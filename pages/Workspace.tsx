@@ -2856,9 +2856,9 @@ const Workspace: React.FC = () => {
                                     <span>4x (4K)</span>
                                     <Sparkles size={10} className="text-blue-500" />
                                 </button>
-                                <button onClick={() => handleUpscaleSelect(8)} className="text-left px-3 py-2 text-xs hover:bg-purple-50 text-purple-600 rounded-lg font-medium flex justify-between items-center">
+                                <button onClick={() => handleUpscaleSelect(8)} className="text-left px-3 py-2 text-xs hover:bg-blue-50 text-blue-600 rounded-lg font-medium flex justify-between items-center">
                                     <span>8x (Ultra)</span>
-                                    <span className="text-[10px] uppercase text-purple-400 border border-purple-200 px-1 rounded">Pro</span>
+                                    <span className="text-[10px] uppercase text-blue-400 border border-blue-200 px-1 rounded">Pro</span>
                                 </button>
                             </div>
                         )}
@@ -3020,9 +3020,9 @@ const Workspace: React.FC = () => {
                                         <div className="absolute inset-0 bg-white border border-gray-200 rounded-xl transform rotate-[8deg] translate-x-1.5 translate-y-0.5 transition-transform group-hover/upload:rotate-[12deg] group-hover/upload:translate-x-2 z-0"></div>
                                         <div className="absolute inset-0 bg-white border border-gray-200 rounded-xl transform rotate-[4deg] translate-x-1 translate-y-0.5 transition-transform group-hover/upload:rotate-[6deg] group-hover/upload:translate-x-1 z-0"></div>
 
-                                        <div onClick={() => document.getElementById(`multi-frame-new-${el.id}`)?.click()} className="relative w-full h-full bg-white border-2 border-dashed border-gray-300 rounded-xl flex flex-col items-center justify-center cursor-pointer hover:border-purple-400 hover:bg-purple-50/50 transition z-10">
-                                            <Plus size={16} className="text-gray-400 group-hover/upload:text-purple-500 transition" />
-                                            <span className="text-[10px] text-gray-400 group-hover/upload:text-purple-500 mt-0.5">多图参考</span>
+                                        <div onClick={() => document.getElementById(`multi-frame-new-${el.id}`)?.click()} className="relative w-full h-full bg-white border-2 border-dashed border-gray-300 rounded-xl flex flex-col items-center justify-center cursor-pointer hover:border-blue-400 hover:bg-blue-50/50 transition z-10">
+                                            <Plus size={16} className="text-gray-400 group-hover/upload:text-blue-500 transition" />
+                                            <span className="text-[10px] text-gray-400 group-hover/upload:text-blue-500 mt-0.5">多图参考</span>
                                         </div>
                                         <input type="file" id={`multi-frame-new-${el.id}`} className="hidden" accept="image/*" onChange={(e) => handleVideoRefUpload(e, 'ref')} />
                                     </div>
@@ -3037,7 +3037,7 @@ const Workspace: React.FC = () => {
                         <div className="flex items-center gap-1 bg-white rounded-full p-0.5 shadow-sm border border-gray-100">
                             <button
                                 onClick={() => { updateSelectedElement({ genFirstLastMode: 'startEnd' }); setVideoToolbarTab('frames'); setShowFramePanel(videoToolbarTab === 'frames' ? !showFramePanel : true); }}
-                                className={`px-3 py-1 text-xs font-medium rounded-full transition-all ${el.genFirstLastMode !== 'multiRef' ? 'bg-purple-100 text-purple-700' : 'text-gray-500 hover:text-gray-700 hover:bg-gray-50'}`}
+                                className={`px-3 py-1 text-xs font-medium rounded-full transition-all ${el.genFirstLastMode !== 'multiRef' ? 'bg-blue-100 text-blue-700' : 'text-gray-500 hover:text-gray-700 hover:bg-gray-50'}`}
                                 tabIndex={-1}
                             >
                                 首尾帧
@@ -3045,7 +3045,7 @@ const Workspace: React.FC = () => {
                             {el.genModel === 'Veo 3.1' && (
                                 <button
                                     onClick={() => { updateSelectedElement({ genFirstLastMode: 'multiRef' }); setVideoToolbarTab('multi'); setShowFramePanel(videoToolbarTab === 'multi' ? !showFramePanel : true); }}
-                                    className={`px-3 py-1 text-xs font-medium rounded-full transition-all ${el.genFirstLastMode === 'multiRef' ? 'bg-purple-100 text-purple-700' : 'text-gray-500 hover:text-gray-700 hover:bg-gray-50'}`}
+                                    className={`px-3 py-1 text-xs font-medium rounded-full transition-all ${el.genFirstLastMode === 'multiRef' ? 'bg-blue-100 text-blue-700' : 'text-gray-500 hover:text-gray-700 hover:bg-gray-50'}`}
                                     tabIndex={-1}
                                 >
                                     多图参考
@@ -3054,7 +3054,7 @@ const Workspace: React.FC = () => {
                             {el.genModel !== 'Veo 3.1' && el.genModel !== 'Veo 3.1 Fast' && (
                                 <button
                                     onClick={() => { setVideoToolbarTab('motion'); setShowFramePanel(false); }}
-                                    className={`px-3 py-1 text-xs font-medium rounded-full transition-all ${videoToolbarTab === 'motion' ? 'bg-purple-100 text-purple-700' : 'text-gray-500 hover:text-gray-700 hover:bg-gray-50'}`}
+                                    className={`px-3 py-1 text-xs font-medium rounded-full transition-all ${videoToolbarTab === 'motion' ? 'bg-blue-100 text-blue-700' : 'text-gray-500 hover:text-gray-700 hover:bg-gray-50'}`}
                                     tabIndex={-1}
                                 >
                                     动作控制
@@ -3079,21 +3079,21 @@ const Workspace: React.FC = () => {
                                         <div className="px-2 py-1.5 text-[10px] text-gray-400 font-medium uppercase tracking-wider mb-0.5">选择视频模型</div>
                                         <button
                                             onClick={() => { updateSelectedElement({ genModel: 'Kling 2.6', genFirstLastMode: 'startEnd' }); setShowVideoModelPicker(false); setVideoToolbarTab('motion'); }}
-                                            className={`w-full flex items-center justify-between px-3 py-2 rounded-lg text-sm transition-colors ${el.genModel === 'Kling 2.6' ? 'bg-purple-50 text-purple-700 font-medium' : 'text-gray-700 hover:bg-gray-50'}`}
+                                            className={`w-full flex items-center justify-between px-3 py-2 rounded-lg text-sm transition-colors ${el.genModel === 'Kling 2.6' ? 'bg-blue-50 text-blue-700 font-medium' : 'text-gray-700 hover:bg-gray-50'}`}
                                         >
                                             <span>Kling 2.6</span>
                                             {el.genModel === 'Kling 2.6' && <Check size={14} />}
                                         </button>
                                         <button
                                             onClick={() => { updateSelectedElement({ genModel: 'Veo 3.1', genFirstLastMode: 'startEnd' }); setShowVideoModelPicker(false); setVideoToolbarTab('frames'); }}
-                                            className={`w-full flex items-center justify-between px-3 py-2 rounded-lg text-sm transition-colors ${el.genModel === 'Veo 3.1' ? 'bg-purple-50 text-purple-700 font-medium' : 'text-gray-700 hover:bg-gray-50'}`}
+                                            className={`w-full flex items-center justify-between px-3 py-2 rounded-lg text-sm transition-colors ${el.genModel === 'Veo 3.1' ? 'bg-blue-50 text-blue-700 font-medium' : 'text-gray-700 hover:bg-gray-50'}`}
                                         >
                                             <span>Veo 3.1</span>
                                             {el.genModel === 'Veo 3.1' && <Check size={14} />}
                                         </button>
                                         <button
                                             onClick={() => { updateSelectedElement({ genModel: 'Veo 3.1 Fast', genFirstLastMode: 'startEnd' }); setShowVideoModelPicker(false); setVideoToolbarTab('frames'); }}
-                                            className={`w-full flex items-center justify-between px-3 py-2 rounded-lg text-sm transition-colors ${el.genModel === 'Veo 3.1 Fast' ? 'bg-purple-50 text-purple-700 font-medium' : 'text-gray-700 hover:bg-gray-50'}`}
+                                            className={`w-full flex items-center justify-between px-3 py-2 rounded-lg text-sm transition-colors ${el.genModel === 'Veo 3.1 Fast' ? 'bg-blue-50 text-blue-700 font-medium' : 'text-gray-700 hover:bg-gray-50'}`}
                                         >
                                             <span>Veo 3.1 Fast</span>
                                             {el.genModel === 'Veo 3.1 Fast' && <Check size={14} />}
@@ -3106,11 +3106,11 @@ const Workspace: React.FC = () => {
                             <div className="relative flex items-center">
                                 <button
                                     onClick={(e) => { e.stopPropagation(); setShowRatioPicker(!showRatioPicker); setShowVideoModelPicker(false); }}
-                                    className={`h-7 px-2.5 rounded-full border text-xs transition flex items-center gap-1 font-medium ${showRatioPicker ? 'border-purple-200 bg-purple-50 text-purple-700' : 'border-gray-200 text-gray-600 hover:bg-gray-50'}`}
+                                    className={`h-7 px-2.5 rounded-full border text-xs transition flex items-center gap-1 font-medium ${showRatioPicker ? 'border-blue-200 bg-blue-50 text-blue-700' : 'border-gray-200 text-gray-600 hover:bg-gray-50'}`}
                                     tabIndex={-1}
                                 >
                                     {el.genAspectRatio || '16:9'} · {el.genDuration || '8s'} · {el.genQuality || '1080p'}
-                                    <ChevronDown size={14} className={`transition-transform duration-200 ${showRatioPicker ? 'rotate-180 text-purple-600' : 'text-gray-400'}`} />
+                                    <ChevronDown size={14} className={`transition-transform duration-200 ${showRatioPicker ? 'rotate-180 text-blue-600' : 'text-gray-400'}`} />
                                 </button>
                                 {showRatioPicker && (
                                     <div className="absolute bottom-full right-0 mb-2 w-64 bg-white rounded-2xl shadow-2xl border border-gray-100 p-3 z-50 animate-in fade-in zoom-in-95 duration-200">
@@ -3120,17 +3120,17 @@ const Workspace: React.FC = () => {
                                             <div className="flex gap-2">
                                                 <button
                                                     onClick={() => updateSelectedElement({ genAspectRatio: '16:9' })}
-                                                    className={`flex-1 flex flex-col items-center justify-center py-3 rounded-xl border transition-all ${(el.genAspectRatio || '16:9') === '16:9' ? 'border-purple-500 bg-purple-50' : 'border-gray-200 hover:bg-gray-50 hover:border-gray-300'} gap-1.5`}
+                                                    className={`flex-1 flex flex-col items-center justify-center py-3 rounded-xl border transition-all ${(el.genAspectRatio || '16:9') === '16:9' ? 'border-blue-500 bg-blue-50' : 'border-gray-200 hover:bg-gray-50 hover:border-gray-300'} gap-1.5`}
                                                 >
-                                                    <div className={`w-8 h-4 border-[1.5px] rounded-[3px] ${(el.genAspectRatio || '16:9') === '16:9' ? 'border-purple-500' : 'border-gray-400'}`}></div>
-                                                    <span className={`text-[12px] font-semibold ${(el.genAspectRatio || '16:9') === '16:9' ? 'text-purple-600' : 'text-gray-600'}`}>16:9</span>
+                                                    <div className={`w-8 h-4 border-[1.5px] rounded-[3px] ${(el.genAspectRatio || '16:9') === '16:9' ? 'border-blue-500' : 'border-gray-400'}`}></div>
+                                                    <span className={`text-[12px] font-semibold ${(el.genAspectRatio || '16:9') === '16:9' ? 'text-blue-600' : 'text-gray-600'}`}>16:9</span>
                                                 </button>
                                                 <button
                                                     onClick={() => updateSelectedElement({ genAspectRatio: '9:16' })}
-                                                    className={`flex-1 flex flex-col items-center justify-center py-3 rounded-xl border transition-all ${(el.genAspectRatio || '16:9') === '9:16' ? 'border-purple-500 bg-purple-50' : 'border-gray-200 hover:bg-gray-50 hover:border-gray-300'} gap-1.5`}
+                                                    className={`flex-1 flex flex-col items-center justify-center py-3 rounded-xl border transition-all ${(el.genAspectRatio || '16:9') === '9:16' ? 'border-blue-500 bg-blue-50' : 'border-gray-200 hover:bg-gray-50 hover:border-gray-300'} gap-1.5`}
                                                 >
-                                                    <div className={`w-4 h-8 border-[1.5px] rounded-[3px] ${(el.genAspectRatio || '16:9') === '9:16' ? 'border-purple-500' : 'border-gray-400'}`}></div>
-                                                    <span className={`text-[12px] font-semibold ${(el.genAspectRatio || '16:9') === '9:16' ? 'text-purple-600' : 'text-gray-600'}`}>9:16</span>
+                                                    <div className={`w-4 h-8 border-[1.5px] rounded-[3px] ${(el.genAspectRatio || '16:9') === '9:16' ? 'border-blue-500' : 'border-gray-400'}`}></div>
+                                                    <span className={`text-[12px] font-semibold ${(el.genAspectRatio || '16:9') === '9:16' ? 'text-blue-600' : 'text-gray-600'}`}>9:16</span>
                                                 </button>
                                             </div>
                                         </div>
@@ -3936,14 +3936,14 @@ const Workspace: React.FC = () => {
                                         {videoGenMode === 'startEnd' ? (
                                             <div className="flex items-center gap-3">
                                                 <div className="relative">
-                                                    <label className={`w-14 h-14 border rounded-xl flex flex-col items-center justify-center cursor-pointer transition overflow-hidden group/upload ${videoStartFrame ? 'border-gray-200 border-solid shadow-sm' : 'border-2 border-dashed border-gray-300 hover:border-purple-400 hover:bg-purple-50/50'}`}>
+                                                    <label className={`w-14 h-14 border rounded-xl flex flex-col items-center justify-center cursor-pointer transition overflow-hidden group/upload ${videoStartFrame ? 'border-gray-200 border-solid shadow-sm' : 'border-2 border-dashed border-gray-300 hover:border-blue-400 hover:bg-blue-50/50'}`}>
                                                         <input type="file" accept="image/*" className="hidden" onChange={e => { if (e.target.files) setVideoStartFrame(e.target.files[0]); }} />
                                                         {videoStartFrame ? (
                                                             <img src={URL.createObjectURL(videoStartFrame)} className="w-full h-full object-cover" />
                                                         ) : (
                                                             <>
-                                                                <Plus size={16} className="text-gray-400 group-hover/upload:text-purple-500 transition" />
-                                                                <span className="text-[10px] text-gray-400 group-hover/upload:text-purple-500 mt-0.5">首帧</span>
+                                                                <Plus size={16} className="text-gray-400 group-hover/upload:text-blue-500 transition" />
+                                                                <span className="text-[10px] text-gray-400 group-hover/upload:text-blue-500 mt-0.5">首帧</span>
                                                             </>
                                                         )}
                                                     </label>
@@ -3954,14 +3954,14 @@ const Workspace: React.FC = () => {
                                                     )}
                                                 </div>
                                                 <div className="relative">
-                                                    <label className={`w-14 h-14 border rounded-xl flex flex-col items-center justify-center cursor-pointer transition overflow-hidden group/upload ${videoEndFrame ? 'border-gray-200 border-solid shadow-sm' : 'border-2 border-dashed border-gray-300 hover:border-purple-400 hover:bg-purple-50/50'}`}>
+                                                    <label className={`w-14 h-14 border rounded-xl flex flex-col items-center justify-center cursor-pointer transition overflow-hidden group/upload ${videoEndFrame ? 'border-gray-200 border-solid shadow-sm' : 'border-2 border-dashed border-gray-300 hover:border-blue-400 hover:bg-blue-50/50'}`}>
                                                         <input type="file" accept="image/*" className="hidden" onChange={e => { if (e.target.files) setVideoEndFrame(e.target.files[0]); }} />
                                                         {videoEndFrame ? (
                                                             <img src={URL.createObjectURL(videoEndFrame)} className="w-full h-full object-cover" />
                                                         ) : (
                                                             <>
-                                                                <Plus size={16} className="text-gray-400 group-hover/upload:text-purple-500 transition" />
-                                                                <span className="text-[10px] text-gray-400 group-hover/upload:text-purple-500 mt-0.5">尾帧</span>
+                                                                <Plus size={16} className="text-gray-400 group-hover/upload:text-blue-500 transition" />
+                                                                <span className="text-[10px] text-gray-400 group-hover/upload:text-blue-500 mt-0.5">尾帧</span>
                                                             </>
                                                         )}
                                                     </label>
@@ -3984,9 +3984,9 @@ const Workspace: React.FC = () => {
                                                         </button>
                                                     </div>
                                                 ))}
-                                                <label className="w-14 h-14 rounded-xl border-2 border-dashed border-gray-300 flex items-center justify-center text-gray-400 cursor-pointer hover:border-purple-400 hover:bg-purple-50/50 transition flex-shrink-0 group">
+                                                <label className="w-14 h-14 rounded-xl border-2 border-dashed border-gray-300 flex items-center justify-center text-gray-400 cursor-pointer hover:border-blue-400 hover:bg-blue-50/50 transition flex-shrink-0 group">
                                                     <input type="file" accept="image/*" multiple className="hidden" onChange={e => { if (e.target.files) setVideoMultiRefs(prev => [...prev, ...Array.from(e.target.files!)]); }} />
-                                                    <Plus size={16} className="group-hover:text-purple-500 transition" />
+                                                    <Plus size={16} className="group-hover:text-blue-500 transition" />
                                                 </label>
                                             </div>
                                         )}
@@ -4302,7 +4302,7 @@ const Workspace: React.FC = () => {
                                                 onClick={() => setShowModeSelector(!showModeSelector)}
                                                 className={`h-8 px-3 rounded-full border flex items-center gap-1.5 text-xs font-medium transition ${creationMode === 'agent' ? 'bg-blue-50 border-[#3B82F6] text-[#3B82F6]' :
                                                     creationMode === 'image' ? 'bg-blue-50 border-[#3B82F6] text-[#3B82F6]' :
-                                                        'bg-purple-50 border-purple-500 text-purple-600'
+                                                        'bg-blue-50 border-blue-500 text-blue-600'
                                                     }`}
                                             >
                                                 {creationMode === 'agent' && <><Sparkles size={12} /> Agent</>}
@@ -4329,7 +4329,7 @@ const Workspace: React.FC = () => {
                                                     </button>
                                                     <button
                                                         onClick={() => { setCreationMode('video'); setShowModeSelector(false); setAgentMode(false); }}
-                                                        className={`w-full px-3 py-2 flex items-center gap-2 text-sm hover:bg-gray-50 transition ${creationMode === 'video' ? 'text-purple-600' : 'text-gray-700'}`}
+                                                        className={`w-full px-3 py-2 flex items-center gap-2 text-sm hover:bg-gray-50 transition ${creationMode === 'video' ? 'text-blue-600' : 'text-gray-700'}`}
                                                     >
                                                         <Video size={14} /> 视频生成器
                                                         {creationMode === 'video' && <Check size={14} className="ml-auto" />}
@@ -4347,7 +4347,7 @@ const Workspace: React.FC = () => {
                                                 <button
                                                     onClick={() => handleSend()}
                                                     disabled={inputBlocks.every(b => (b.type === 'text' && !b.text) || (b.type === 'file' && !b.file))}
-                                                    className="h-8 px-3 rounded-full flex items-center gap-1 text-xs font-medium shadow-sm transition bg-gradient-to-r from-purple-500 to-purple-600 text-white hover:from-purple-600 hover:to-purple-700 disabled:opacity-50"
+                                                    className="h-8 px-3 rounded-full flex items-center gap-1 text-xs font-medium shadow-sm transition bg-gradient-to-r from-blue-500 to-blue-600 text-white hover:from-blue-600 hover:to-blue-700 disabled:opacity-50"
                                                 >
                                                     <Zap size={12} /> 20
                                                 </button>
