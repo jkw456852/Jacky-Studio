@@ -17,6 +17,8 @@ export class PosterAgent extends EnhancedBaseAgent {
       'extractText'
     ];
   }
+
+  get maxConcurrency() { return 3; } // 图片密集型
 }
 
 export const posterAgent = new PosterAgent();

@@ -13,6 +13,7 @@ import {
 } from '../../types/agent.types';
 import { executeSkill, AVAILABLE_SKILLS } from '../skills';
 import { errorHandler, ErrorType, AppError } from '../../utils/error-handler';
+import { buildEcommerceProposals } from './shared/ecommerce-variants';
 
 // 带指数退避的重试工具（用于 analyzeAndPlan 等内部调用）
 const retryAsync = async <T>(
@@ -74,7 +75,17 @@ const DEFAULT_EXECUTION_CONFIG: ExecutionConfig = {
     enableCache: true
 };
 
-const SKILL_TIMEOUT = 120_000; // 单个 skill 最多 120 秒
+const SKILL_TIMEOUTS: Record<string, number> = {
+    generateImage: 45_000,    // 图片生成 15-30s 典型
+    smartEdit: 45_000,
+    touchEdit: 45_000,
+    generateVideo: 180_000,   // 视频生成可能很慢
+    generateCopy: 15_000,     // 文本生成很快
+    extractText: 15_000,
+    analyzeRegion: 15_000,
+    export: 30_000,
+};
+const DEFAULT_SKILL_TIMEOUT = 60_000;
 
 export abstract class EnhancedBaseAgent {
     protected chat: Chat | null = null;
@@ -83,6 +94,9 @@ export abstract class EnhancedBaseAgent {
     abstract get agentInfo(): AgentInfo;
     abstract get systemPrompt(): string;
     abstract get preferredSkills(): string[]; // 智能体偏好的技能
+
+    /** 最大并发数（子类可覆盖：图片密集型=3，视频密集型=1，混合=2） */
+    get maxConcurrency(): number { return 2; }
 
     /**
      * 初始化智能体
@@ -204,6 +218,25 @@ export abstract class EnhancedBaseAgent {
         // 1. 分析任务并生成执行计划
         const plan = await this.analyzeAndPlan(message, context, task.input.attachments, task.input.metadata);
 
+        // 1.5 修复: 顶层键名大小写和别名纠正 (防止 LLM 输出 lowercase 的 keys 或常用别名)
+        if (plan && typeof plan === 'object') {
+            const planKeys = Object.keys(plan);
+            for (const key of planKeys) {
+                const lowerKey = key.toLowerCase();
+                if (['skillcalls', 'skills', 'calls', 'tool_calls', 'actions'].includes(lowerKey)) {
+                    plan.skillCalls = plan.skillCalls || plan[key];
+                } else if (lowerKey === 'proposals') {
+                    plan.proposals = plan.proposals || plan[key];
+                } else if (lowerKey === 'message') {
+                    plan.message = plan.message || plan[key];
+                } else if (lowerKey === 'analysis') {
+                    plan.analysis = plan.analysis || plan[key];
+                } else if (lowerKey === 'suggestions') {
+                    plan.suggestions = plan.suggestions || plan[key];
+                }
+            }
+        }
+
         console.log(`[${this.agentInfo.id}] Plan received:`, {
             hasProposals: !!(plan.proposals && plan.proposals.length),
             proposalCount: plan.proposals?.length || 0,
@@ -222,13 +255,16 @@ export abstract class EnhancedBaseAgent {
         // 3.5 修复: AI 可能用不同的字段名返回 skillCalls（如 skills, calls, actions 等）
         for (const p of effectiveProposals) {
             if (!p.skillCalls || p.skillCalls.length === 0) {
-                // 尝试常见的别名
-                const aliases = ['skills', 'calls', 'actions', 'skill_calls', 'skillCall', 'tool_calls'];
-                for (const alias of aliases) {
-                    if (p[alias] && Array.isArray(p[alias]) && p[alias].length > 0) {
-                        console.log(`[${this.agentInfo.id}] Fixed proposal "${p.title}": renamed "${alias}" -> "skillCalls"`);
-                        p.skillCalls = p[alias];
-                        break;
+                // 尝试常见的别名和不同的大小写
+                const keys = Object.keys(p);
+                for (const key of keys) {
+                    const lowerKey = key.toLowerCase();
+                    if (['skillcalls', 'skills', 'calls', 'actions', 'skill_calls', 'tool_calls'].includes(lowerKey)) {
+                        if (p[key] && Array.isArray(p[key]) && p[key].length > 0) {
+                            console.log(`[${this.agentInfo.id}] Fixed proposal "${p.title}": renamed "${key}" -> "skillCalls"`);
+                            p.skillCalls = p[key];
+                            break;
+                        }
                     }
                 }
             }
@@ -241,33 +277,14 @@ export abstract class EnhancedBaseAgent {
             console.log(`[${this.agentInfo.id}] Proposals missing skillCalls, restructuring from top-level skillCalls`);
 
             if (requestedCount > 1 && plan.skillCalls.length === 1 && !['cameron', 'vireo', 'motion'].includes(this.agentInfo.id)) {
-                // 用户要求多张图但只有1个 skillCall — 需要基于原始 prompt 生成多个变体（仅限产品设计类智能体）
+                // 用户要求多张图但只有1个 skillCall — 使用共享电商套图模块生成变体（仅限产品设计类智能体）
                 const baseCall = plan.skillCalls[0];
                 const basePrompt = baseCall.params?.prompt || '';
-                const ecommerceVariants = [
-                    { title: '产品信息图', suffix: ', clean white background, product infographic with feature callout annotations, e-commerce listing style, professional, 8K' },
-                    { title: '多角度展示', suffix: ', studio product photography, 3/4 angle view, even soft lighting, commercial quality, white gradient background, 8K' },
-                    { title: '场景应用图', suffix: ', lifestyle photography, product in natural real-use setting, warm natural lighting, editorial quality, aspirational, 8K' },
-                    { title: '细节特写图', suffix: ', macro product photography, extreme close-up of texture and material detail, sharp focus, studio lighting, premium quality, 8K' },
-                    { title: '尺寸包装图', suffix: ', product with size reference objects, flat lay composition, what-is-in-the-box layout, clean informative style, 8K' },
-                ];
-
-                effectiveProposals = [];
-                for (let i = 0; i < requestedCount && i < ecommerceVariants.length; i++) {
-                    effectiveProposals.push({
-                        id: String(i + 1),
-                        title: ecommerceVariants[i].title,
-                        description: ecommerceVariants[i].title,
-                        skillCalls: [{
-                            skillName: 'generateImage',
-                            params: {
-                                prompt: basePrompt + ecommerceVariants[i].suffix,
-                                aspectRatio: baseCall.params?.aspectRatio || '1:1',
-                                model: baseCall.params?.model || 'Nano Banana Pro'
-                            }
-                        }]
-                    });
-                }
+                effectiveProposals = buildEcommerceProposals(
+                    basePrompt,
+                    { aspectRatio: baseCall.params?.aspectRatio, model: baseCall.params?.model },
+                    requestedCount
+                );
                 console.log(`[${this.agentInfo.id}] Created ${effectiveProposals.length} variant proposals from single skillCall`);
             } else {
                 // 将每个顶层装成一个 proposal
@@ -360,7 +377,7 @@ export abstract class EnhancedBaseAgent {
                 }
                 return assets;
             });
-            const allResults = await runWithConcurrency(taskFns, 2);
+            const allResults = await runWithConcurrency(taskFns, this.maxConcurrency);
 
             // 收集所有成功的结果
             for (const result of allResults) {
@@ -456,6 +473,47 @@ export abstract class EnhancedBaseAgent {
         try {
             const ai = getClient();
 
+            // 按需构建提示词段落，减少不必要的 token 消耗
+            const hasAttachments = attachments && attachments.length > 0;
+            const isEdit = /换成|改成|改为|替换|修改|调整|变成|去掉|删除|移除|去背景|换背景|换颜色|改颜色|抠图|高清|放大画质|upscale|remove|replace|recolor|edit/i.test(message);
+            const isMultiImage = /(\d+)\s*张|一套|一组|系列|套图/i.test(message);
+
+            const smartEditSection = isEdit ? `
+特殊技能 smartEdit（图片编辑）:
+- 删除物体: editType='object-remove', parameters: {"object": "目标名称"}
+- 去除背景: editType='background-remove'
+- 更换颜色: editType='recolor', parameters: {"object": "目标", "color": "颜色"}
+- 替换物体: editType='replace', parameters: {"object": "原物体", "replacement": "新物体"}
+- 放大画质: editType='upscale'
+- sourceUrl 设为 "ATTACHMENT_X"
+` : '';
+
+            const productSection = (hasAttachments && !['cameron'].includes(this.agentInfo.id)) ? `
+【产品识别 - 最高优先级】
+- 如果用户附带了图片（附件），这些图片就是用户的产品/素材。你必须仔细观察每张图片，识别出产品的具体类型、颜色、材质、形状、品牌元素等细节。
+- 在每个 generateImage 的 prompt 中，必须以产品的精确英文描述开头（例如 "A matte black stainless steel water bottle with bamboo lid and minimalist logo" 而不是 "a water bottle"）。
+- 所有生成的图片必须围绕这些具体产品，不能生成无关的随机产品。
+- 重要：每个 generateImage 的 params 中必须包含 "referenceImage": "ATTACHMENT_N"（N 是附件索引，从0开始）。如果只有1张附件，所有 proposal 都用 "ATTACHMENT_0"；如果有多张附件，每个 proposal 可以引用不同的附件（如 ATTACHMENT_0, ATTACHMENT_1, ATTACHMENT_2...）。
+` : '';
+
+            const quantitySection = `
+【输出数量规则 — 最重要】
+- 默认只返回 1 个 proposal（1张图/1个视频）。用户说"做个海报"、"设计一个logo"、"帮我做张图" → 只返回 1 个 proposal。
+- 只有用户明确要求多张时才返回多个 proposals：
+  - "5张副图" → 5 个 proposals
+  - "一套图" / "一组" / "系列" → 3-5 个 proposals
+  - "3张海报" → 3 个 proposals
+- 修改/编辑请求说"改成XX"/"换成XX"/"去掉XX"）→ 只返回 1 个 proposal，使用 smartEdit 技能。
+- 绝对不要在用户没要求多张的情况下返回多个 proposals。1个请求 = 1张图，这是默认行为。
+`;
+
+            const multiImageSection = isMultiImage ? `
+【多图规则（仅当用户明确要求时）】
+- 每个 proposal 必须包含自己的 skillCalls 数组，内容/角度/用途各不相同。
+- 电商套图（亚马逊副图）应包含：白底主图、信息图、场景图、细节特写、尺寸包装图等。
+- 不能返回少于用户要求数量的 proposals。
+` : '';
+
             const fullPrompt = `${this.systemPrompt}
 
 【语言要求】你必须用中文回复所有内容（analysis、message、title、description 等字段全部用中文）。只有 prompt 字段用英文（因为图片生成模型需要英文 prompt）。
@@ -476,38 +534,9 @@ ${(attachments || []).map((file, index) => {
             }).join('\n')}
 
 可用技能: ${this.preferredSkills.join(', ')}
-
-特殊技能 smartEdit（图片编辑）:
-- 删除物体: editType='object-remove', parameters: {"object": "目标名称"}
-- 去除背景: editType='background-remove'
-- 更换颜色: editType='recolor', parameters: {"object": "目标", "color": "颜色"}
-- 替换物体: editType='replace', parameters: {"object": "原物体", "replacement": "新物体"}
-- 放大画质: editType='upscale'
-- sourceUrl 设为 "ATTACHMENT_X"
-
+${smartEditSection}
 用户请求: ${message}
-
-${['cameron'].includes(this.agentInfo.id) ? '' : `【产品识别 - 最高优先级】
-- 如果用户附带了图片（附件），这些图片就是用户的产品/素材。你必须仔细观察每张图片，识别出产品的具体类型、颜色、材质、形状、品牌元素等细节。
-- 在每个 generateImage 的 prompt 中，必须以产品的精确英文描述开头（例如 "A matte black stainless steel water bottle with bamboo lid and minimalist logo" 而不是 "a water bottle"）。
-- 所有生成的图片必须围绕这些具体产品，不能生成无关的随机产品。
-- 如果没有附件图片，根据用户的文字描述来理解产品。
-- 重要：每个 generateImage 的 params 中必须包含 "referenceImage": "ATTACHMENT_N"（N 是附件索引，从0开始）。如果只有1张附件，所有 proposal 都用 "ATTACHMENT_0"；如果有多张附件，每个 proposal 可以引用不同的附件（如 ATTACHMENT_0, ATTACHMENT_1, ATTACHMENT_2...）。
-
-【输出数量规则 — 最重要】
-- 默认只返回 1 个 proposal（1张图/1个视频）。用户说"做个海报"、"设计一个logo"、"帮我做张图" → 只返回 1 个 proposal。
-- 只有用户明确要求多张时才返回多个 proposals：
-  - "5张副图" → 5 个 proposals
-  - "一套图" / "一组" / "系列" → 3-5 个 proposals
-  - "3张海报" → 3 个 proposals
-- 修改/编辑请求（用户标记了区域 + 说"改成XX"/"换成XX"/"去掉XX"）→ 只返回 1 个 proposal，使用 smartEdit 技能。
-- 绝对不要在用户没要求多张的情况下返回多个 proposals。1个请求 = 1张图，这是默认行为。
-
-【多图规则（仅当用户明确要求时）】
-- 每个 proposal 必须包含自己的 skillCalls 数组，内容/角度/用途各不相同。
-- 电商套图（亚马逊副图）应包含：白底主图、信息图、场景图、细节特写、尺寸包装图等。
-- 不能返回少于用户要求数量的 proposals。
-`}
+${productSection}${quantitySection}${multiImageSection}
 请分析用户需求，返回以下 JSON 格式:
 {
   "analysis": "用中文简要分析用户需求",
@@ -678,10 +707,11 @@ ${['cameron'].includes(this.agentInfo.id) ? '' : `【产品识别 - 最高优先
                     }
                 }
 
+                const skillTimeout = SKILL_TIMEOUTS[call.skillName] || DEFAULT_SKILL_TIMEOUT;
                 const result = await Promise.race([
                     executeSkill(call.skillName, call.params),
                     new Promise<never>((_, reject) =>
-                        setTimeout(() => reject(new Error(`Skill ${call.skillName} 执行超时(120s)`)), SKILL_TIMEOUT)
+                        setTimeout(() => reject(new Error(`Skill ${call.skillName} 执行超时(${skillTimeout / 1000}s)`)), skillTimeout)
                     )
                 ]);
                 results.push({ ...call, result, success: true });
@@ -859,8 +889,10 @@ ${['cameron'].includes(this.agentInfo.id) ? '' : `【产品识别 - 最高优先
         if (task.input.attachments && task.input.attachments.length > 0) {
             return `nocache-${Date.now()}-${Math.random()}`;
         }
+        const meta = task.input.metadata || {};
+        const metaKey = `web:${!!meta.enableWebSearch}|force:${!!meta.forceSkills}`;
         const contextHash = task.input.context?.projectTitle || '';
-        return `${this.agentInfo.id}:${task.input.message}:${contextHash}`;
+        return `${this.agentInfo.id}:${task.input.message}:${contextHash}:${metaKey}`;
     }
 
     /**

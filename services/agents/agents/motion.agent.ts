@@ -17,6 +17,8 @@ export class MotionAgent extends EnhancedBaseAgent {
       'smartEdit'
     ];
   }
+
+  get maxConcurrency() { return 1; } // 视频生成资源重、限速严
 }
 
 export const motionAgent = new MotionAgent();

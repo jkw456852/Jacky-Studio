@@ -64,6 +64,14 @@ export function localPreRoute(message: string): AgentType | null {
 
   const lower = message.toLowerCase();
 
+  // 复合意图检测（优先于通用关键词匹配）
+  const hasVideoKeyword = /视频|video|动画|animation|片头|转场/.test(lower);
+  const hasStoryboardKeyword = /分镜|故事板|九宫格|storyboard|镜头|shot list/.test(lower);
+  const hasEcommerceKeyword = /电商|亚马逊|amazon|listing|副图|主图|详情图|shopify|淘宝|天猫/.test(lower);
+
+  if (hasVideoKeyword && hasStoryboardKeyword) return 'cameron';
+  if (hasVideoKeyword && hasEcommerceKeyword) return 'campaign';
+
   let bestMatch: { agent: AgentType; priority: number; matchCount: number } | null = null;
 
   for (const rule of ROUTE_RULES) {
@@ -77,12 +85,8 @@ export function localPreRoute(message: string): AgentType | null {
     }
   }
 
-  // 如果没匹配到任何规则，默认路由到 poster（设计工具中绝大多数请求都是设计相关的）
-  if (!bestMatch && message.trim().length > 2) {
-    console.log('[LocalRouter] No keyword match, defaulting to poster');
-    return 'poster';
-  }
-
+  // 未匹配到任何规则时返回 null，让消息流入 LLM 路由做语义分析
+  // poster fallback 仅在 Hook 层作为最终兜底
   return bestMatch?.agent || null;
 }
 

@@ -18,6 +18,8 @@ export class CampaignAgent extends EnhancedBaseAgent {
       'export'
     ];
   }
+
+  get maxConcurrency() { return 3; } // 图片密集型
 }
 
 export const campaignAgent = new CampaignAgent();

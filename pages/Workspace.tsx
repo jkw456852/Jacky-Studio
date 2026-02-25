@@ -26,6 +26,7 @@ import { Content } from '@google/genai';
 import { useAgentOrchestrator } from '../hooks/useAgentOrchestrator';
 import { useProjectContext } from '../hooks/useProjectContext';
 import { getAgentInfo, executeAgentTask } from '../services/agents';
+import { localPreRoute } from '../services/agents/local-router';
 import { AgentAvatar } from '../components/agents/AgentAvatar';
 import { assetsToCanvasElementsAtCenter } from '../utils/canvas-helpers';
 import { AgentSelector } from '../components/agents/AgentSelector';
@@ -94,14 +95,14 @@ const TooltipButton = ({ icon: Icon, label, onClick, active, showTooltipOnHover 
     <div className="relative group">
         <button
             onClick={onClick}
-            className={`p-2 rounded-xl transition ${active ? 'text-black bg-gray-100' : 'text-gray-400 hover:text-black hover:bg-gray-50'}`}
+            className={`p-2.5 rounded-xl transition ${active ? 'text-white bg-gray-800' : 'text-gray-500 hover:text-black hover:bg-gray-100'}`}
         >
             <Icon size={18} />
         </button>
         {showTooltipOnHover && (
-            <div className="absolute left-full top-1/2 -translate-y-1/2 ml-3 px-2.5 py-1.5 bg-gray-900 text-white text-xs font-medium rounded-lg opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none whitespace-nowrap z-50 shadow-sm">
+            <div className="absolute bottom-full left-1/2 -translate-x-1/2 mb-2.5 px-2.5 py-1.5 bg-gray-900 text-white text-xs font-medium rounded-lg opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none whitespace-nowrap z-50 shadow-sm">
                 {label}
-                <div className="absolute left-0 top-1/2 -translate-y-1/2 -translate-x-1 border-4 border-transparent border-r-gray-900"></div>
+                <div className="absolute top-full left-1/2 -translate-x-1/2 border-4 border-transparent border-t-gray-900"></div>
             </div>
         )}
     </div>
@@ -278,8 +279,7 @@ const Workspace: React.FC = () => {
     const [showShapeMenu, setShowShapeMenu] = useState(false);
     const [markers, setMarkers] = useState<Marker[]>([]);
     const [hoveredMarkerId, setHoveredMarkerId] = useState<number | null>(null);
-    const [showLayersPanel, setShowLayersPanel] = useState(true);
-    const [isLayersCollapsed, setIsLayersCollapsed] = useState(true);
+    const [leftPanelMode, setLeftPanelMode] = useState<'layers' | 'files' | null>(null);
     const [contextMenu, setContextMenu] = useState<{ x: number, y: number } | null>(null);
     const [showHistoryPopover, setShowHistoryPopover] = useState(false);
     const [showFontPicker, setShowFontPicker] = useState(false);
@@ -658,7 +658,13 @@ const Workspace: React.FC = () => {
 
     // Agent orchestration
     const projectContext = useProjectContext(id || '', projectTitle, elements, messages);
-    const { currentTask, isAgentMode, setIsAgentMode, processMessage } = useAgentOrchestrator(projectContext);
+    const { currentTask, isAgentMode, setIsAgentMode, processMessage } = useAgentOrchestrator({
+        projectContext,
+        canvasState: { elements, pan, zoom, showAssistant },
+        onElementsUpdate: setElements,
+        onHistorySave: (els) => saveToHistory(els, markers),
+        autoAddToCanvas: true
+    });
 
     // Sync agentMode state with isAgentMode
     useEffect(() => {
@@ -2258,6 +2264,25 @@ const Workspace: React.FC = () => {
 
         if ((!textToSend.trim() && filesToSend.length === 0 && markers.length === 0) || isTyping) return;
 
+        // Auto-detect Skill Data for manually typed prompts to ensure they render as components
+        let finalSkillData = skillData;
+        if (!finalSkillData && creationMode === 'agent' && textToSend.trim()) {
+            const routedAgent = localPreRoute(textToSend);
+            switch (routedAgent) {
+                case 'cameron': finalSkillData = { id: 'cameron', name: '分镜故事板', iconName: 'Film' }; break;
+                case 'campaign': finalSkillData = { id: 'campaign', name: '营销与电商', iconName: 'Store' }; break;
+                case 'poster': finalSkillData = { id: 'poster', name: '视觉海报', iconName: 'FileText' }; break;
+                case 'vireo': finalSkillData = { id: 'vireo', name: '品牌视觉', iconName: 'Layout' }; break;
+                case 'package': finalSkillData = { id: 'package', name: '包装设计', iconName: 'Box' }; break;
+                case 'motion': finalSkillData = { id: 'motion', name: '动效流', iconName: 'Video' }; break;
+                default:
+                    // Only wrap as a generic tool if it's long enough or looks like a prompt, otherwise let it be a text message?
+                    // Actually, treating everything as a task looks cleaner for the "Skill App" vision
+                    finalSkillData = { id: 'general', name: '智能分析', iconName: 'Sparkles' };
+                    break;
+            }
+        }
+
         // Agent mode handling
         if (agentMode && isAgentMode && textToSend.trim()) {
             let agentText = textToSend;
@@ -2297,7 +2322,7 @@ const Workspace: React.FC = () => {
                 text: textToSend,
                 timestamp: Date.now(),
                 attachments: attachmentUrls.length > 0 ? attachmentUrls : undefined,
-                skillData: skillData
+                skillData: finalSkillData
             };
             setMessages(prev => [...prev, newUserMsg]);
             setInputBlocks([{ id: `text-${Date.now()}`, type: 'text', text: '' }]);
@@ -2490,35 +2515,42 @@ const Workspace: React.FC = () => {
     const renderToolbar = () => {
         let NavIcon = MousePointer2;
         if (activeTool === 'hand') NavIcon = Hand;
-        if (activeTool === 'mark') NavIcon = MapPin;
+
         return (
-            <div className="absolute left-4 top-1/2 -translate-y-1/2 bg-white rounded-2xl shadow-lg border border-gray-200/80 p-1.5 flex flex-col gap-0.5 z-50 animate-in fade-in slide-in-from-left-4 duration-300 items-center w-11">
-                {/* 1. Select / Hand / Mark */}
+            <div className="absolute bottom-5 left-1/2 -translate-x-1/2 bg-white rounded-full shadow-[0_2px_20px_rgba(0,0,0,0.08)] border border-gray-200/60 px-2 py-1.5 flex flex-row gap-0.5 z-50 animate-in fade-in slide-in-from-bottom-4 duration-300 items-center" style={{ marginLeft: showAssistant ? '-200px' : '0' }}>
+                {/* 1. Select / Hand */}
                 <div className="relative group/nav">
-                    <button className={`p-2 rounded-xl transition ${['select', 'hand', 'mark'].includes(activeTool) ? 'bg-gray-100 text-black' : 'text-gray-400 hover:text-black hover:bg-gray-50'}`}><NavIcon size={18} /></button>
-                    <div className="absolute left-full top-0 pl-1 z-50 hidden group-hover/nav:block">
-                        <div className="w-44 bg-white rounded-xl shadow-xl border border-gray-100 p-1.5 flex flex-col gap-0.5 animate-in fade-in slide-in-from-left-2 duration-200">
+                    <button className={`p-2.5 rounded-xl transition ${['select', 'hand'].includes(activeTool) ? 'bg-gray-800 text-white' : 'text-gray-500 hover:text-black hover:bg-gray-100'}`}><NavIcon size={18} /></button>
+                    <div className="absolute bottom-full left-1/2 -translate-x-1/2 pb-2 z-50 hidden group-hover/nav:block">
+                        <div className="w-44 bg-white rounded-xl shadow-xl border border-gray-100 p-1.5 flex flex-col gap-0.5 animate-in fade-in slide-in-from-bottom-2 duration-200">
                             <button onClick={() => setActiveTool('select')} className={`flex items-center justify-between px-3 py-2 rounded-lg text-sm transition ${activeTool === 'select' ? 'bg-gray-100 text-black' : 'text-gray-600 hover:bg-gray-50'}`}><div className="flex items-center gap-3"><MousePointer2 size={16} /> Select</div><span className="text-xs text-gray-400 font-medium">V</span></button>
                             <button onClick={() => setActiveTool('hand')} className={`flex items-center justify-between px-3 py-2 rounded-lg text-sm transition ${activeTool === 'hand' ? 'bg-gray-100 text-black' : 'text-gray-600 hover:bg-gray-50'}`}><div className="flex items-center gap-3"><Hand size={16} /> Hand Tool</div><span className="text-xs text-gray-400 font-medium">H</span></button>
-                            <button onClick={() => setActiveTool('mark')} className={`flex items-center justify-between px-3 py-2 rounded-lg text-sm transition ${activeTool === 'mark' ? 'bg-gray-100 text-black' : 'text-gray-600 hover:bg-gray-50'}`}><div className="flex items-center gap-3"><MapPin size={16} /> Mark</div><span className="text-xs text-gray-400 font-medium">M</span></button>
                         </div>
                     </div>
                 </div>
-                {/* 2. Insert */}
+
+                {/* 2. Mark (Independent Pin) */}
+                <TooltipButton icon={MapPin} label="Mark (M)" onClick={() => setActiveTool('mark')} active={activeTool === 'mark'} />
+
+                {/* 3. Upload (Image / Video) */}
                 <div className="relative group/ins">
-                    <button className="p-2 rounded-xl transition text-gray-400 hover:text-black hover:bg-gray-50"><Plus size={18} /></button>
-                    <div className="absolute left-full top-0 pl-1 z-50 hidden group-hover/ins:block">
-                        <div className="w-44 bg-white rounded-xl shadow-xl border border-gray-100 p-1.5 flex flex-col gap-0.5 animate-in fade-in slide-in-from-left-2 duration-200">
-                            <label className="flex items-center gap-3 px-3 py-2 rounded-lg text-sm text-gray-600 hover:bg-gray-50 cursor-pointer transition"><ImagePlus size={16} /> 上传图片 <input type="file" accept="image/*" multiple className="hidden" onChange={(e) => handleFileUpload(e, 'image')} /></label>
-                            <label className="flex items-center gap-3 px-3 py-2 rounded-lg text-sm text-gray-600 hover:bg-gray-50 cursor-pointer transition"><Film size={16} /> 上传视频 <input type="file" accept="video/*" multiple className="hidden" onChange={(e) => handleFileUpload(e, 'video')} /></label>
+                    <button className={`p-2.5 rounded-xl transition ${activeTool === 'insert' ? 'bg-gray-800 text-white' : 'text-gray-500 hover:text-black hover:bg-gray-100'}`}><ImagePlus size={18} /></button>
+                    <div className="absolute bottom-full left-1/2 -translate-x-1/2 pb-2 z-50 hidden group-hover/ins:block">
+                        <div className="w-44 bg-white rounded-xl shadow-xl border border-gray-100 p-1.5 flex flex-col gap-0.5 animate-in fade-in slide-in-from-bottom-2 duration-200">
+                            <label className="flex items-center gap-3 px-3 py-2 rounded-lg text-sm text-gray-600 hover:bg-gray-50 cursor-pointer transition text-left w-full"><ImageIcon size={16} /> 上传图片 <input type="file" accept="image/*" multiple className="hidden" onChange={(e) => handleFileUpload(e, 'image')} /></label>
+                            <label className="flex items-center gap-3 px-3 py-2 rounded-lg text-sm text-gray-600 hover:bg-gray-50 cursor-pointer transition text-left w-full"><Film size={16} /> 上传视频 <input type="file" accept="video/*" multiple className="hidden" onChange={(e) => handleFileUpload(e, 'video')} /></label>
                         </div>
                     </div>
                 </div>
-                {/* 3. Shape */}
+
+                {/* 4. Artboard (#) */}
+                <TooltipButton icon={Hash} label="Artboard (#)" onClick={() => { }} />
+
+                {/* 5. Shape */}
                 <div className="relative group/shp">
-                    <button className="p-2 rounded-xl transition text-gray-400 hover:text-black hover:bg-gray-50"><Square size={18} /></button>
-                    <div className="absolute left-full top-0 pl-1 z-50 hidden group-hover/shp:block">
-                        <div className="bg-white rounded-xl shadow-xl border border-gray-100 p-3 flex flex-col gap-2 animate-in fade-in slide-in-from-left-2 duration-200 w-48">
+                    <button className={`p-2.5 rounded-xl transition ${activeTool === 'shape' ? 'bg-gray-800 text-white' : 'text-gray-500 hover:text-black hover:bg-gray-100'}`}><Square size={18} /></button>
+                    <div className="absolute bottom-full left-1/2 -translate-x-1/2 pb-2 z-50 hidden group-hover/shp:block">
+                        <div className="bg-white rounded-xl shadow-xl border border-gray-100 p-3 flex flex-col gap-2 animate-in fade-in slide-in-from-bottom-2 duration-200 w-48">
                             <div className="text-[11px] font-medium text-gray-400">形状</div>
                             <div className="grid grid-cols-5 gap-1">
                                 <ShapeMenuItem icon={Square} onClick={() => addShape('square')} />
@@ -2535,26 +2567,21 @@ const Workspace: React.FC = () => {
                         </div>
                     </div>
                 </div>
-                {/* 4. Text */}
+
+                {/* 6. Pencil */}
+                <TooltipButton icon={PenTool} label="Draw (P)" onClick={() => { }} />
+
+                {/* 7. Text */}
                 <TooltipButton icon={Type} label="Text (T)" onClick={addText} />
-                {/* 5. Touch Edit */}
-                <TooltipButton icon={Scan} label="Touch Edit" onClick={() => { setTouchEditMode(!touchEditMode); setActiveTool(touchEditMode ? 'select' : 'mark'); }} active={touchEditMode} />
-                {/* 6. AI Image Gen */}
-                <TooltipButton icon={ImageIcon} label="图像生成器" onClick={() => addGenImage()} />
-                {/* 7. AI Video Gen */}
-                <TooltipButton icon={Video} label="视频生成器" onClick={() => addGenVideo()} />
-                {/* 8. Export */}
-                <div className="relative group/exp">
-                    <button className="p-2 rounded-xl transition text-gray-400 hover:text-black hover:bg-gray-50"><Download size={18} /></button>
-                    <div className="absolute left-full top-0 pl-1 z-50 hidden group-hover/exp:block">
-                        <div className="w-36 bg-white rounded-xl shadow-xl border border-gray-100 p-1.5 flex flex-col gap-0.5 animate-in fade-in slide-in-from-left-2 duration-200">
-                            <button onClick={() => handleExport('png')} className="px-3 py-2 rounded-lg text-sm text-gray-600 hover:bg-gray-50 transition text-left">PNG</button>
-                            <button onClick={() => handleExport('jpg')} className="px-3 py-2 rounded-lg text-sm text-gray-600 hover:bg-gray-50 transition text-left">JPG</button>
-                            <button onClick={() => handleExport('svg')} className="px-3 py-2 rounded-lg text-sm text-gray-600 hover:bg-gray-50 transition text-left">SVG</button>
-                            <button onClick={() => handleExport('pdf')} className="px-3 py-2 rounded-lg text-sm text-gray-600 hover:bg-gray-50 transition text-left">PDF</button>
-                        </div>
-                    </div>
-                </div>
+
+                {/* Separator / Gap */}
+                <div className="w-px h-6 bg-gray-200/80 mx-1.5" />
+
+                {/* 8. AI Image Gen */}
+                <TooltipButton icon={ImagePlus} label="AI 图像生成" onClick={() => addGenImage()} />
+
+                {/* 9. AI Video Gen */}
+                <TooltipButton icon={Video} label="AI 视频生成" onClick={() => addGenVideo()} />
             </div>
         );
     };
@@ -3475,7 +3502,7 @@ const Workspace: React.FC = () => {
     };
 
     return (
-        <div className="flex h-screen w-screen overflow-hidden bg-[#E5E7EB] font-sans">
+        <div className="flex h-screen w-screen overflow-hidden bg-[#E8E8E8] font-sans">
             {renderContextMenu()}
             {previewUrl && (
                 <div className="fixed inset-0 z-[100] bg-black/80 flex items-center justify-center p-10 cursor-pointer backdrop-blur-sm animate-in fade-in duration-200" onClick={() => setPreviewUrl(null)}>
@@ -3507,39 +3534,91 @@ const Workspace: React.FC = () => {
                 </div>
             )}
             <AnimatePresence>
-                {showLayersPanel && (
+                {leftPanelMode && (
                     <motion.div
-                        initial={{ opacity: 0, x: -20, y: 20 }}
-                        animate={{ opacity: 1, x: 0, y: 0 }}
-                        exit={{ opacity: 0, x: -20, y: 20 }}
+                        initial={{ opacity: 0, x: -280 }}
+                        animate={{ opacity: 1, x: 0 }}
+                        exit={{ opacity: 0, x: -280 }}
                         transition={{ type: "spring", stiffness: 300, damping: 30 }}
-                        className={`absolute bottom-4 left-4 z-50 flex flex-col ${isLayersCollapsed ? 'w-auto' : 'w-64 max-h-[60vh] bg-white/90 backdrop-blur-xl border border-white/20 rounded-xl shadow-2xl overflow-hidden'}`}
+                        className="absolute top-0 left-0 bottom-0 w-[220px] bg-white/98 backdrop-blur-xl border-r border-gray-200/60 z-50 flex flex-col shadow-[4px_0_24px_rgba(0,0,0,0.04)]"
                     >
-                        {isLayersCollapsed ? (
-                            <button onClick={() => setIsLayersCollapsed(false)} className="bg-white/90 backdrop-blur-md border border-white/20 shadow-lg rounded-xl px-4 py-2.5 flex items-center gap-2 hover:scale-105 transition active:scale-95 group">
-                                <History size={16} className="text-gray-600 group-hover:text-black" /><span className="text-sm font-medium text-gray-700 group-hover:text-black">Layers & History</span><ChevronRight size={16} className="text-gray-400 group-hover:text-black ml-1" />
-                            </button>
-                        ) : (
-                            <div className="flex flex-col h-full">
-                                <div className="p-4 border-b border-gray-100/50 flex justify-between items-center bg-transparent sticky top-0 z-10"><span className="font-semibold text-gray-900">历史记录</span><button onClick={() => setIsLayersCollapsed(true)} className="text-gray-400 hover:text-black transition"><ChevronDown size={16} /></button></div>
-                                <div className="flex-1 overflow-y-auto no-scrollbar flex flex-col p-2">
-                                    <div className="h-32 bg-gray-50/50 rounded-lg flex flex-col items-center justify-center text-gray-400 text-xs border border-dashed border-gray-200 mb-4"><div className="mb-2"><ImageIcon size={32} className="opacity-10" /></div>暂无历史记录</div>
-                                    <div className="border-t border-gray-100/50 pt-3">
-                                        <h3 className="text-xs font-semibold text-gray-500 uppercase tracking-wider mb-2 px-2">图层</h3>
-                                        <div className="space-y-1">
-                                            <motion.div whileHover={{ scale: 1.02 }} onClick={addText} className="flex items-center gap-3 p-2 rounded-lg cursor-pointer text-sm text-gray-500 hover:bg-black/5 hover:text-black transition group border border-dashed border-gray-200 hover:border-gray-300 justify-center mb-2"><Plus size={14} /> Add Layer</motion.div>
-                                            {[...elements].reverse().map(el => (
-                                                <motion.div layoutId={el.id} key={el.id} onClick={(e) => handleElementMouseDown(e, el.id)} className={`flex items-center gap-3 p-2 rounded-lg cursor-pointer text-sm transition group border border-transparent ${selectedElementId === el.id ? 'bg-blue-50 border-blue-100' : 'hover:bg-black/5 hover:border-transparent'}`}>
-                                                    <div className="w-10 h-10 bg-white rounded-md border border-gray-200 flex items-center justify-center overflow-hidden flex-shrink-0 shadow-sm">{el.type === 'text' && <span className="font-serif text-gray-500 text-lg">T</span>}{el.type === 'image' && <img src={el.url} className="w-full h-full object-cover" />}{(el.type === 'video' || el.type === 'gen-video') && <Video size={16} className="text-gray-500" />}{el.type === 'shape' && <Box size={16} className="text-gray-500" />}{el.type === 'gen-image' && <ImagePlus size={16} className="text-blue-500" />}</div>
-                                                    <div className="flex-1 min-w-0 flex flex-col justify-center"><div className="truncate text-gray-700 font-medium text-xs leading-tight mb-0.5">{el.type === 'text' ? (el.text || 'Text Layer') : (el.type === 'gen-image' ? 'Image Generator' : (el.type === 'gen-video' ? 'Video Generator' : (el.type === 'image' ? `Image ${el.id.slice(-4)}` : (el.type === 'shape' ? `${el.shapeType || 'Shape'}` : 'Element'))))}</div><div className="truncate text-gray-400 text-[10px]">{el.type === 'text' ? 'Text' : (el.type === 'gen-image' ? 'AI Model' : (el.type === 'gen-video' ? 'AI Video' : 'Graphic'))}</div></div>
-                                                </motion.div>
-                                            ))}
+                        {/* Panel Header */}
+                        <div className="px-4 py-3.5 flex items-center justify-between border-b border-gray-100 shrink-0">
+                            <span className="font-semibold text-sm text-gray-900">{leftPanelMode === 'layers' ? '图层' : '已生成文件列表'}</span>
+                            <button onClick={() => setLeftPanelMode(null)} className="w-6 h-6 flex items-center justify-center text-gray-400 hover:text-gray-700 hover:bg-gray-100 rounded-md transition"><X size={14} /></button>
+                        </div>
+
+                        {/* Panel Content */}
+                        <div className="flex-1 overflow-y-auto no-scrollbar">
+                            {leftPanelMode === 'layers' ? (
+                                <div className="flex flex-col">
+                                    {/* 历史记录 Section */}
+                                    <div className="border-b border-gray-100">
+                                        <div className="px-4 py-2.5 flex items-center justify-between cursor-pointer hover:bg-gray-50 transition" onClick={() => { }}>
+                                            <span className="text-xs font-semibold text-gray-500 uppercase tracking-wider">历史记录</span>
+                                            <ChevronUp size={14} className="text-gray-400" />
+                                        </div>
+                                        <div className="px-4 pb-4">
+                                            <div className="h-24 bg-gray-50/80 rounded-lg flex flex-col items-center justify-center text-gray-400 text-xs border border-dashed border-gray-200">
+                                                <ImageIcon size={24} className="opacity-15 mb-1.5" />
+                                                暂无历史记录
+                                            </div>
                                         </div>
                                     </div>
+                                    {/* 图层列表 */}
+                                    <div className="p-2 space-y-0.5">
+                                        {elements.length === 0 ? (
+                                            <div className="py-16 text-center text-xs text-gray-400">暂无图层</div>
+                                        ) : (
+                                            [...elements].reverse().map(el => (
+                                                <div key={el.id} onClick={(e) => handleElementMouseDown(e, el.id)} className={`flex items-center gap-2.5 px-2.5 py-2 rounded-lg cursor-pointer text-sm transition ${selectedElementId === el.id ? 'bg-blue-50 border border-blue-100' : 'hover:bg-gray-50 border border-transparent'}`}>
+                                                    <div className="w-8 h-8 bg-gray-50 rounded-md border border-gray-200 flex items-center justify-center overflow-hidden flex-shrink-0">
+                                                        {el.type === 'text' && <span className="font-serif text-gray-500 text-sm">T</span>}
+                                                        {el.type === 'image' && <img src={el.url} className="w-full h-full object-cover" />}
+                                                        {(el.type === 'video' || el.type === 'gen-video') && <Video size={14} className="text-gray-500" />}
+                                                        {el.type === 'shape' && <Box size={14} className="text-gray-500" />}
+                                                        {el.type === 'gen-image' && <ImagePlus size={14} className="text-blue-500" />}
+                                                    </div>
+                                                    <div className="flex-1 min-w-0">
+                                                        <div className="truncate text-gray-700 font-medium text-xs">{el.type === 'text' ? (el.text || 'Text') : (el.type === 'gen-image' ? 'Image Gen' : (el.type === 'gen-video' ? 'Video Gen' : (el.type === 'image' ? `Image` : (el.type === 'shape' ? `${el.shapeType || 'Shape'}` : 'Element'))))}</div>
+                                                        <div className="truncate text-gray-400 text-[10px]">{el.type === 'text' ? 'Text' : (el.type === 'gen-image' ? 'AI' : (el.type === 'gen-video' ? 'AI Video' : 'Graphic'))}</div>
+                                                    </div>
+                                                </div>
+                                            ))
+                                        )}
+                                    </div>
                                 </div>
-                                <div className="p-2 border-t border-gray-100/50"><button onClick={() => setIsLayersCollapsed(true)} className="w-full flex items-center justify-center p-2 text-gray-400 hover:text-black hover:bg-black/5 rounded-lg transition" title="Collapse Panel"><Minimize2 size={16} /></button></div>
-                            </div>
-                        )}
+                            ) : (
+                                /* 已生成文件列表 */
+                                <div className="p-2">
+                                    {(() => {
+                                        const allFiles = messages.flatMap((m, mi) =>
+                                            (m.agentData?.imageUrls || []).map((url, fi) => ({
+                                                url,
+                                                title: m.agentData?.title || `生成图片 ${mi + 1}-${fi + 1}`,
+                                                time: m.timestamp,
+                                                model: m.agentData?.model || 'AI'
+                                            }))
+                                        );
+                                        if (allFiles.length === 0) {
+                                            return <div className="py-16 text-center text-xs text-gray-400">暂无文件</div>;
+                                        }
+                                        return allFiles.reverse().map((file, i) => (
+                                            <div key={i} className="flex items-center gap-2.5 p-2 rounded-lg hover:bg-gray-50 cursor-pointer transition group" onClick={() => setPreviewUrl(file.url)}>
+                                                <div className="w-10 h-10 rounded-md overflow-hidden flex-shrink-0 border border-gray-100 bg-gray-50">
+                                                    <img src={file.url} className="w-full h-full object-cover" alt="" />
+                                                </div>
+                                                <div className="flex-1 min-w-0">
+                                                    <div className="text-xs font-medium text-gray-700 truncate">{file.title}</div>
+                                                    <div className="text-[10px] text-gray-400 mt-0.5">{file.model} · {new Date(file.time).toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' })}</div>
+                                                </div>
+                                                <a href={file.url} download={`${file.title}.png`} onClick={(e) => e.stopPropagation()} className="opacity-0 group-hover:opacity-100 text-gray-400 hover:text-gray-700 transition"><Download size={13} /></a>
+                                            </div>
+                                        ));
+                                    })()}
+                                </div>
+                            )}
+                        </div>
                     </motion.div>
                 )}
             </AnimatePresence>
@@ -3554,7 +3633,8 @@ const Workspace: React.FC = () => {
                         className="absolute top-4 right-4 w-[400px] bottom-4 bg-white rounded-2xl shadow-lg border border-gray-200/60 z-40 flex flex-col overflow-hidden"
                     >
                         {/* Header with Toolbar - Lovart Style */}
-                        <div className="px-3 py-2.5 flex items-center justify-end border-b border-gray-100 z-20 shrink-0 select-none">
+                        <div className="px-3 py-2.5 flex items-center justify-between border-b border-gray-100 z-20 shrink-0 select-none">
+                            <span className="text-sm font-semibold text-gray-900 pl-1">新对话</span>
                             <div className="flex items-center gap-0.5">
                                 <button
                                     className="h-7 px-2.5 text-xs text-gray-500 hover:text-gray-800 hover:bg-gray-100 flex items-center justify-center rounded-lg transition-all"
@@ -3787,6 +3867,9 @@ const Workspace: React.FC = () => {
                                                             {msg.skillData.iconName === 'Globe' && <Globe size={15} className="text-gray-500" strokeWidth={2} />}
                                                             {msg.skillData.iconName === 'FileText' && <FileText size={15} className="text-gray-500" strokeWidth={2} />}
                                                             {msg.skillData.iconName === 'Film' && <Film size={15} className="text-gray-500" strokeWidth={2} />}
+                                                            {msg.skillData.iconName === 'Box' && <Box size={15} className="text-gray-500" strokeWidth={2} />}
+                                                            {msg.skillData.iconName === 'Video' && <Video size={15} className="text-gray-500" strokeWidth={2} />}
+                                                            {msg.skillData.iconName === 'Sparkles' && <Sparkles size={15} className="text-gray-500" strokeWidth={2} />}
                                                             <span className="font-semibold">{msg.skillData.name}</span>
                                                         </div>
                                                         {/* Preview context */}
@@ -4531,32 +4614,48 @@ const Workspace: React.FC = () => {
             </AnimatePresence>
 
             <div className="flex-1 relative flex flex-col h-full overflow-hidden">
-                <div className="absolute top-6 left-6 right-6 flex justify-between items-start z-30 pointer-events-none transition-all duration-300" style={{ paddingRight: showAssistant ? '420px' : '0' }}>
-                    <div className="flex items-center gap-3 pointer-events-auto transition-all duration-300 ml-12">
-                        <button onClick={() => navigate('/')} className="w-10 h-10 bg-black rounded-full flex items-center justify-center text-white font-bold text-xs shadow-md hover:scale-105 transition">XC</button>
-                        <div className="flex items-center gap-2 cursor-pointer hover:bg-white/50 px-3 py-1.5 rounded-full transition backdrop-blur-sm pointer-events-auto">
-                            <input className="font-medium text-gray-900 bg-transparent border-none focus:outline-none w-24 focus:w-48 transition-all" value={projectTitle} onChange={(e) => setProjectTitle(e.target.value)} />
-                            <ChevronDown size={14} className="text-gray-500" />
+                {/* Top Bar - Lovart Style: minimal, transparent */}
+                <div className="absolute top-4 left-5 right-5 flex justify-between items-center z-30 pointer-events-none transition-all duration-300" style={{ paddingRight: showAssistant ? '420px' : '0' }}>
+                    <div className="flex items-center gap-3 pointer-events-auto">
+                        <button onClick={() => navigate('/')} className="w-9 h-9 bg-black rounded-full flex items-center justify-center text-white font-bold text-[10px] tracking-wide shadow-sm hover:scale-105 transition">XC</button>
+                        <div className="flex items-center gap-1.5 cursor-pointer hover:bg-white/60 px-2.5 py-1 rounded-full transition backdrop-blur-sm">
+                            <input className="font-medium text-sm text-gray-900 bg-transparent border-none focus:outline-none w-20 focus:w-40 transition-all" value={projectTitle} onChange={(e) => setProjectTitle(e.target.value)} />
+                            <ChevronDown size={12} className="text-gray-400" />
                         </div>
                     </div>
 
-                    {/* Top Right Floating Controls - Zoom & Toggle */}
+                    {/* Top Right - Minimal: assistant toggle (Lovart “💬 对话” style matching user reference) */}
                     <div className="pointer-events-auto flex items-center gap-2">
-                        <div className="bg-white rounded-xl shadow-sm border border-gray-200/80 flex items-center p-1 gap-1 h-9">
-                            <button onClick={() => setZoom(z => Math.max(10, z - 10))} className="w-7 h-7 flex items-center justify-center text-gray-500 hover:text-black hover:bg-gray-50 rounded-lg transition"><Minus size={14} /></button>
-                            <span className="text-xs font-medium w-8 text-center text-gray-700">{Math.round(zoom)}%</span>
-                            <button onClick={() => setZoom(z => Math.min(200, z + 10))} className="w-7 h-7 flex items-center justify-center text-gray-500 hover:text-black hover:bg-gray-50 rounded-lg transition"><Plus size={14} /></button>
-                        </div>
-
                         {!showAssistant && (
-                            <button onClick={() => setShowAssistant(true)} className="w-9 h-9 bg-white rounded-xl shadow-sm border border-gray-200/80 flex items-center justify-center text-black hover:bg-gray-50 transition">
-                                <Sparkles size={16} fill="currentColor" />
+                            <button onClick={() => setShowAssistant(true)} className="h-8 px-3.5 bg-gray-100/90 backdrop-blur-sm rounded-full flex items-center gap-1.5 text-gray-700 hover:text-gray-900 hover:bg-gray-200/90 transition text-xs font-medium border border-transparent shadow-[0_2px_8px_rgba(0,0,0,0.04)]">
+                                <MessageSquare size={13} className="text-gray-500 fill-gray-500" />
+                                对话
                             </button>
                         )}
                     </div>
                 </div>
 
-                <div ref={containerRef} className="flex-1 overflow-hidden relative bg-[#E5E7EB] w-full h-full select-none" onContextMenu={handleContextMenu} onMouseDown={handleMouseDown} onMouseMove={handleMouseMove} onMouseUp={handleMouseUp} onMouseLeave={handleMouseUp} onDragOver={(e) => { e.preventDefault(); e.dataTransfer.dropEffect = 'copy'; }} onDrop={handleCanvasDrop} style={{ cursor: (activeTool === 'hand' || isPanning || isSpacePressed) ? (isPanning ? 'grabbing' : 'grab') : (activeTool === 'mark' ? 'crosshair' : (activeTool === 'select' ? 'default' : 'grab')), WebkitUserSelect: 'none' }}>
+                {/* Bottom Left - Layers/Files Icons + Separator + Zoom Controls (Lovart Style) */}
+                <div className="absolute bottom-5 left-5 flex items-center gap-1.5 z-40 pointer-events-auto">
+                    {/* Layers Icon */}
+                    <button onClick={() => setLeftPanelMode(leftPanelMode === 'layers' ? null : 'layers')} className={`w-7 h-7 flex items-center justify-center rounded-md transition ${leftPanelMode === 'layers' ? 'text-gray-900 bg-gray-200/80' : 'text-gray-500 hover:text-gray-800 hover:bg-white/60'}`} title="图层">
+                        <Layers size={15} strokeWidth={1.8} />
+                    </button>
+                    {/* Files Icon */}
+                    <button onClick={() => setLeftPanelMode(leftPanelMode === 'files' ? null : 'files')} className={`w-7 h-7 flex items-center justify-center rounded-md transition ${leftPanelMode === 'files' ? 'text-gray-900 bg-gray-200/80' : 'text-gray-500 hover:text-gray-800 hover:bg-white/60'}`} title="已生成文件列表">
+                        <Folder size={15} strokeWidth={1.8} />
+                    </button>
+                    {/* Separator */}
+                    <div className="w-px h-4 bg-gray-300/60 mx-0.5"></div>
+                    {/* Zoom Controls */}
+                    <div className="flex items-center gap-0.5">
+                        <button onClick={() => setZoom(z => Math.max(10, z - 10))} className="w-6 h-6 flex items-center justify-center text-gray-500 hover:text-black rounded-md hover:bg-white/60 transition"><Minus size={13} /></button>
+                        <span className="text-[11px] font-medium w-9 text-center text-gray-600 select-none">{Math.round(zoom)}%</span>
+                        <button onClick={() => setZoom(z => Math.min(200, z + 10))} className="w-6 h-6 flex items-center justify-center text-gray-500 hover:text-black rounded-md hover:bg-white/60 transition"><Plus size={13} /></button>
+                    </div>
+                </div>
+
+                <div ref={containerRef} className="flex-1 overflow-hidden relative bg-[#E8E8E8] w-full h-full select-none" onContextMenu={handleContextMenu} onMouseDown={handleMouseDown} onMouseMove={handleMouseMove} onMouseUp={handleMouseUp} onMouseLeave={handleMouseUp} onDragOver={(e) => { e.preventDefault(); e.dataTransfer.dropEffect = 'copy'; }} onDrop={handleCanvasDrop} style={{ cursor: (activeTool === 'hand' || isPanning || isSpacePressed) ? (isPanning ? 'grabbing' : 'grab') : (activeTool === 'mark' ? 'crosshair' : (activeTool === 'select' ? 'default' : 'grab')), WebkitUserSelect: 'none' }}>
                     {renderToolbar()}
                     {/* 框选矩形 */}
                     {isMarqueeSelecting && (

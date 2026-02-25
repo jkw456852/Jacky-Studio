@@ -3,13 +3,11 @@
  * 使用Skills统一处理智能体任务，降低耦合性，提高鲁棒性
  */
 
-import { GoogleGenAI } from '@google/genai';
 import { AgentRoutingDecision, ProjectContext, AgentType } from '../../types/agent.types';
 import { COCO_SYSTEM_PROMPT } from './prompts/coco.prompt';
 import { errorHandler, ErrorType } from '../../utils/error-handler';
-import { executeSkill } from '../skills';
 import { getApiKey, getClient } from '../gemini';
-import { localPreRoute, isChatMessage } from './local-router';
+import { localPreRoute } from './local-router';
 import { z } from 'zod';
 
 
@@ -33,6 +31,38 @@ const circuitBreaker = {
     isOpen: false,
     threshold: 3,          // 连续失败 N 次后熔断
     resetTimeout: 60_000,  // 熔断后 60 秒自动恢复（半开状态）
+};
+
+/** 路由结果 LRU 缓存 — 仅缓存高置信度结果，减少重复 LLM 调用 */
+const routingCache = {
+    entries: new Map<string, { decision: EnhancedRoutingDecision; timestamp: number }>(),
+    maxSize: 20,
+    ttl: 10 * 60 * 1000, // 10 分钟
+    confidenceThreshold: 0.8,
+
+    get(key: string): EnhancedRoutingDecision | null {
+        const entry = this.entries.get(key);
+        if (!entry) return null;
+        if (Date.now() - entry.timestamp > this.ttl) {
+            this.entries.delete(key);
+            return null;
+        }
+        return entry.decision;
+    },
+
+    set(key: string, decision: EnhancedRoutingDecision): void {
+        if (decision.confidence < this.confidenceThreshold) return;
+        // LRU 淘汰
+        if (this.entries.size >= this.maxSize) {
+            const oldest = this.entries.keys().next().value;
+            if (oldest) this.entries.delete(oldest);
+        }
+        this.entries.set(key, { decision, timestamp: Date.now() });
+    },
+
+    normalizeKey(message: string): string {
+        return message.trim().toLowerCase().replace(/\s+/g, ' ');
+    }
 };
 
 
@@ -94,6 +124,14 @@ export async function routeToAgent(
             }
             // 半开状态：允许一次尝试
             console.log('[EnhancedOrchestrator] Circuit breaker half-open, attempting request');
+        }
+
+        // 缓存快速路径：相似消息直接返回缓存的高置信度路由结果
+        const cacheKey = routingCache.normalizeKey(message);
+        const cached = routingCache.get(cacheKey);
+        if (cached) {
+            console.log('[EnhancedOrchestrator] Cache hit:', cached.targetAgent);
+            return cached;
         }
 
         // 快速路径：本地关键词预路由（0延迟，不依赖API）
@@ -219,7 +257,7 @@ Analyze and route to appropriate agent. Return JSON with:
         circuitBreaker.isOpen = false;
 
         // 返回增强的路由决策
-        return {
+        const decision: EnhancedRoutingDecision = {
             targetAgent: parsed.targetAgent.toLowerCase() as AgentType,
             taskType: parsed.taskType,
             complexity: parsed.complexity,
@@ -229,6 +267,11 @@ Analyze and route to appropriate agent. Return JSON with:
             estimatedDuration: parsed.estimatedDuration,
             requiredSkills: parsed.requiredSkills
         };
+
+        // 写入缓存（仅高置信度结果）
+        routingCache.set(cacheKey, decision);
+
+        return decision;
     } catch (error) {
         // 熔断器：记录失败
         circuitBreaker.failures++;
@@ -273,98 +316,3 @@ function createFallbackDecision(
     };
 }
 
-/**
- * 使用Skills执行智能体任务
- */
-export async function executeAgentTaskWithSkills(
-    agentId: AgentType,
-    message: string,
-    skills: string[],
-    context: ProjectContext
-): Promise<any> {
-    try {
-        const results: Record<string, any> = {};
-
-        // 并行执行所有必需的技能
-        const skillPromises = skills.map(async (skillName) => {
-            try {
-                const result = await executeSkill(skillName, {
-                    message,
-                    context,
-                    agentId
-                });
-                return { skillName, result, success: true };
-            } catch (error) {
-                const appError = errorHandler.handleError(error, {
-                    skill: skillName,
-                    agent: agentId
-                });
-                return { skillName, error: appError.message, success: false };
-            }
-        });
-
-        const skillResults = await Promise.all(skillPromises);
-
-        // 汇总结果
-        skillResults.forEach(({ skillName, result, error, success }) => {
-            results[skillName] = success ? result : { error };
-        });
-
-        return results;
-    } catch (error) {
-        throw errorHandler.handleError(error, {
-            function: 'executeAgentTaskWithSkills',
-            agentId,
-            skills
-        });
-    }
-}
-
-/**
- * 智能体协作执行
- */
-export async function collaborativeExecution(
-    primaryAgent: AgentType,
-    fallbackAgents: AgentType[],
-    message: string,
-    context: ProjectContext
-): Promise<any> {
-    let lastError: any;
-
-    // 尝试主智能体
-    try {
-        console.log(`[Collaboration] Trying primary agent: ${primaryAgent}`);
-        // 这里应该调用实际的智能体执行逻辑
-        // 为简化示例，暂时返回mock数据
-        return { agent: primaryAgent, status: 'success' };
-    } catch (error) {
-        lastError = errorHandler.handleError(error, {
-            agent: primaryAgent,
-            role: 'primary'
-        });
-        console.warn(`[Collaboration] Primary agent failed:`, lastError.message);
-    }
-
-    // 尝试降级智能体
-    for (const fallbackAgent of fallbackAgents) {
-        try {
-            console.log(`[Collaboration] Trying fallback agent: ${fallbackAgent}`);
-            return { agent: fallbackAgent, status: 'success', fallback: true };
-        } catch (error) {
-            lastError = errorHandler.handleError(error, {
-                agent: fallbackAgent,
-                role: 'fallback'
-            });
-            console.warn(`[Collaboration] Fallback agent failed:`, lastError.message);
-        }
-    }
-
-    // 所有智能体都失败
-    throw errorHandler.createError(
-        ErrorType.AGENT,
-        '所有智能体执行失败，请稍后重试',
-        lastError?.originalError,
-        { primaryAgent, fallbackAgents },
-        true
-    );
-}

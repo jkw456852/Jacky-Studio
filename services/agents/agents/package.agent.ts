@@ -17,6 +17,8 @@ export class PackageAgent extends EnhancedBaseAgent {
       'export'
     ];
   }
+
+  get maxConcurrency() { return 3; } // 图片密集型
 }
 
 export const packageAgent = new PackageAgent();
