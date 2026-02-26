@@ -47,7 +47,7 @@ export interface AgentTask {
     assets?: GeneratedAsset[];
     skillCalls?: SkillCall[];
     adjustments?: string[];
-    error?: any; // 添加错误字段支持
+    error?: { message: string; code?: string; details?: unknown };
   };
   createdAt: number;
   updatedAt: number;

@@ -70,6 +70,20 @@ const ASPECT_RATIOS = [
     { label: '4:5', value: '4:5', size: '1024*1280' },
 ];
 
+const renderRatioIcon = (ratioStr: string, isActive: boolean = false) => {
+    const [wStr, hStr] = ratioStr.split(':');
+    const w = parseFloat(wStr) || 1;
+    const h = parseFloat(hStr) || 1;
+    const maxDim = 14;
+    const scaledW = w > h ? maxDim : maxDim * (w / h);
+    const scaledH = h > w ? maxDim : maxDim * (h / w);
+    return (
+        <div className="flex items-center justify-center w-5 h-5 shrink-0">
+            <div className={`border-[1.5px] rounded-[2px] transition-colors ${isActive ? 'border-blue-600' : 'border-gray-400'}`} style={{ width: scaledW, height: scaledH }} />
+        </div>
+    );
+};
+
 const VIDEO_RATIOS = [
     { label: '16:9', value: '16:9', icon: 'rectangle-horizontal' },
     { label: '9:16', value: '9:16', icon: 'rectangle-vertical' },
@@ -79,10 +93,17 @@ const VIDEO_RATIOS = [
 type ToolType = 'select' | 'hand' | 'mark' | 'insert' | 'shape' | 'text' | 'brush' | 'eraser';
 
 // Utility to compress image to max dimensions to save storage and improve performance
-const compressImage = (file: File, maxDim: number = 1024): Promise<string> => {
+const compressImage = (file: File, maxDim: number = 2048): Promise<string> => {
     return new Promise((resolve) => {
         const reader = new FileReader();
         reader.onload = (e) => {
+            const resultUrl = e.target?.result as string;
+            // Never compress if the file is < 10MB
+            if (file.size <= 10 * 1024 * 1024) {
+                resolve(resultUrl);
+                return;
+            }
+
             const img = new Image();
             img.onload = () => {
                 let width = img.width;
@@ -95,15 +116,17 @@ const compressImage = (file: File, maxDim: number = 1024): Promise<string> => {
                         width = (width / height) * maxDim;
                         height = maxDim;
                     }
+                    const canvas = document.createElement('canvas');
+                    canvas.width = width;
+                    canvas.height = height;
+                    const ctx = canvas.getContext('2d');
+                    ctx?.drawImage(img, 0, 0, width, height);
+                    resolve(canvas.toDataURL('image/jpeg', 0.85));
+                } else {
+                    resolve(resultUrl);
                 }
-                const canvas = document.createElement('canvas');
-                canvas.width = width;
-                canvas.height = height;
-                const ctx = canvas.getContext('2d');
-                ctx?.drawImage(img, 0, 0, width, height);
-                resolve(canvas.toDataURL('image/jpeg', 0.85));
             };
-            img.src = e.target?.result as string;
+            img.src = resultUrl;
         };
         reader.readAsDataURL(file);
     });
@@ -349,6 +372,7 @@ const Workspace: React.FC = () => {
 
     const [historySearch, setHistorySearch] = useState('');
     const [showAssistant, setShowAssistant] = useState(true);
+    const [isHoveringVideoFrames, setIsHoveringVideoFrames] = useState<{ [id: string]: boolean }>({});
     const [inputBlocks, setInputBlocks] = useState<InputBlock[]>([{ id: 'init', type: 'text', text: '' }]);
     const [activeBlockId, setActiveBlockId] = useState<string>('init');
     const [selectionIndex, setSelectionIndex] = useState<number | null>(null);
@@ -451,6 +475,10 @@ const Workspace: React.FC = () => {
     const [videoStartFrame, setVideoStartFrame] = useState<File | null>(null);
     const [videoEndFrame, setVideoEndFrame] = useState<File | null>(null);
     const [videoMultiRefs, setVideoMultiRefs] = useState<File[]>([]);
+
+    // Video bottom toolbar dropdowns
+    const [showVideoModelDropdown, setShowVideoModelDropdown] = useState(false);
+    const [showVideoSettingsDropdown, setShowVideoSettingsDropdown] = useState(false);
 
     // 悬停展开与面板状态
     const [isVideoPanelHovered, setIsVideoPanelHovered] = useState(false);
@@ -717,6 +745,16 @@ const Workspace: React.FC = () => {
         console.log('[Workspace] Setting isAgentMode to:', agentMode);
         setIsAgentMode(agentMode);
     }, [agentMode, setIsAgentMode]);
+
+    // Close video dropdowns on outside click
+    useEffect(() => {
+        const handleClickOutside = () => {
+            setShowVideoModelDropdown(false);
+            setShowVideoSettingsDropdown(false);
+        };
+        document.addEventListener('click', handleClickOutside);
+        return () => document.removeEventListener('click', handleClickOutside);
+    }, []);
 
     // Sync markers with inputBlocks - remove markers that don't have corresponding chips in inputBlocks
     // Only sync when inputBlocks has at least one marker file (meaning user is actively working with markers)
@@ -1772,12 +1810,6 @@ const Workspace: React.FC = () => {
 
                         let width = img.width;
                         let height = img.height;
-                        const maxSize = 800;
-                        if (width > maxSize || height > maxSize) {
-                            const ratio = Math.min(maxSize / width, maxSize / height);
-                            width *= ratio;
-                            height *= ratio;
-                        }
 
                         // Offset multiple images slightly
                         const offset = index * 20;
@@ -1859,12 +1891,6 @@ const Workspace: React.FC = () => {
                     img.onload = () => {
                         let width = img.width;
                         let height = img.height;
-                        const maxSize = 800;
-                        if (width > maxSize || height > maxSize) {
-                            const ratio = Math.min(maxSize / width, maxSize / height);
-                            width *= ratio;
-                            height *= ratio;
-                        }
                         const offset = index * 20;
                         newElementsToAppend.push({
                             id: Date.now().toString() + index,
@@ -2748,23 +2774,25 @@ const Workspace: React.FC = () => {
     };
 
     const renderImageToolbar = () => {
-        if (!selectedElementId || selectedElementIds.length > 1) return null;
+        if (!selectedElementId || selectedElementIds.length > 1 || isDraggingElement) return null;
         const el = elements.find(e => e.id === selectedElementId);
         if (!el || (el.type !== 'gen-image' && el.type !== 'image')) return null;
 
         // Canvas-space coordinates (toolbar lives inside the CSS transform layer)
-        // During drag, use ref position to stay in sync with direct DOM updates
-        const dragPos = isDraggingElement ? dragOffsetsRef.current[el.id] : null;
-        const elX = dragPos ? dragPos.x : el.x;
-        const elY = dragPos ? dragPos.y : el.y;
+        const elX = el.x;
+        const elY = el.y;
         const canvasCenterX = elX + el.width / 2;
         const counterScale = 100 / zoom;
 
         // Configuration Toolbar for Empty Gen-Image
         if (!el.url && el.type === 'gen-image') {
-            const toolbarTop = elY + el.height + (16 * counterScale);
+            const toolbarTop = elY + el.height + 16;
+            const toolbarDesignWidth = 440;
+            // Strict inverse scale: makes the toolbar stay pixel-perfect regardless of canvas zoom
+            const inverseScale = 100 / zoom;
+
             return (
-                <div id="active-floating-toolbar" className="absolute bg-white rounded-2xl shadow-[0_4px_24px_rgba(0,0,0,0.08)] border border-gray-100 p-4 z-50 animate-in fade-in zoom-in-95 duration-200 w-[440px]" style={{ left: canvasCenterX, top: toolbarTop, transform: `translateX(-50%) scale(${counterScale})`, transformOrigin: 'top center', pointerEvents: 'auto' }} onMouseDown={(e) => e.stopPropagation()}>
+                <div id="active-floating-toolbar" className="absolute bg-white rounded-2xl shadow-[0_4px_24px_rgba(0,0,0,0.08)] border border-gray-100 p-4 z-50 animate-in fade-in zoom-in-95 duration-200 origin-top" style={{ left: canvasCenterX, top: toolbarTop, width: `${toolbarDesignWidth}px`, transform: `translateX(-50%) scale(${inverseScale})`, pointerEvents: 'auto' }} onMouseDown={(e) => e.stopPropagation()}>
                     <textarea
                         placeholder="今天我们要创作什么..."
                         className="w-full text-sm font-medium text-gray-700 placeholder:text-gray-300 bg-transparent border-none outline-none resize-none h-20 mb-4 p-1 leading-relaxed"
@@ -2869,13 +2897,22 @@ const Workspace: React.FC = () => {
                                     {el.genAspectRatio || '1:1'} <ChevronDown size={10} className="opacity-50" />
                                 </button>
                                 {showRatioPicker && (
-                                    <div className="absolute bottom-full mb-2 right-0 w-44 bg-white rounded-xl shadow-xl border border-gray-100 p-1 z-[60] max-h-72 overflow-y-auto">
-                                        {ASPECT_RATIOS.map(r => (
-                                            <button key={r.value} onClick={() => { updateSelectedElement({ genAspectRatio: r.value }); setShowRatioPicker(false); }} className={`w-full text-left px-3 py-2 hover:bg-gray-50 rounded-lg text-xs transition flex items-center justify-between ${el.genAspectRatio === r.value ? 'text-blue-600 font-bold bg-blue-50/30' : 'text-gray-600'}`}>
-                                                <span>{r.label}</span>
-                                                <span className="text-[10px] text-gray-400 font-mono">{r.size}</span>
-                                            </button>
-                                        ))}
+                                    <div className="absolute bottom-full mb-2 right-0 w-48 bg-white rounded-xl shadow-[0_12px_40px_rgba(0,0,0,0.12)] border border-gray-100/80 p-1.5 z-[60] max-h-72 overflow-y-auto custom-scrollbar">
+                                        <div className="px-2 py-1.5 text-[10px] uppercase font-bold text-gray-400 tracking-wider mb-1">格式</div>
+                                        {ASPECT_RATIOS.map(r => {
+                                            const isActive = el.genAspectRatio === r.value;
+                                            return (
+                                                <button key={r.value} onClick={() => { updateSelectedElement({ genAspectRatio: r.value }); setShowRatioPicker(false); }} className={`w-full text-left px-2 py-1.5 hover:bg-gray-50 rounded-lg text-xs transition flex items-center justify-between group ${isActive ? 'text-blue-600 bg-blue-50/50 font-bold' : 'text-gray-700 font-medium'}`}>
+                                                    <div className="flex items-center gap-2">
+                                                        <div className={`text-gray-400 ${isActive ? 'text-blue-600' : 'group-hover:text-gray-600'}`}>
+                                                            {renderRatioIcon(r.value, isActive)}
+                                                        </div>
+                                                        <span>{r.label}</span>
+                                                    </div>
+                                                    <span className={`text-[10px] font-mono ${isActive ? 'text-blue-400/80' : 'text-gray-400/80'}`}>{r.size}</span>
+                                                </button>
+                                            );
+                                        })}
                                     </div>
                                 )}
                             </div>
@@ -2900,7 +2937,8 @@ const Workspace: React.FC = () => {
 
         // Calculate scaling logic (cap the scaling to avoid huge toolbars when zoomed in, keep them reasonable sized)
         // Adjust baseline scale depending on viewport zoom
-        const adaptiveScale = Math.max(0.6, Math.min(1.2, zoom / 100));
+        const adaptiveScale = Math.max(0.4, Math.min(2.0, zoom / 100));
+        const flexibleScale = 1 + ((1 / adaptiveScale) - 1) * 0.6;
         const rightToolbarLeft = elX + el.width + (24 / adaptiveScale);
         const topToolbarTop = elY;
         const bottomButtonTop = elY + el.height + (16 / adaptiveScale);
@@ -3009,7 +3047,7 @@ const Workspace: React.FC = () => {
 
         return (
             <>
-                <div id="active-floating-toolbar" className={`absolute z-50 ${isDraggingElement ? '' : 'animate-in fade-in zoom-in-95 duration-200'} pointer-events-auto origin-top-left`} style={{ left: rightToolbarLeft, top: topToolbarTop, transform: `scale(${1 / adaptiveScale})` }} onMouseDown={(e) => e.stopPropagation()}>
+                <div id="active-floating-toolbar" className={`absolute z-50 ${isDraggingElement ? '' : 'animate-in fade-in zoom-in-95 duration-200'} pointer-events-auto origin-top-left`} style={{ left: rightToolbarLeft, top: topToolbarTop, transform: `scale(${flexibleScale})` }} onMouseDown={(e) => e.stopPropagation()}>
                     <div
                         className={`flex flex-col bg-white rounded-[16px] p-2 shadow-[0_4px_24px_rgba(0,0,0,0.06),0_1px_3px_rgba(0,0,0,0.04)] border border-gray-100/80 items-stretch gap-0.5 transition-all duration-300 ease-out overflow-hidden ${toolbarExpanded ? 'w-[150px]' : 'w-[48px]'}`}
                         onMouseEnter={() => { toolbarExpandTimer.current = setTimeout(() => setToolbarExpanded(true), 800); }}
@@ -3130,24 +3168,24 @@ const Workspace: React.FC = () => {
     };
 
     const renderGenVideoToolbar = () => {
-        if (!selectedElementId || selectedElementIds.length > 1) return null;
+        if (!selectedElementId || selectedElementIds.length > 1 || isDraggingElement) return null;
         const el = elements.find(e => e.id === selectedElementId);
         if (!el || (el.type !== 'gen-video' && el.type !== 'video')) return null;
 
         // Canvas-space coordinates (toolbar lives inside the CSS transform layer)
-        // During drag, use ref position to stay in sync with direct DOM updates
-        const dragPos = isDraggingElement ? dragOffsetsRef.current[el.id] : null;
+        const dragPos = false as any;
         const elX = dragPos ? dragPos.x : el.x;
         const elY = dragPos ? dragPos.y : el.y;
         const canvasCenterX = elX + el.width / 2;
         // Calculate adaptive scaling logic for video toolbar
-        const adaptiveScale = Math.max(0.6, Math.min(1.2, zoom / 100));
+        const adaptiveScale = Math.max(0.4, Math.min(2.0, zoom / 100));
+        const flexibleScale = 1 + ((1 / adaptiveScale) - 1) * 0.6;
 
         if (el.url) {
             // Generated state
             const topToolbarTop = elY - (60 / adaptiveScale);
             return (
-                <div id="active-floating-toolbar" className={`absolute bg-white rounded-xl shadow-[0_8px_30px_rgb(0,0,0,0.12)] border border-gray-100/50 px-2 py-1.5 flex items-center gap-1 z-50 ${isDraggingElement ? '' : 'animate-in fade-in zoom-in-95 duration-200'} whitespace-nowrap backdrop-blur-sm`} style={{ left: canvasCenterX, top: topToolbarTop, transform: `translateX(-50%) scale(${1 / adaptiveScale})`, transformOrigin: 'bottom center', pointerEvents: 'auto' }} onMouseDown={(e) => e.stopPropagation()}>
+                <div id="active-floating-toolbar" className={`absolute bg-white rounded-xl shadow-[0_8px_30px_rgb(0,0,0,0.12)] border border-gray-100/50 px-2 py-1.5 flex items-center gap-1 z-50 ${isDraggingElement ? '' : 'animate-in fade-in zoom-in-95 duration-200'} whitespace-nowrap backdrop-blur-sm`} style={{ left: canvasCenterX, top: topToolbarTop, transform: `translateX(-50%) scale(${flexibleScale})`, transformOrigin: 'bottom center', pointerEvents: 'auto' }} onMouseDown={(e) => e.stopPropagation()}>
                     <button className="px-2.5 py-1.5 text-gray-600 hover:text-black hover:bg-gray-50 rounded-lg flex items-center gap-2 text-[13px] font-medium transition-colors group">
                         <div className="border-[1.5px] border-current rounded-[3px] px-0.5 text-[9px] font-bold opacity-70 group-hover:opacity-100 transition-opacity">HD</div>
                         放大
@@ -3164,47 +3202,50 @@ const Workspace: React.FC = () => {
             );
         } else {
             // Config state
-            const toolbarTop = elY + el.height + (16 / adaptiveScale);
+            const toolbarTop = elY + el.height + 16;
+            const toolbarDesignWidth = 420;
+            const inverseScale = 100 / zoom;
+
             return (
-                <div id="active-floating-toolbar" className="absolute bg-white rounded-2xl shadow-[0_4px_20px_rgb(0,0,0,0.08)] border border-gray-100 z-50 animate-in fade-in zoom-in-95 duration-200 min-w-[420px]" style={{ left: canvasCenterX, top: toolbarTop, transform: `translateX(-50%) scale(${1 / adaptiveScale})`, transformOrigin: 'top center', pointerEvents: 'auto' }} onMouseDown={(e) => e.stopPropagation()}>
+                <div id="active-floating-toolbar" className="absolute bg-white rounded-[24px] shadow-[0_12px_40px_rgba(0,0,0,0.12)] border border-gray-100/80 z-[100] animate-in fade-in zoom-in-95 duration-200 overflow-visible origin-top" style={{ left: canvasCenterX, top: toolbarTop, width: `${toolbarDesignWidth}px`, transform: `translateX(-50%) scale(${inverseScale})`, pointerEvents: 'auto' }} onMouseDown={(e) => e.stopPropagation()}>
                     {/* Prompt textarea */}
-                    <div className="p-3 pb-0">
-                        <textarea placeholder="今天我们要创作什么" className="w-full text-sm text-gray-700 placeholder:text-gray-400 bg-transparent border-none outline-none resize-none h-16 p-1" value={el.genPrompt || ''} onChange={(e) => updateSelectedElement({ genPrompt: e.target.value })} onKeyDown={(e) => e.stopPropagation()} />
+                    <div className="px-4 pt-4 pb-0">
+                        <textarea placeholder="今天我们要创作什么" className="w-full text-sm text-gray-700 placeholder:text-gray-300 bg-transparent border-none outline-none resize-none h-16 p-1 mb-0" value={el.genPrompt || ''} onChange={(e) => updateSelectedElement({ genPrompt: e.target.value })} onKeyDown={(e) => e.stopPropagation()} />
                     </div>
 
                     {/* Collapsible Frame Upload Panel */}
-                    {showFramePanel && videoToolbarTab === 'frames' && (
-                        <div className="px-3 pb-2 animate-in slide-in-from-top-2 duration-200">
-                            <div className="flex items-center gap-3 py-2">
+                    {(showFramePanel || isHoveringVideoFrames[el.id]) && videoToolbarTab === 'frames' && (
+                        <div
+                            className="px-5 pb-2 animate-in slide-in-from-bottom-2 fade-in duration-200"
+                            onMouseEnter={() => setIsHoveringVideoFrames(prev => ({ ...prev, [el.id]: true }))}
+                            onMouseLeave={() => setIsHoveringVideoFrames(prev => ({ ...prev, [el.id]: false }))}
+                        >
+                            <div className="flex items-center gap-0 w-max pl-1">
                                 {/* 首帧 Card */}
-                                <div className="relative group/startframe">
+                                <div className="relative group/startframe w-11 h-11 transform -rotate-[4deg] origin-bottom-left transition-transform hover:-translate-y-1 hover:rotate-0 z-10 cursor-pointer shadow-[0_2px_8px_rgba(0,0,0,0.04)]" onClick={() => document.getElementById(`start-frame-${el.id}`)?.click()}>
                                     {el.genStartFrame ? (
-                                        <div className="w-14 h-14 rounded-xl overflow-hidden border border-gray-200 relative cursor-pointer" onClick={() => document.getElementById(`start-frame-${el.id}`)?.click()}>
+                                        <div className="w-full h-full rounded-[10px] overflow-hidden border border-gray-200 bg-white relative">
                                             <img src={el.genStartFrame} className="w-full h-full object-cover" />
-                                            <span className="absolute bottom-0 left-0 right-0 bg-black/50 text-white text-[9px] text-center py-0.5 font-medium">首帧</span>
-                                            <div className="absolute -top-1.5 -right-1.5 bg-gray-600 text-white rounded-full p-0.5 cursor-pointer hover:bg-red-500 opacity-0 group-hover/startframe:opacity-100 transition z-10" onClick={(ev) => { ev.stopPropagation(); updateSelectedElement({ genStartFrame: undefined }); }}><X size={8} /></div>
+                                            <div className="absolute -top-1.5 -right-1.5 bg-gray-600/90 text-white rounded-full p-0.5 cursor-pointer hover:bg-red-500 opacity-0 group-hover/startframe:opacity-100 transition-opacity z-10" onClick={(ev) => { ev.stopPropagation(); updateSelectedElement({ genStartFrame: undefined }); }}><X size={10} /></div>
                                         </div>
                                     ) : (
-                                        <div onClick={() => document.getElementById(`start-frame-${el.id}`)?.click()} className="w-14 h-14 border-2 border-dashed border-gray-300 rounded-xl flex flex-col items-center justify-center cursor-pointer hover:border-blue-400 hover:bg-blue-50/50 transition group/upload">
-                                            <Plus size={16} className="text-gray-400 group-hover/upload:text-blue-500 transition" />
-                                            <span className="text-[10px] text-gray-400 group-hover/upload:text-blue-500 mt-0.5">首帧</span>
+                                        <div className="w-full h-full border border-gray-200 bg-white rounded-[10px] flex items-center justify-center cursor-pointer hover:border-blue-400 hover:bg-blue-50/50 transition-colors">
+                                            <Plus size={14} className="text-gray-400" />
                                         </div>
                                     )}
                                     <input type="file" id={`start-frame-${el.id}`} className="hidden" accept="image/*" onChange={(e) => handleVideoRefUpload(e, 'start')} />
                                 </div>
 
                                 {/* 尾帧 Card */}
-                                <div className="relative group/endframe">
+                                <div className="relative group/endframe w-11 h-11 transform rotate-[4deg] origin-bottom-right transition-transform hover:-translate-y-1 hover:rotate-0 z-0 -ml-1.5 cursor-pointer shadow-[0_2px_8px_rgba(0,0,0,0.04)]" onClick={() => document.getElementById(`end-frame-${el.id}`)?.click()}>
                                     {el.genEndFrame ? (
-                                        <div className="w-14 h-14 rounded-xl overflow-hidden border border-gray-200 relative cursor-pointer" onClick={() => document.getElementById(`end-frame-${el.id}`)?.click()}>
+                                        <div className="w-full h-full rounded-[10px] overflow-hidden border border-gray-200 bg-white relative">
                                             <img src={el.genEndFrame} className="w-full h-full object-cover" />
-                                            <span className="absolute bottom-0 left-0 right-0 bg-black/50 text-white text-[9px] text-center py-0.5 font-medium">尾帧</span>
-                                            <div className="absolute -top-1.5 -right-1.5 bg-gray-600 text-white rounded-full p-0.5 cursor-pointer hover:bg-red-500 opacity-0 group-hover/endframe:opacity-100 transition z-10" onClick={(ev) => { ev.stopPropagation(); updateSelectedElement({ genEndFrame: undefined }); }}><X size={8} /></div>
+                                            <div className="absolute -top-1.5 -right-1.5 bg-gray-600/90 text-white rounded-full p-0.5 cursor-pointer hover:bg-red-500 opacity-0 group-hover/endframe:opacity-100 transition-opacity z-10" onClick={(ev) => { ev.stopPropagation(); updateSelectedElement({ genEndFrame: undefined }); }}><X size={10} /></div>
                                         </div>
                                     ) : (
-                                        <div onClick={() => document.getElementById(`end-frame-${el.id}`)?.click()} className="w-14 h-14 border-2 border-dashed border-gray-300 rounded-xl flex flex-col items-center justify-center cursor-pointer hover:border-blue-400 hover:bg-blue-50/50 transition group/upload">
-                                            <Plus size={16} className="text-gray-400 group-hover/upload:text-blue-500 transition" />
-                                            <span className="text-[10px] text-gray-400 group-hover/upload:text-blue-500 mt-0.5">尾帧</span>
+                                        <div className="w-full h-full border border-gray-200 bg-white rounded-[10px] flex items-center justify-center cursor-pointer hover:border-blue-400 hover:bg-blue-50/50 transition-colors">
+                                            <Plus size={14} className="text-gray-400" />
                                         </div>
                                     )}
                                     <input type="file" id={`end-frame-${el.id}`} className="hidden" accept="image/*" onChange={(e) => handleVideoRefUpload(e, 'end')} />
@@ -3244,70 +3285,75 @@ const Workspace: React.FC = () => {
                     )}
 
                     {/* Bottom Controls Bar */}
-                    <div className="flex items-center justify-between px-3 py-2 border-t border-gray-100 bg-white rounded-b-2xl">
-                        {/* Left: Tabs */}
-                        <div className="flex items-center gap-1 bg-white rounded-full p-0.5 shadow-sm border border-gray-100">
+                    <div className="flex items-center justify-between px-4 pb-4 pt-1 bg-white relative rounded-b-[24px]">
+                        {/* Left: Tabs (Pill style) */}
+                        <div
+                            className="flex items-center gap-0 bg-[#F5F5F7] rounded-full p-[3px] relative z-20"
+                            onMouseEnter={() => setIsHoveringVideoFrames(prev => ({ ...prev, [el.id]: true }))}
+                            onMouseLeave={() => setIsHoveringVideoFrames(prev => ({ ...prev, [el.id]: false }))}
+                        >
                             <button
-                                onClick={() => { updateSelectedElement({ genFirstLastMode: 'startEnd' }); setVideoToolbarTab('frames'); setShowFramePanel(videoToolbarTab === 'frames' ? !showFramePanel : true); }}
-                                className={`px-3 py-1 text-xs font-medium rounded-full transition-all ${el.genFirstLastMode !== 'multiRef' ? 'bg-blue-100 text-blue-700' : 'text-gray-500 hover:text-gray-700 hover:bg-gray-50'}`}
+                                onClick={() => { updateSelectedElement({ genFirstLastMode: 'startEnd' }); setVideoToolbarTab('frames'); }}
+                                className={`px-4 py-1 text-[11px] font-bold tracking-widest rounded-full transition-all duration-300 z-10 border ${videoToolbarTab === 'frames' ? 'bg-white text-gray-800 shadow-sm border-gray-100' : 'text-gray-400 hover:text-gray-600 border-transparent bg-transparent'}`}
                                 tabIndex={-1}
                             >
                                 首尾帧
                             </button>
                             {el.genModel === 'Veo 3.1' && (
                                 <button
-                                    onClick={() => { updateSelectedElement({ genFirstLastMode: 'multiRef' }); setVideoToolbarTab('multi'); setShowFramePanel(videoToolbarTab === 'multi' ? !showFramePanel : true); }}
-                                    className={`px-3 py-1 text-xs font-medium rounded-full transition-all ${el.genFirstLastMode === 'multiRef' ? 'bg-blue-100 text-blue-700' : 'text-gray-500 hover:text-gray-700 hover:bg-gray-50'}`}
+                                    onClick={() => { updateSelectedElement({ genFirstLastMode: 'multiRef' }); setVideoToolbarTab('multi'); }}
+                                    className={`px-4 py-1 text-[11px] font-bold tracking-widest rounded-full transition-all duration-300 border ${videoToolbarTab === 'multi' ? 'bg-white text-gray-800 shadow-sm border-gray-100' : 'text-gray-400 hover:text-gray-600 border-transparent bg-transparent'}`}
                                     tabIndex={-1}
                                 >
                                     多图参考
                                 </button>
                             )}
-                            {el.genModel !== 'Veo 3.1' && el.genModel !== 'Veo 3.1 Fast' && (
-                                <button
-                                    onClick={() => { setVideoToolbarTab('motion'); setShowFramePanel(false); }}
-                                    className={`px-3 py-1 text-xs font-medium rounded-full transition-all ${videoToolbarTab === 'motion' ? 'bg-blue-100 text-blue-700' : 'text-gray-500 hover:text-gray-700 hover:bg-gray-50'}`}
-                                    tabIndex={-1}
-                                >
-                                    动作控制
-                                </button>
-                            )}
                         </div>
 
                         {/* Right: Model, Ratio, Generate */}
-                        <div className="flex items-center gap-2">
+                        <div className="flex items-center gap-1.5 relative z-20">
                             {/* Model Dropdown */}
                             <div className="relative">
                                 <button
                                     onClick={() => setShowVideoModelPicker(!showVideoModelPicker)}
-                                    className="h-7 px-3 flex items-center gap-1.5 text-xs font-medium text-gray-700 hover:bg-black/5 rounded-full transition whitespace-nowrap"
+                                    className="h-8 px-2 flex items-center gap-1.5 text-[11px] font-bold text-gray-700 hover:bg-gray-100 rounded-full transition whitespace-nowrap"
                                     tabIndex={-1}
                                 >
-                                    <Box size={14} /><span>{el.genModel || 'Veo 3.1'}</span>
-                                    <ChevronDown size={14} className={`text-gray-400 transition-transform ${showVideoModelPicker ? 'rotate-180' : ''}`} />
+                                    <Box size={13} className="text-gray-600" />
+                                    <span>{el.genModel || 'Veo 3.1 Fast'}</span>
+                                    <ChevronDown size={12} className={`text-gray-400 transition-transform ${showVideoModelPicker ? 'rotate-180' : ''}`} />
                                 </button>
                                 {showVideoModelPicker && (
-                                    <div className="absolute bottom-full right-0 mb-2 w-48 bg-white rounded-xl shadow-xl border border-gray-100 p-1.5 z-50 animate-in fade-in zoom-in-95 duration-200">
-                                        <div className="px-2 py-1.5 text-[10px] text-gray-400 font-medium uppercase tracking-wider mb-0.5">选择视频模型</div>
+                                    <div className="absolute bottom-full right-0 mb-3 w-48 bg-white rounded-2xl shadow-[0_12px_40px_rgba(0,0,0,0.12)] border border-gray-100/80 p-1.5 z-[9999] animate-in fade-in slide-in-from-bottom-2 duration-200 custom-scrollbar">
+                                        <div className="px-2 py-1.5 text-[10px] text-gray-400 font-bold uppercase tracking-wider mb-0.5">选择视频模型</div>
                                         <button
                                             onClick={() => { updateSelectedElement({ genModel: 'Kling 2.6', genFirstLastMode: 'startEnd' }); setShowVideoModelPicker(false); setVideoToolbarTab('motion'); }}
-                                            className={`w-full flex items-center justify-between px-3 py-2 rounded-lg text-sm transition-colors ${el.genModel === 'Kling 2.6' ? 'bg-blue-50 text-blue-700 font-medium' : 'text-gray-700 hover:bg-gray-50'}`}
+                                            className={`w-full flex items-center justify-between px-3 py-2 rounded-xl text-sm transition-colors ${el.genModel === 'Kling 2.6' ? 'bg-blue-50 text-blue-700 font-bold' : 'text-gray-700 hover:bg-gray-50 font-medium'}`}
                                         >
-                                            <span>Kling 2.6</span>
+                                            <div className="flex items-center gap-2">
+                                                <div className={`w-5 h-5 flex items-center justify-center rounded-md ${el.genModel === 'Kling 2.6' ? 'bg-blue-100 text-blue-600' : 'bg-gray-100 text-gray-500'}`}><Box size={12} /></div>
+                                                <span>Kling 2.6</span>
+                                            </div>
                                             {el.genModel === 'Kling 2.6' && <Check size={14} />}
                                         </button>
                                         <button
                                             onClick={() => { updateSelectedElement({ genModel: 'Veo 3.1', genFirstLastMode: 'startEnd' }); setShowVideoModelPicker(false); setVideoToolbarTab('frames'); }}
-                                            className={`w-full flex items-center justify-between px-3 py-2 rounded-lg text-sm transition-colors ${el.genModel === 'Veo 3.1' ? 'bg-blue-50 text-blue-700 font-medium' : 'text-gray-700 hover:bg-gray-50'}`}
+                                            className={`w-full flex items-center justify-between px-3 py-2 rounded-xl text-sm transition-colors ${el.genModel === 'Veo 3.1' ? 'bg-blue-50 text-blue-700 font-bold' : 'text-gray-700 hover:bg-gray-50 font-medium'}`}
                                         >
-                                            <span>Veo 3.1</span>
+                                            <div className="flex items-center gap-2">
+                                                <div className={`w-5 h-5 flex items-center justify-center rounded-md ${el.genModel === 'Veo 3.1' ? 'bg-blue-100 text-blue-600' : 'bg-gray-100 text-gray-500'}`}><Box size={12} /></div>
+                                                <span>Veo 3.1</span>
+                                            </div>
                                             {el.genModel === 'Veo 3.1' && <Check size={14} />}
                                         </button>
                                         <button
                                             onClick={() => { updateSelectedElement({ genModel: 'Veo 3.1 Fast', genFirstLastMode: 'startEnd' }); setShowVideoModelPicker(false); setVideoToolbarTab('frames'); }}
-                                            className={`w-full flex items-center justify-between px-3 py-2 rounded-lg text-sm transition-colors ${el.genModel === 'Veo 3.1 Fast' ? 'bg-blue-50 text-blue-700 font-medium' : 'text-gray-700 hover:bg-gray-50'}`}
+                                            className={`w-full flex items-center justify-between px-3 py-2 rounded-xl text-sm transition-colors ${el.genModel === 'Veo 3.1 Fast' ? 'bg-blue-50 text-blue-700 font-bold' : 'text-gray-700 hover:bg-gray-50 font-medium'}`}
                                         >
-                                            <span>Veo 3.1 Fast</span>
+                                            <div className="flex items-center gap-2">
+                                                <div className={`w-5 h-5 flex items-center justify-center rounded-md ${el.genModel === 'Veo 3.1 Fast' ? 'bg-blue-100 text-blue-600' : 'bg-gray-100 text-gray-500'}`}><Box size={12} /></div>
+                                                <span>Veo 3.1 Fast</span>
+                                            </div>
                                             {el.genModel === 'Veo 3.1 Fast' && <Check size={14} />}
                                         </button>
                                     </div>
@@ -3318,44 +3364,53 @@ const Workspace: React.FC = () => {
                             <div className="relative flex items-center">
                                 <button
                                     onClick={(e) => { e.stopPropagation(); setShowRatioPicker(!showRatioPicker); setShowVideoModelPicker(false); }}
-                                    className={`h-7 px-2.5 rounded-full border text-xs transition flex items-center gap-1 font-medium ${showRatioPicker ? 'border-blue-200 bg-blue-50 text-blue-700' : 'border-gray-200 text-gray-600 hover:bg-gray-50'}`}
+                                    className={`h-8 px-2 rounded-full border text-[11px] transition flex items-center gap-1.5 font-bold ${showRatioPicker ? 'border-transparent bg-gray-100 text-black' : 'border-transparent text-gray-600 hover:bg-gray-100'}`}
                                     tabIndex={-1}
                                 >
-                                    {el.genAspectRatio || '16:9'} · {el.genDuration || '8s'} · {el.genQuality || '1080p'}
-                                    <ChevronDown size={14} className={`transition-transform duration-200 ${showRatioPicker ? 'rotate-180 text-blue-600' : 'text-gray-400'}`} />
+                                    {el.genAspectRatio || '16:9'} • {el.genDuration || '8s'} • {el.genQuality || '1080p'}
+                                    <ChevronDown size={12} className={`text-gray-400 transition-transform ${showRatioPicker ? 'rotate-180' : ''}`} />
                                 </button>
                                 {showRatioPicker && (
-                                    <div className="absolute bottom-full right-0 mb-2 w-64 bg-white rounded-2xl shadow-2xl border border-gray-100 p-3 z-50 animate-in fade-in zoom-in-95 duration-200">
+                                    <div className="absolute bottom-full right-0 mb-3 w-[260px] bg-white rounded-[20px] shadow-[0_12px_40px_rgba(0,0,0,0.12)] border border-gray-100/80 p-4 z-[9999] animate-in fade-in slide-in-from-bottom-2 duration-200">
                                         {/* Size section */}
-                                        <div className="mb-4">
-                                            <div className="text-[11px] text-gray-400 uppercase tracking-widest font-semibold mb-2">比例</div>
+                                        <div className="mb-5">
+                                            <div className="text-[11px] text-gray-400 uppercase tracking-widest font-bold mb-3 flex items-center justify-between">
+                                                <span>比例</span>
+                                            </div>
                                             <div className="flex gap-2">
                                                 <button
                                                     onClick={() => updateSelectedElement({ genAspectRatio: '16:9' })}
-                                                    className={`flex-1 flex flex-col items-center justify-center py-3 rounded-xl border transition-all ${(el.genAspectRatio || '16:9') === '16:9' ? 'border-blue-500 bg-blue-50' : 'border-gray-200 hover:bg-gray-50 hover:border-gray-300'} gap-1.5`}
+                                                    className={`flex-1 flex flex-col items-center justify-center py-3 rounded-[12px] border transition-all ${(el.genAspectRatio || '16:9') === '16:9' ? 'border-blue-500 bg-blue-50/50' : 'border-gray-100 hover:border-gray-300 bg-white'} gap-2`}
                                                 >
                                                     <div className={`w-8 h-4 border-[1.5px] rounded-[3px] ${(el.genAspectRatio || '16:9') === '16:9' ? 'border-blue-500' : 'border-gray-400'}`}></div>
-                                                    <span className={`text-[12px] font-semibold ${(el.genAspectRatio || '16:9') === '16:9' ? 'text-blue-600' : 'text-gray-600'}`}>16:9</span>
+                                                    <span className={`text-xs font-bold ${(el.genAspectRatio || '16:9') === '16:9' ? 'text-blue-600' : 'text-gray-600'}`}>16:9</span>
                                                 </button>
                                                 <button
                                                     onClick={() => updateSelectedElement({ genAspectRatio: '9:16' })}
-                                                    className={`flex-1 flex flex-col items-center justify-center py-3 rounded-xl border transition-all ${(el.genAspectRatio || '16:9') === '9:16' ? 'border-blue-500 bg-blue-50' : 'border-gray-200 hover:bg-gray-50 hover:border-gray-300'} gap-1.5`}
+                                                    className={`flex-1 flex flex-col items-center justify-center py-3 rounded-[12px] border transition-all ${(el.genAspectRatio || '16:9') === '9:16' ? 'border-blue-500 bg-blue-50/50' : 'border-gray-100 hover:border-gray-300 bg-white'} gap-2`}
                                                 >
                                                     <div className={`w-4 h-8 border-[1.5px] rounded-[3px] ${(el.genAspectRatio || '16:9') === '9:16' ? 'border-blue-500' : 'border-gray-400'}`}></div>
-                                                    <span className={`text-[12px] font-semibold ${(el.genAspectRatio || '16:9') === '9:16' ? 'text-blue-600' : 'text-gray-600'}`}>9:16</span>
+                                                    <span className={`text-xs font-bold ${(el.genAspectRatio || '16:9') === '9:16' ? 'text-blue-600' : 'text-gray-600'}`}>9:16</span>
+                                                </button>
+                                                <button
+                                                    onClick={() => updateSelectedElement({ genAspectRatio: '1:1' })}
+                                                    className={`flex-1 flex flex-col items-center justify-center py-3 rounded-[12px] border transition-all ${(el.genAspectRatio || '16:9') === '1:1' ? 'border-blue-500 bg-blue-50/50' : 'border-gray-100 hover:border-gray-300 bg-white'} gap-2`}
+                                                >
+                                                    <div className={`w-5 h-5 border-[1.5px] rounded-[3px] ${(el.genAspectRatio || '16:9') === '1:1' ? 'border-blue-500' : 'border-gray-400'}`}></div>
+                                                    <span className={`text-xs font-bold ${(el.genAspectRatio || '16:9') === '1:1' ? 'text-blue-600' : 'text-gray-600'}`}>1:1</span>
                                                 </button>
                                             </div>
                                         </div>
 
                                         {/* Duration section */}
-                                        <div className="mb-4">
-                                            <div className="text-[11px] text-gray-400 uppercase tracking-widest font-semibold mb-2">时长</div>
-                                            <div className="flex bg-gray-100 rounded-lg p-1">
+                                        <div className="mb-5">
+                                            <div className="text-[11px] text-gray-400 uppercase tracking-widest font-bold mb-3">时长</div>
+                                            <div className="flex bg-[#F5F5F7] rounded-[10px] p-1">
                                                 {['4s', '6s', '8s'].map(dur => (
                                                     <button
                                                         key={dur}
                                                         onClick={() => updateSelectedElement({ genDuration: dur as any })}
-                                                        className={`flex-1 py-1 text-[13px] font-semibold rounded-md transition-all ${(el.genDuration || '8s') === dur ? 'bg-white shadow border border-black/5 text-gray-900' : 'text-gray-500 hover:text-gray-700'}`}
+                                                        className={`flex-1 py-1 text-xs font-bold rounded-lg transition-all ${(el.genDuration || '8s') === dur ? 'bg-white shadow-sm text-black' : 'text-gray-500 hover:text-gray-800'}`}
                                                     >
                                                         {dur}
                                                     </button>
@@ -3365,13 +3420,13 @@ const Workspace: React.FC = () => {
 
                                         {/* Quality section */}
                                         <div>
-                                            <div className="text-[11px] text-gray-400 uppercase tracking-widest font-semibold mb-2">画质</div>
-                                            <div className="flex bg-gray-100 rounded-lg p-1">
+                                            <div className="text-[11px] text-gray-400 uppercase tracking-widest font-bold mb-3">画质</div>
+                                            <div className="flex bg-[#F5F5F7] rounded-[10px] p-1">
                                                 {['720p', '1080p', '4k'].map(quality => (
                                                     <button
                                                         key={quality}
                                                         onClick={() => updateSelectedElement({ genQuality: quality as any })}
-                                                        className={`flex-1 py-1 text-[13px] font-semibold rounded-md transition-all ${(el.genQuality || '1080p') === quality ? 'bg-white shadow border border-black/5 text-gray-900' : 'text-gray-500 hover:text-gray-700'}`}
+                                                        className={`flex-1 py-1 text-xs font-bold rounded-lg transition-all ${(el.genQuality || '1080p') === quality ? 'bg-white shadow-sm text-black' : 'text-gray-500 hover:text-gray-800'}`}
                                                     >
                                                         {quality}
                                                     </button>
@@ -3385,10 +3440,12 @@ const Workspace: React.FC = () => {
                             <button
                                 onClick={() => handleGenVideo(el.id)}
                                 disabled={!el.genPrompt || el.isGenerating}
-                                className={`w-8 h-8 rounded-lg flex items-center justify-center transition-all ${!el.genPrompt || el.isGenerating ? 'bg-gray-200 text-gray-400' : 'bg-[#E5E5EA] hover:bg-[#D1D1D6] text-black shadow-sm'}`}
+                                className={`h-7 w-10 ml-1 rounded-[10px] flex items-center justify-center transition-all ${!el.genPrompt || el.isGenerating ? 'bg-gray-100 text-gray-400' : 'bg-[#E5E7EB] hover:bg-[#D1D5DB] text-gray-500 shadow-sm'}`}
                                 tabIndex={-1}
                             >
-                                {el.isGenerating ? <Loader2 size={16} className="animate-spin text-black" /> : <Sparkles size={16} fill="currentColor" />}
+                                {el.isGenerating ? <Loader2 size={14} className="animate-spin text-gray-500" /> : (
+                                    <Sparkles size={14} fill="currentColor" className="opacity-80" strokeWidth={1} />
+                                )}
                             </button>
                         </div>
                     </div>
@@ -4665,20 +4722,88 @@ const Workspace: React.FC = () => {
 
                                     {/* Right side controls */}
                                     <div className="flex items-center gap-0.5">
-                                        {/* Video: Setup Panel */}
+                                        {/* Video: Inline Controls — 图4 style */}
                                         {creationMode === 'video' && (
-                                            <>
-                                                <div className="flex items-center gap-1 bg-gray-100 rounded-full px-1 py-0.5">
-                                                    <button className="p-1 text-gray-500 hover:text-gray-700 transition"><Box size={14} /></button>
+                                            <div className="flex items-center gap-1">
+                                                {/* 首尾帧 toggle */}
+                                                <button
+                                                    onClick={() => setVideoGenMode(videoGenMode === 'startEnd' ? 'multiRef' : 'startEnd')}
+                                                    className={`h-7 px-2.5 rounded-full text-xs font-medium transition whitespace-nowrap ${videoGenMode === 'startEnd' ? 'bg-blue-50 text-blue-600' : 'text-gray-500 hover:text-gray-700 hover:bg-gray-100'}`}
+                                                >
+                                                    首尾帧
+                                                </button>
+                                                {/* 动作控制 */}
+                                                <button className="h-7 px-2.5 rounded-full text-xs font-medium text-gray-500 hover:text-gray-700 hover:bg-gray-100 transition whitespace-nowrap">
+                                                    动作控制
+                                                </button>
+                                                {/* Model Selector */}
+                                                <div className="relative" onClick={e => e.stopPropagation()}>
+                                                    <button
+                                                        onClick={() => { setShowVideoModelDropdown(!showVideoModelDropdown); setShowVideoSettingsDropdown(false); }}
+                                                        className="h-7 px-2.5 flex items-center gap-1 text-xs font-medium text-gray-700 hover:bg-gray-100 rounded-full transition whitespace-nowrap"
+                                                    >
+                                                        <span>{videoGenModel}</span>
+                                                        <ChevronDown size={12} className={`text-gray-400 transition-transform ${showVideoModelDropdown ? 'rotate-180' : ''}`} />
+                                                    </button>
+                                                    {showVideoModelDropdown && (
+                                                        <div className="absolute bottom-full right-0 mb-2 w-44 bg-white rounded-xl shadow-xl border border-gray-100 p-1.5 z-50 animate-in fade-n-95 duration-200">
+                                                            <div className="px-2 py-1.5 text-[10px] text-gray-400 font-medium uppercase tracking-wider mb-0.5">视频模型</div>
+                                                            {(['Kling 2.6', 'Veo 3.1', 'Veo 3.1 Fast'] as const).map(model => (
+                                                                <button
+                                                                    key={model}
+                                                                    onClick={() => { setVideoGenModel(model); setShowVideoModelDropdown(false); }}
+                                                                    className={`w-full flex items-center justify-between px-3 py-2 rounded-lg text-sm transition-colors ${videoGenModel === model ? 'bg-blue-50 text-blue-700 font-medium' : 'text-gray-700 hover:bg-gray-50'}`}
+                                                                >
+                                                                    <span>{model}</span>
+                                                                    {videoGenModel === model && <Check size={14} />}
+                                                                </button>
+                                                            ))}
+                                                        </div>
+                                                    )}
                                                 </div>
+                                                {/* Ratio + Duration Selector */}
+                                                <div className="relative" onClick={e => e.stopPropagation()}>
+                                                    <button
+                                                        onClick={() => { setShowVideoSettingsDropdown(!showVideoSettingsDropdown); setShowVideoModelDropdown(false); }}
+                                                        className="h-7 px-2.5 flex items-center gap-1 text-xs font-medium text-gray-600 hover:bg-gray-100 rounded-full transition whitespace-nowrap"
+                                                    >
+                                                        <span>{videoGenRatio} · {videoGenDuration}</span>
+                                                        <ChevronDown size={12} className={`text-gray-400 transition-transform ${showVideoSettingsDropdown ? 'rotate-180' : ''}`} />
+                                                    </button>
+                                                    {showVideoSettingsDropdown && (
+                                                        <div className="absolute bottom-full right-0 mb-2 w-56 bg-white rounded-2xl shadow-2xl border border-gray-100 p-3 z-50 animate-in fade-in zoom-in-95 duration-200">
+                                                            <div className="mb-3">
+                                                                <div className="text-[11px] text-gray-400 uppercase tracking-widest font-semibold mb-2">比例</div>
+                                                                <div className="flex gap-2">
+                                                                    {VIDEO_RATIOS.map(r => (
+                                                                        <button key={r.value} onClick={() => setVideoGenRatio(r.value)} className={`flex-1 py-1.5 text-xs font-medium rounded-lg transition ${videoGenRatio === r.value ? 'bg-blue-50 text-blue-700 border border-blue-200' : 'bg-gray-50 text-gray-600 hover:bg-gray-100'}`}>
+                                                                            {r.label}
+                                                                        </button>
+                                                                    ))}
+                                                                </div>
+                                                            </div>
+                                                            <div>
+                                                                <div className="text-[11px] text-gray-400 uppercase tracking-widest font-semibold mb-2">时长</div>
+                                                                <div className="flex gap-2">
+                                                                    {['5s', '8s', '10s'].map(d => (
+                                                                        <button key={d} onClick={() => setVideoGenDuration(d)} className={`flex-1 py-1.5 text-xs font-medium rounded-lg transition ${videoGenDuration === d ? 'bg-blue-50 text-blue-700 border border-blue-200' : 'bg-gray-50 text-gray-600 hover:bg-gray-100'}`}>
+                                                                            {d}
+                                                                        </button>
+                                                                    ))}
+                                                                </div>
+                                                            </div>
+                                                        </div>
+                                                    )}
+                                                </div>
+                                                {/* Submit */}
                                                 <button
                                                     onClick={() => handleSend()}
                                                     disabled={inputBlocks.every(b => (b.type === 'text' && !b.text) || (b.type === 'file' && !b.file))}
-                                                    className="h-8 px-3 rounded-full flex items-center gap-1 text-xs font-medium shadow-sm transition bg-gradient-to-r from-blue-500 to-blue-600 text-white hover:from-blue-600 hover:to-blue-700 disabled:opacity-50"
+                                                    className="h-7 px-3 rounded-full flex items-center gap-1 text-xs font-medium shadow-sm transition bg-gradient-to-r from-blue-500 to-blue-600 text-white hover:from-blue-600 hover:to-blue-700 disabled:opacity-50"
                                                 >
                                                     <Zap size={12} /> 20
                                                 </button>
-                                            </>
+                                            </div>
                                         )}
 
                                         {/* Agent Mode: Enhanced Controls */}
@@ -4879,6 +5004,8 @@ const Workspace: React.FC = () => {
                                 if (parentGroup?.isCollapsed) return null;
                             }
                             const isSelected = selectedElementId === el.id || selectedElementIds.includes(el.id);
+                            const adaptiveScaleLoop = Math.max(0.4, Math.min(2.0, zoom / 100));
+                            const flexibleScale = 1 + ((1 / adaptiveScaleLoop) - 1) * 0.6;
 
                             // Group element rendering
                             if (el.type === 'group') {
@@ -4924,7 +5051,7 @@ const Workspace: React.FC = () => {
                                         </svg>
                                     )}
                                     {(el.type === 'image' || el.type === 'gen-image') && (
-                                        <div className={`w-full h-full flex flex-col relative transition-all ${el.url && el.type === 'image' ? '' : (el.url ? 'bg-white' : 'bg-[#F0F9FF]')} ${el.type === 'gen-image' && !el.url ? 'border border-blue-100' : ''} ${el.type === 'gen-image' ? 'rounded-lg overflow-hidden' : ''}`}>
+                                        <div className={`w-full h-full flex flex-col relative transition-all ${el.url && el.type === 'image' ? '' : (el.url ? 'bg-white' : 'bg-[#F0F9FF]')} ${el.type === 'gen-image' && !el.url ? 'border border-blue-100' : ''} ${el.type === 'gen-image' ? `rounded-lg ${el.url ? 'overflow-hidden' : ''}` : ''}`}>
                                             {el.url ? (
                                                 <>
                                                     <img src={el.url} className={`w-full h-full ${el.type === 'image' ? 'w-full h-full' : 'object-cover'}`} draggable={false} />
@@ -4964,18 +5091,24 @@ const Workspace: React.FC = () => {
                                                 </>
                                             ) : (
                                                 <>
-                                                    {/* Header bar — counter-scaled at low zoom for readability */}
-                                                    <div
-                                                        className="absolute top-0 left-0 right-0 flex items-center justify-between px-3 py-2 text-xs text-gray-500 border-b border-blue-100/50 whitespace-nowrap bg-white/90 backdrop-blur-sm z-10 pointer-events-none"
-                                                        style={zoom < 60 ? {
-                                                            transform: `scale(${Math.max(100 / zoom, 1)})`,
-                                                            transformOrigin: 'top left',
-                                                            width: `${Math.min(zoom, 100)}%`
-                                                        } : undefined}
-                                                    >
-                                                        <div className="flex items-center gap-2 font-medium"> <ImageIcon size={12} /> <span>图像生成器</span> </div>
-                                                        <div className="font-mono opacity-70"> {Math.round(el.width)} × {Math.round(el.height)} </div>
-                                                    </div>
+                                                    {/* Floating label above node — only when selected */}
+                                                    {isSelected && (
+                                                        <>
+                                                            <div
+                                                                className="absolute top-0 left-0 flex items-center gap-1.5 text-xs font-semibold text-gray-700 whitespace-nowrap pointer-events-none select-none z-50"
+                                                                style={{ transform: `scale(${100 / zoom}) translateY(calc(-100% - 4px))` }}
+                                                            >
+                                                                <ImageIcon size={12} className="opacity-80" />
+                                                                <span>图像生成器</span>
+                                                            </div>
+                                                            <div
+                                                                className="absolute top-0 right-0 font-mono text-[10px] font-medium text-gray-500 whitespace-nowrap pointer-events-none select-none z-50"
+                                                                style={{ transform: `scale(${100 / zoom}) translateY(calc(-100% - 6px))` }}
+                                                            >
+                                                                {Math.round(el.width)} × {Math.round(el.height)}
+                                                            </div>
+                                                        </>
+                                                    )}
                                                     <div className="flex-1 flex items-center justify-center relative group-hover:bg-blue-50/50 transition-colors">
                                                         {el.isGenerating ? (<div className="flex flex-col items-center gap-3"> <Loader2 size={32} className="animate-spin text-blue-500" /> <span className="text-xs text-blue-400 font-medium">Creating magic...</span> </div>) : (<div className="flex flex-col items-center gap-2 text-blue-200"> <ImageIcon size={48} strokeWidth={1.5} /> </div>)}
                                                     </div>
@@ -4984,7 +5117,7 @@ const Workspace: React.FC = () => {
                                         </div>
                                     )}
                                     {(el.type === 'gen-video' || el.type === 'video') && (
-                                        <div className={`w-full h-full flex flex-col relative transition-all ${el.url ? 'bg-black' : 'bg-[#F0FAFF]'} ${isSelected ? 'ring-1 ring-blue-500' : ((el.type === 'gen-video' || el.type === 'video') && !el.url ? 'border border-blue-100' : '')} ${(el.type === 'gen-video' || el.type === 'video') ? 'rounded-lg overflow-hidden' : ''}`}>
+                                        <div className={`w-full h-full flex flex-col relative transition-all ${el.url ? 'bg-black' : 'bg-[#F0FAFF]'} ${isSelected ? 'ring-1 ring-blue-500' : ((el.type === 'gen-video' || el.type === 'video') && !el.url ? 'border border-blue-100' : '')} ${(el.type === 'gen-video' || el.type === 'video') ? `rounded-lg ${el.url ? 'overflow-hidden' : ''}` : ''}`}>
                                             {el.url ? (
                                                 <>
                                                     <div className="w-full h-full relative flex items-center justify-center">
@@ -5027,18 +5160,24 @@ const Workspace: React.FC = () => {
                                                 </>
                                             ) : (
                                                 <>
-                                                    {/* Header bar — counter-scaled at low zoom for readability */}
-                                                    <div
-                                                        className="absolute top-0 left-0 right-0 flex items-center justify-between px-3 py-2 text-xs text-gray-500 border-b border-blue-100/50 whitespace-nowrap bg-white/90 backdrop-blur-sm z-10 pointer-events-none"
-                                                        style={zoom < 60 ? {
-                                                            transform: `scale(${Math.max(100 / zoom, 1)})`,
-                                                            transformOrigin: 'top left',
-                                                            width: `${Math.min(zoom, 100)}%`
-                                                        } : undefined}
-                                                    >
-                                                        <div className="flex items-center gap-2 font-medium"> <Video size={12} /> <span>视频生成器</span> </div>
-                                                        <div className="font-mono opacity-70"> {Math.round(el.width)} × {Math.round(el.height)} </div>
-                                                    </div>
+                                                    {/* Floating label above node — only when selected */}
+                                                    {isSelected && (
+                                                        <>
+                                                            <div
+                                                                className="absolute top-0 left-0 flex items-center gap-1.5 text-xs font-semibold text-gray-700 whitespace-nowrap pointer-events-none select-none z-50"
+                                                                style={{ transform: `scale(${100 / zoom}) translateY(calc(-100% - 4px))` }}
+                                                            >
+                                                                <Video size={12} className="opacity-80" />
+                                                                <span>视频生成器</span>
+                                                            </div>
+                                                            <div
+                                                                className="absolute top-0 right-0 font-mono text-[10px] font-medium text-gray-500 whitespace-nowrap pointer-events-none select-none z-50"
+                                                                style={{ transform: `scale(${100 / zoom}) translateY(calc(-100% - 6px))` }}
+                                                            >
+                                                                {Math.round(el.width)} × {Math.round(el.height)}
+                                                            </div>
+                                                        </>
+                                                    )}
                                                     <div className="flex-1 flex items-center justify-center relative group-hover:bg-blue-50/50 transition-colors">
                                                         {el.isGenerating ? (<div className="flex flex-col items-center gap-3"> <Loader2 size={32} className="animate-spin text-blue-500" /> <span className="text-xs text-blue-400 font-medium">Creating magic...</span> </div>) : (<div className="flex flex-col items-center gap-2 text-blue-200"> <Film size={48} strokeWidth={1.5} /> </div>)}
                                                     </div>

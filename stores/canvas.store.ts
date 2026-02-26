@@ -263,3 +263,11 @@ export const useCanvasStore = create<CanvasState>()(
   })),
   { name: 'CanvasStore' })
 );
+
+// ─── Selectors ───
+export const useCanvasElements = () => useCanvasStore(s => s.elements);
+export const useSelectedElementId = () => useCanvasStore(s => s.selectedElementId);
+export const useZoom = () => useCanvasStore(s => s.zoom);
+export const usePan = () => useCanvasStore(s => s.pan);
+export const useMarkers = () => useCanvasStore(s => s.markers);
+export const useCanvasActions = () => useCanvasStore(s => s.actions);

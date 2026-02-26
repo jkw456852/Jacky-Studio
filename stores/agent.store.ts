@@ -51,8 +51,7 @@ interface AgentState {
   // Actions
   actions: {
     setIsAgentMode: (mode: boolean) => void;
-    setAgentMode: (mode: boolean) => void;
-    
+
     setCurrentTask: (task: AgentTask | null) => void;
     
     addMessage: (message: ChatMessage) => void;
@@ -136,8 +135,7 @@ export const useAgentStore = create<AgentState>()(
     
     actions: {
       setIsAgentMode: (mode) => set({ isAgentMode: mode }),
-      setAgentMode: (mode) => set({ isAgentMode: mode }),
-      
+
       setCurrentTask: (task) => set({ currentTask: task }),
       
       addMessage: (message) => set((state) => {
@@ -211,3 +209,12 @@ export const useAgentStore = create<AgentState>()(
   })),
   { name: 'AgentStore' })
 );
+
+// ─── Selectors（避免组件订阅整个 store 导致不必要的重渲染）───
+export const useAgentMode = () => useAgentStore(s => s.isAgentMode);
+export const useAgentMessages = () => useAgentStore(s => s.messages);
+export const useAgentTyping = () => useAgentStore(s => s.isTyping);
+export const useCurrentTask = () => useAgentStore(s => s.currentTask);
+export const useInputBlocks = () => useAgentStore(s => s.inputBlocks);
+export const useModelMode = () => useAgentStore(s => s.modelMode);
+export const useAgentActions = () => useAgentStore(s => s.actions);
