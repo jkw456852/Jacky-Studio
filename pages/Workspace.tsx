@@ -4671,7 +4671,7 @@ const Workspace: React.FC = () => {
                                                         </>
                                                     )}
                                                     <div className="flex-1 flex items-center justify-center relative group-hover:bg-blue-50/50 transition-colors">
-                                                        {el.isGenerating ? (<div className="flex flex-col items-center gap-4"> <Loader2 size={48} className="animate-spin text-blue-500" /> <span className="text-sm text-blue-400 font-medium">Creating magic...</span> </div>) : (<div className="flex flex-col items-center gap-2 text-blue-200"> <ImageIcon size={48} strokeWidth={1.5} /> </div>)}
+                                                        {el.isGenerating ? (<div className="flex flex-col items-center gap-4" style={{ transform: `scale(${100 / zoom})` }}> <Loader2 size={48} className="animate-spin text-blue-500" /> <span className="text-sm text-blue-400 font-medium whitespace-nowrap">Creating magic...</span> </div>) : (<div className="flex flex-col items-center gap-2 text-blue-200" style={{ transform: `scale(${100 / zoom})` }}> <ImageIcon size={48} strokeWidth={1.5} /> </div>)}
                                                     </div>
                                                 </>
                                             )}
@@ -4740,7 +4740,7 @@ const Workspace: React.FC = () => {
                                                         </>
                                                     )}
                                                     <div className="flex-1 flex items-center justify-center relative group-hover:bg-blue-50/50 transition-colors">
-                                                        {el.isGenerating ? (<div className="flex flex-col items-center gap-4"> <Loader2 size={48} className="animate-spin text-blue-500" /> <span className="text-sm text-blue-400 font-medium">Creating magic...</span> </div>) : (<div className="flex flex-col items-center gap-2 text-blue-200"> <Film size={48} strokeWidth={1.5} /> </div>)}
+                                                        {el.isGenerating ? (<div className="flex flex-col items-center gap-4" style={{ transform: `scale(${100 / zoom})` }}> <Loader2 size={48} className="animate-spin text-blue-500" /> <span className="text-sm text-blue-400 font-medium whitespace-nowrap">Creating magic...</span> </div>) : (<div className="flex flex-col items-center gap-2 text-blue-200" style={{ transform: `scale(${100 / zoom})` }}> <Film size={48} strokeWidth={1.5} /> </div>)}
                                                     </div>
                                                 </>
                                             )}

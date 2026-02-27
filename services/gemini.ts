@@ -98,7 +98,7 @@ const PRO_MODEL = 'gemini-3-pro-preview';
 const FLASH_MODEL = 'gemini-3-flash-preview';
 // Image Gen models
 const IMAGE_PRO_MODEL = 'gemini-3-pro-image-preview';
-const IMAGE_FLASH_MODEL = 'gemini-2.5-flash-preview-image-generation';
+const IMAGE_FLASH_MODEL = 'gemini-3-pro-image-preview';
 const IMAGE_NANOBANANA_2_MODEL = 'gemini-3.1-flash-image-preview';
 const IMAGE_SEEDREAM_MODEL = 'doubao-seedream-5-0-260128';
 // Video Gen models
@@ -351,13 +351,85 @@ export interface ImageGenerationConfig {
     referenceImages?: string[]; // Multiple base64 images
 }
 
+// Seedream 使用 dall-e-3 格式 (OpenAI 兼容的 /v1/images/generations 端点)
+const generateImageDallE3 = async (
+    model: string,
+    prompt: string,
+    aspectRatio: string
+): Promise<string | null> => {
+    const baseUrl = getApiUrl() || 'https://yunwu.ai';
+    const apiKey = getApiKey();
+
+    // 将宽高比转换为 dall-e-3 支持的尺寸
+    let size = '1024x1024';
+    if (aspectRatio === '16:9') size = '1792x1024';
+    else if (aspectRatio === '9:16') size = '1024x1792';
+    else if (aspectRatio === '4:3') size = '1024x768';
+    else if (aspectRatio === '3:4') size = '768x1024';
+
+    console.log(`[generateImageDallE3] model=${model}, size=${size}`);
+
+    const response = await retryWithBackoff(async () => {
+        const res = await fetch(`${baseUrl}/v1/images/generations`, {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+                'Authorization': `Bearer ${apiKey}`,
+            },
+            body: JSON.stringify({
+                model,
+                prompt,
+                n: 1,
+                size,
+                response_format: 'b64_json',
+            }),
+        });
+
+        if (!res.ok) {
+            const errBody = await res.text().catch(() => '');
+            const err: any = new Error(`dall-e-3 API error: ${res.status} ${errBody}`);
+            err.status = res.status;
+            throw err;
+        }
+
+        return res.json();
+    });
+
+    const b64 = response?.data?.[0]?.b64_json;
+    if (b64) {
+        console.log(`[generateImageDallE3] Success with model: ${model}`);
+        return `data:image/png;base64,${b64}`;
+    }
+
+    // 如果返回的是 url 格式
+    const url = response?.data?.[0]?.url;
+    if (url) {
+        console.log(`[generateImageDallE3] Got URL result from model: ${model}`);
+        return url;
+    }
+
+    return null;
+};
+
 export const generateImage = async (config: ImageGenerationConfig): Promise<string | null> => {
+    // Seedream 使用 dall-e-3 格式，走单独的路径
+    if (config.model === 'Seedream5.0') {
+        try {
+            const result = await generateImageDallE3(IMAGE_SEEDREAM_MODEL, config.prompt, config.aspectRatio);
+            if (result) return result;
+        } catch (error: any) {
+            console.warn(`[generateImage] Seedream dall-e-3 failed:`, error.message || error);
+        }
+        // Seedream 失败后 fallback 到 Gemini 模型
+        console.log(`[generateImage] Seedream failed, falling back to Gemini model`);
+    }
+
     let targetModel = IMAGE_PRO_MODEL;
     if (config.model === 'Nano Banana Pro') targetModel = IMAGE_PRO_MODEL;
     else if (config.model === 'NanoBanana2') targetModel = IMAGE_NANOBANANA_2_MODEL;
-    else if (config.model === 'Seedream5.0') targetModel = IMAGE_SEEDREAM_MODEL;
-    
-    const modelsToTry = [targetModel, IMAGE_FLASH_MODEL];
+    else if (config.model === 'Seedream5.0') targetModel = IMAGE_FLASH_MODEL; // fallback
+
+    const modelsToTry = [...new Set([targetModel, IMAGE_FLASH_MODEL])];
 
     let validAspectRatio = config.aspectRatio;
     const supported = ["1:1", "3:4", "4:3", "9:16", "16:9"];

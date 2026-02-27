@@ -37,7 +37,9 @@
     "seedream",
     "NANOBANANA",
     "NanoBanana",
-    "doubao"
+    "doubao",
+    "dall",
+    "Dall"
   ],
   "ignorePaths": ["node_modules", "dist", "public"]
 }
