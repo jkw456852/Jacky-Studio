@@ -525,7 +525,7 @@ const Workspace: React.FC = () => {
             width: 512,
             height: 512,
             genPrompt: prompt,
-            genModel: 'Nano Banana Pro', // Standardized to Pro
+            genModel: preferredImageModel,
             zIndex: elements.length + 10, // Ensure it's on top
             isGenerating: true
         };
@@ -560,7 +560,7 @@ const Workspace: React.FC = () => {
 
             const resultUrl = await imageGenSkill({
                 prompt: prompt,
-                model: 'Nano Banana Pro',
+                model: preferredImageModel as any,
                 aspectRatio: '1:1',
                 referenceImages: referenceImages.length > 0 ? referenceImages : undefined
             });
@@ -575,7 +575,7 @@ const Workspace: React.FC = () => {
                     text: `已为您完成智能生成：${prompt.slice(0, 30)}${prompt.length > 30 ? '...' : ''}`,
                     timestamp: Date.now(),
                     agentData: {
-                        model: 'Nano Banana Pro',
+                        model: preferredImageModel,
                         title: '智能生成',
                         imageUrls: [resultUrl]
                     }
@@ -1161,7 +1161,7 @@ const Workspace: React.FC = () => {
             const base64Ref = await urlToBase64(el.url);
             const resultUrl = await imageGenSkill({
                 prompt: editPrompt,
-                model: 'Nano Banana Pro',
+                model: (el.genModel as any) || 'Nano Banana Pro',
                 aspectRatio: el.genAspectRatio || '1:1',
                 referenceImage: base64Ref,
             });
@@ -1266,6 +1266,19 @@ const Workspace: React.FC = () => {
                         }
                         setHistory([{ elements: project.elements || [], markers: [] }]);
                         setHistoryStep(0);
+                    } else {
+                        // New project: save initial record to IndexedDB immediately
+                        // so it appears in the recent projects list
+                        console.log('[Workspace] New project, saving initial record');
+                        await saveProject({
+                            id,
+                            title: '未命名',
+                            updatedAt: formatDate(Date.now()),
+                            elements: [],
+                            markers: [],
+                            thumbnail: '',
+                            conversations: [],
+                        });
                     }
                 } catch (err) {
                     console.error('[Workspace] Load failed:', err);
@@ -1622,7 +1635,7 @@ const Workspace: React.FC = () => {
         const update1 = elements.map(e => e.id === elementId ? { ...e, isGenerating: true } : e);
         setElements(update1);
         const currentAspectRatio = getClosestAspectRatio(el.width, el.height);
-        const model: 'Nano Banana Pro' = 'Nano Banana Pro';
+        const model = (el.genModel as any) || 'Nano Banana Pro';
         try {
             const resultUrl = await imageGenSkill({
                 prompt: el.genPrompt,
@@ -4658,7 +4671,7 @@ const Workspace: React.FC = () => {
                                                         </>
                                                     )}
                                                     <div className="flex-1 flex items-center justify-center relative group-hover:bg-blue-50/50 transition-colors">
-                                                        {el.isGenerating ? (<div className="flex flex-col items-center gap-3"> <Loader2 size={32} className="animate-spin text-blue-500" /> <span className="text-xs text-blue-400 font-medium">Creating magic...</span> </div>) : (<div className="flex flex-col items-center gap-2 text-blue-200"> <ImageIcon size={48} strokeWidth={1.5} /> </div>)}
+                                                        {el.isGenerating ? (<div className="flex flex-col items-center gap-4"> <Loader2 size={48} className="animate-spin text-blue-500" /> <span className="text-sm text-blue-400 font-medium">Creating magic...</span> </div>) : (<div className="flex flex-col items-center gap-2 text-blue-200"> <ImageIcon size={48} strokeWidth={1.5} /> </div>)}
                                                     </div>
                                                 </>
                                             )}
@@ -4727,7 +4740,7 @@ const Workspace: React.FC = () => {
                                                         </>
                                                     )}
                                                     <div className="flex-1 flex items-center justify-center relative group-hover:bg-blue-50/50 transition-colors">
-                                                        {el.isGenerating ? (<div className="flex flex-col items-center gap-3"> <Loader2 size={32} className="animate-spin text-blue-500" /> <span className="text-xs text-blue-400 font-medium">Creating magic...</span> </div>) : (<div className="flex flex-col items-center gap-2 text-blue-200"> <Film size={48} strokeWidth={1.5} /> </div>)}
+                                                        {el.isGenerating ? (<div className="flex flex-col items-center gap-4"> <Loader2 size={48} className="animate-spin text-blue-500" /> <span className="text-sm text-blue-400 font-medium">Creating magic...</span> </div>) : (<div className="flex flex-col items-center gap-2 text-blue-200"> <Film size={48} strokeWidth={1.5} /> </div>)}
                                                     </div>
                                                 </>
                                             )}

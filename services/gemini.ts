@@ -344,7 +344,7 @@ export const extractTextFromImage = async (imageBase64: string): Promise<string[
 
 export interface ImageGenerationConfig {
     prompt: string;
-    model: 'Nano Banana Pro';
+    model: 'Nano Banana Pro' | 'NanoBanana2' | 'Seedream5.0' | 'GPT Image 1.5' | 'Flux.2 Max';
     aspectRatio: string;
     imageSize?: '1K' | '2K' | '4K';
     referenceImage?: string; // base64 (legacy)
