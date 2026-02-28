@@ -2,7 +2,7 @@ import { create } from 'zustand';
 import { devtools } from 'zustand/middleware';
 import { immer } from 'zustand/middleware/immer';
 import { AgentTask, AgentType } from '../types/agent.types';
-import { ChatMessage, InputBlock } from '../types';
+import { ChatMessage, InputBlock, ImageModel, VideoModel } from '../types';
 
 // ─── Pure helper: normalize input blocks ───
 export function normalizeInputBlocks(blocks: InputBlock[]): InputBlock[] {
@@ -54,7 +54,7 @@ interface AgentState {
   videoGenRatio: string;
   videoGenDuration: string;
   videoGenQuality: string;
-  videoGenModel: string;
+  videoGenModel: VideoModel;
   videoGenMode: 'startEnd' | 'multiRef';
   videoStartFrame: File | null;
   videoEndFrame: File | null;
@@ -104,7 +104,7 @@ interface AgentState {
     setVideoGenRatio: (ratio: string) => void;
     setVideoGenDuration: (duration: string) => void;
     setVideoGenQuality: (quality: string) => void;
-    setVideoGenModel: (model: string) => void;
+    setVideoGenModel: (model: VideoModel) => void;
     setVideoGenMode: (mode: 'startEnd' | 'multiRef') => void;
     setVideoStartFrame: (file: File | null) => void;
     setVideoEndFrame: (file: File | null) => void;
@@ -147,7 +147,7 @@ const initialState = {
   videoGenRatio: '16:9',
   videoGenDuration: '5s',
   videoGenQuality: '1080p',
-  videoGenModel: 'Veo 3.1 Fast',
+  videoGenModel: 'Veo 3.1 Fast' as VideoModel,
   videoGenMode: 'startEnd' as const,
   videoStartFrame: null,
   videoEndFrame: null,
@@ -166,129 +166,129 @@ const initialState = {
 
 export const useAgentStore = create<AgentState>()(
   devtools(
-  immer((set) => ({
-    ...initialState,
+    immer((set) => ({
+      ...initialState,
 
-    actions: {
-      setIsAgentMode: (mode) => set({ isAgentMode: mode }),
+      actions: {
+        setIsAgentMode: (mode) => set({ isAgentMode: mode }),
 
-      setCurrentTask: (task) => set({ currentTask: task }),
+        setCurrentTask: (task) => set({ currentTask: task }),
 
-      addMessage: (message) => set((state) => {
-        state.messages.push(message);
-      }),
+        addMessage: (message) => set((state) => {
+          state.messages.push(message);
+        }),
 
-      setMessages: (messages) => set({ messages }),
+        setMessages: (messages) => set({ messages }),
 
-      clearMessages: () => set({ messages: [], inputBlocks: [{ id: 'init', type: 'text', text: '' }] }),
+        clearMessages: () => set({ messages: [], inputBlocks: [{ id: 'init', type: 'text', text: '' }] }),
 
-      setInputBlocks: (blocks) => set({ inputBlocks: normalizeInputBlocks(blocks) }),
+        setInputBlocks: (blocks) => set({ inputBlocks: normalizeInputBlocks(blocks) }),
 
-      addInputBlock: (block) => set((state) => {
-        state.inputBlocks.push(block);
-      }),
+        addInputBlock: (block) => set((state) => {
+          state.inputBlocks.push(block);
+        }),
 
-      removeInputBlock: (id) => set((state) => {
-        const idx = state.inputBlocks.findIndex(b => b.id === id);
-        if (idx === -1) return;
+        removeInputBlock: (id) => set((state) => {
+          const idx = state.inputBlocks.findIndex(b => b.id === id);
+          if (idx === -1) return;
 
-        const left = state.inputBlocks[idx - 1];
-        const right = state.inputBlocks[idx + 1];
+          const left = state.inputBlocks[idx - 1];
+          const right = state.inputBlocks[idx + 1];
 
-        if (left?.type === 'text' && right?.type === 'text') {
-          left.text = (left.text || '') + (right.text || '');
-          state.inputBlocks.splice(idx, 2);
-        } else {
-          state.inputBlocks.splice(idx, 1);
-          if (state.inputBlocks.length === 0) {
-            state.inputBlocks.push({ id: `text-${Date.now()}`, type: 'text', text: '' });
+          if (left?.type === 'text' && right?.type === 'text') {
+            left.text = (left.text || '') + (right.text || '');
+            state.inputBlocks.splice(idx, 2);
+          } else {
+            state.inputBlocks.splice(idx, 1);
+            if (state.inputBlocks.length === 0) {
+              state.inputBlocks.push({ id: `text-${Date.now()}`, type: 'text', text: '' });
+            }
           }
-        }
-      }),
+        }),
 
-      updateInputBlock: (id, updates) => set((state) => {
-        const block = state.inputBlocks.find(b => b.id === id);
-        if (block) {
-          Object.assign(block, updates);
-        }
-      }),
+        updateInputBlock: (id, updates) => set((state) => {
+          const block = state.inputBlocks.find(b => b.id === id);
+          if (block) {
+            Object.assign(block, updates);
+          }
+        }),
 
-      setActiveBlockId: (id) => set({ activeBlockId: id }),
-      setSelectionIndex: (index) => set({ selectionIndex: index }),
+        setActiveBlockId: (id) => set({ activeBlockId: id }),
+        setSelectionIndex: (index) => set({ selectionIndex: index }),
 
-      insertInputFile: (file) => set((state) => {
-        const activeIndex = state.inputBlocks.findIndex(b => b.id === state.activeBlockId);
+        insertInputFile: (file) => set((state) => {
+          const activeIndex = state.inputBlocks.findIndex(b => b.id === state.activeBlockId);
 
-        if (activeIndex === -1) {
-          const fileBlock: InputBlock = { id: `file-${Date.now()}`, type: 'file', file };
-          const textBlock: InputBlock = { id: `text-${Date.now() + 1}`, type: 'text', text: '' };
-          state.inputBlocks.push(fileBlock, textBlock);
-          state.activeBlockId = textBlock.id;
-          state.selectionIndex = 0;
-          return;
-        }
+          if (activeIndex === -1) {
+            const fileBlock: InputBlock = { id: `file-${Date.now()}`, type: 'file', file };
+            const textBlock: InputBlock = { id: `text-${Date.now() + 1}`, type: 'text', text: '' };
+            state.inputBlocks.push(fileBlock, textBlock);
+            state.activeBlockId = textBlock.id;
+            state.selectionIndex = 0;
+            return;
+          }
 
-        const activeBlock = state.inputBlocks[activeIndex];
+          const activeBlock = state.inputBlocks[activeIndex];
 
-        if (activeBlock.type === 'text') {
-          const text = activeBlock.text || '';
-          const idx = state.selectionIndex !== null ? state.selectionIndex : text.length;
-          const preText = text.slice(0, idx);
-          const postText = text.slice(idx);
-          const newTextBlockId = `text-${Date.now() + 1}`;
+          if (activeBlock.type === 'text') {
+            const text = activeBlock.text || '';
+            const idx = state.selectionIndex !== null ? state.selectionIndex : text.length;
+            const preText = text.slice(0, idx);
+            const postText = text.slice(idx);
+            const newTextBlockId = `text-${Date.now() + 1}`;
 
-          const newBlocks: InputBlock[] = [
-            { ...activeBlock, text: preText },
-            { id: `file-${Date.now()}`, type: 'file', file },
-            { id: newTextBlockId, type: 'text', text: postText }
-          ];
+            const newBlocks: InputBlock[] = [
+              { ...activeBlock, text: preText },
+              { id: `file-${Date.now()}`, type: 'file', file },
+              { id: newTextBlockId, type: 'text', text: postText }
+            ];
 
-          state.inputBlocks.splice(activeIndex, 1, ...newBlocks);
-          state.activeBlockId = newTextBlockId;
-          state.selectionIndex = 0;
-          // Focus is handled reactively via useEffect on activeBlockId in the UI
-        } else {
-          const fileBlock: InputBlock = { id: `file-${Date.now()}`, type: 'file', file };
-          const textBlock: InputBlock = { id: `text-${Date.now() + 1}`, type: 'text', text: '' };
-          state.inputBlocks.push(fileBlock, textBlock);
-          state.activeBlockId = textBlock.id;
-          state.selectionIndex = 0;
-        }
-      }),
+            state.inputBlocks.splice(activeIndex, 1, ...newBlocks);
+            state.activeBlockId = newTextBlockId;
+            state.selectionIndex = 0;
+            // Focus is handled reactively via useEffect on activeBlockId in the UI
+          } else {
+            const fileBlock: InputBlock = { id: `file-${Date.now()}`, type: 'file', file };
+            const textBlock: InputBlock = { id: `text-${Date.now() + 1}`, type: 'text', text: '' };
+            state.inputBlocks.push(fileBlock, textBlock);
+            state.activeBlockId = textBlock.id;
+            state.selectionIndex = 0;
+          }
+        }),
 
-      setIsTyping: (typing) => set({ isTyping: typing }),
+        setIsTyping: (typing) => set({ isTyping: typing }),
 
-      setModelMode: (mode) => set({ modelMode: mode }),
-      setWebEnabled: (enabled) => set({ webEnabled: enabled }),
-      setImageModelEnabled: (enabled) => set({ imageModelEnabled: enabled }),
+        setModelMode: (mode) => set({ modelMode: mode }),
+        setWebEnabled: (enabled) => set({ webEnabled: enabled }),
+        setImageModelEnabled: (enabled) => set({ imageModelEnabled: enabled }),
 
-      setImageGenRatio: (ratio) => set({ imageGenRatio: ratio }),
-      setImageGenRes: (res) => set({ imageGenRes: res }),
-      setImageGenUpload: (file) => set({ imageGenUpload: file }),
+        setImageGenRatio: (ratio) => set({ imageGenRatio: ratio }),
+        setImageGenRes: (res) => set({ imageGenRes: res }),
+        setImageGenUpload: (file) => set({ imageGenUpload: file }),
 
-      setVideoGenRatio: (ratio) => set({ videoGenRatio: ratio }),
-      setVideoGenDuration: (duration) => set({ videoGenDuration: duration }),
-      setVideoGenQuality: (quality) => set({ videoGenQuality: quality }),
-      setVideoGenModel: (model) => set({ videoGenModel: model }),
-      setVideoGenMode: (mode) => set({ videoGenMode: mode }),
-      setVideoStartFrame: (file) => set({ videoStartFrame: file }),
-      setVideoEndFrame: (file) => set({ videoEndFrame: file }),
-      setVideoMultiRefs: (refs) => set({ videoMultiRefs: refs }),
-      setShowVideoModelDropdown: (show) => set({ showVideoModelDropdown: show }),
+        setVideoGenRatio: (ratio) => set({ videoGenRatio: ratio }),
+        setVideoGenDuration: (duration) => set({ videoGenDuration: duration }),
+        setVideoGenQuality: (quality) => set({ videoGenQuality: quality }),
+        setVideoGenModel: (model) => set({ videoGenModel: model }),
+        setVideoGenMode: (mode) => set({ videoGenMode: mode }),
+        setVideoStartFrame: (file) => set({ videoStartFrame: file }),
+        setVideoEndFrame: (file) => set({ videoEndFrame: file }),
+        setVideoMultiRefs: (refs) => set({ videoMultiRefs: refs }),
+        setShowVideoModelDropdown: (show) => set({ showVideoModelDropdown: show }),
 
-      setDetectedTexts: (texts) => set({ detectedTexts: texts }),
-      setEditedTexts: (texts) => set({ editedTexts: texts }),
-      setIsExtractingText: (extracting) => set({ isExtractingText: extracting }),
+        setDetectedTexts: (texts) => set({ detectedTexts: texts }),
+        setEditedTexts: (texts) => set({ editedTexts: texts }),
+        setIsExtractingText: (extracting) => set({ isExtractingText: extracting }),
 
-      setFastEditPrompt: (prompt) => set({ fastEditPrompt: prompt }),
+        setFastEditPrompt: (prompt) => set({ fastEditPrompt: prompt }),
 
-      setBrushSize: (size) => set({ brushSize: size }),
-      setUpscaleMenuOpen: (open) => set({ upscaleMenuOpen: open }),
+        setBrushSize: (size) => set({ brushSize: size }),
+        setUpscaleMenuOpen: (open) => set({ upscaleMenuOpen: open }),
 
-      reset: () => set(initialState),
-    }
-  })),
-  { name: 'AgentStore' })
+        reset: () => set(initialState),
+      }
+    })),
+    { name: 'AgentStore' })
 );
 
 // ─── Selectors（避免组件订阅整个 store 导致不必要的重渲染）───

@@ -1,86 +1,156 @@
 
 import { GoogleGenAI, Chat, GenerateContentResponse, Part, Content, VideoGenerationReferenceImage, VideoGenerationReferenceType, Type } from "@google/genai";
 
-// Helper to get API Key dynamically
-export const getApiKey = () => {
-    const win = window as any;
+// Helper to get API configurations
+export const getProviderConfig = () => {
+    const providerId = localStorage.getItem('api_provider') || 'gemini';
+    const providersRaw = localStorage.getItem('api_providers');
 
-    // 1. 优先使用 AI Studio 的 key
-    if (win.aistudio && win.aistudio.getKey) {
-        const key = win.aistudio.getKey();
-        if (key) return key;
-    }
-
-    // 2. 其次使用 localStorage 中用户设置的对应提供商 key
-    const provider = localStorage.getItem('api_provider') || 'gemini';
-    let rawKeys = '';
-
-    if (provider === 'gemini') rawKeys = localStorage.getItem('gemini_api_key') || '';
-    else if (provider === 'yunwu') rawKeys = localStorage.getItem('yunwu_api_key') || '';
-    else if (provider === 'custom') rawKeys = localStorage.getItem('custom_api_key') || '';
-
-    // 为了兼容老用户，如果新字段没有，尝试取老字段
-    if (!rawKeys) {
-        rawKeys = localStorage.getItem('custom_api_key') || '';
-    }
-
-    if (rawKeys) {
-        // 多 key 轮询逻辑
-        const keys = rawKeys.split('\n')
-            .map(k => k.trim())
-            .filter(k => k && !k.startsWith('#')); // 过滤空行和注释
-        
-        if (keys.length > 0) {
-            // 获取并更新轮询索引
-            const storageKey = `api_poll_index_${provider}`;
-            let currentIndex = parseInt(localStorage.getItem(storageKey) || '0', 10);
-            
-            // 确保索引不越界
-            if (currentIndex >= keys.length) currentIndex = 0;
-            
-            const selectedKey = keys[currentIndex];
-            
-            // 更新下一个索引
-            localStorage.setItem(storageKey, ((currentIndex + 1) % keys.length).toString());
-            
-            console.log(`[API轮询] 提供商: ${provider}, 使用第 ${currentIndex + 1}/${keys.length} 个 Key`);
-            return selectedKey;
+    if (providersRaw) {
+        try {
+            const providers = JSON.parse(providersRaw);
+            const found = providers.find((p: any) => p.id === providerId);
+            if (found) return found;
+        } catch (e) {
+            console.error("Parse providers error", e);
         }
     }
 
-    // 3. 最后才使用环境变量（可选）
-    try {
-        // Use string indexing to bypass tsc static analysis in non-ESM environments
-        const meta: any = (window as any).import?.meta || {};
-        const envKey = meta.env?.VITE_GEMINI_API_KEY;
-        if (envKey && envKey !== 'undefined') return envKey;
-    } catch (e) {
-        // Silent
+    // Default Fallbacks for legacy/start
+    if (providerId === 'gemini') {
+        return {
+            id: 'gemini',
+            name: 'Gemini',
+            baseUrl: 'https://generativelanguage.googleapis.com',
+            apiKey: localStorage.getItem('gemini_api_key') || ''
+        };
+    } else if (providerId === 'yunwu') {
+        return {
+            id: 'yunwu',
+            name: 'Yunwu',
+            baseUrl: 'https://yunwu.ai',
+            apiKey: localStorage.getItem('yunwu_api_key') || ''
+        };
     }
 
-    // Fallback search in process.env or other common places if needed
-    return 'PLACEHOLDER';
+    return { id: 'gemini', apiKey: '' };
+};
+
+// Helper to get API Key dynamically
+export const getApiKey = (all: boolean = false) => {
+    const win = window as any;
+
+    if (win.aistudio && win.aistudio.getKey) {
+        const key = win.aistudio.getKey();
+        if (key) return all ? [key] : key;
+    }
+
+    const config = getProviderConfig();
+    const rawKeys = config.apiKey || '';
+
+    if (rawKeys) {
+        const keys = rawKeys.split('\n')
+            .map(k => k.trim())
+            .filter(k => k && !k.startsWith('#'));
+
+        if (keys.length > 0) {
+            if (all) return keys;
+
+            const storageKey = `api_poll_index_${config.id}`;
+            let currentIndex = parseInt(localStorage.getItem(storageKey) || '0', 10);
+            if (currentIndex >= keys.length) currentIndex = 0;
+            const selectedKey = keys[currentIndex];
+            localStorage.setItem(storageKey, ((currentIndex + 1) % keys.length).toString());
+            return selectedKey;
+        }
+    }
+    return all ? [] : 'PLACEHOLDER';
+};
+
+/**
+ * Normalize and clean Base URL
+ */
+const normalizeUrl = (baseUrl: string): string => {
+    let url = (baseUrl || '').trim().replace(/\/+$/, '');
+    if (!url) return 'https://generativelanguage.googleapis.com';
+    return url;
+};
+
+/**
+ * Fetch available models from the provider, attempting all provided keys
+ */
+export const fetchAvailableModels = async (provider: string, keys: string[], baseUrl?: string) => {
+    if (keys.length === 0) return [];
+
+    const isGoogle = !baseUrl || baseUrl.includes('googleapis.com');
+    const rootUrl = normalizeUrl(baseUrl || '');
+    const allModels = new Set<string>();
+
+    // 1. Special Handling: MemeFast Pricing API (Public list, high accuracy)
+    const isMemeFast = rootUrl.includes('memefast.top');
+    if (isMemeFast) {
+        try {
+            const pricingUrl = `${rootUrl}/api/pricing_new`;
+            console.log(`[fetchAvailableModels] [MemeFast] Fetching pricing metadata: ${pricingUrl}`);
+            const res = await fetch(pricingUrl);
+            if (res.ok) {
+                const json = await res.json();
+                const data = json.data || [];
+                if (Array.isArray(data)) {
+                    data.forEach(m => {
+                        if (m.model_name) allModels.add(m.model_name);
+                    });
+                }
+            }
+        } catch (e) {
+            console.warn(`[fetchAvailableModels] [MemeFast] Pricing fetch failed, falling back to /v1/models`, e);
+        }
+    }
+
+    // 2. Standard Logic: Iterate through all keys to find all accessible models
+    const modelsPath = /\/v\d+$/.test(rootUrl) ? `${rootUrl}/models` : `${rootUrl}/v1/models`;
+    const getGoogleUrl = (k: string) => `${rootUrl}/v1/models?key=${k}`;
+
+    for (let i = 0; i < keys.length; i++) {
+        const key = keys[i].trim();
+        if (!key) continue;
+
+        try {
+            const fetchUrl = isGoogle && !baseUrl ? getGoogleUrl(key) : modelsPath;
+            console.log(`[fetchAvailableModels] [${provider}] Key #${i + 1} checking: ${fetchUrl}`);
+
+            const res = await fetch(fetchUrl, {
+                headers: isGoogle && !baseUrl ? {} : {
+                    'Authorization': `Bearer ${key}`,
+                    'Content-Type': 'application/json'
+                }
+            });
+
+            if (res.ok) {
+                const data = await res.json();
+                const list = data.models || data.data || (Array.isArray(data) ? data : []);
+                list.forEach((m: any) => {
+                    const id = typeof m === 'string' ? m : (m.id || m.name || m.model);
+                    if (id) allModels.add(id);
+                });
+                console.log(`[fetchAvailableModels] [${provider}] Key #${i + 1} found ${list.length} items.`);
+            } else {
+                console.warn(`[fetchAvailableModels] [${provider}] Key #${i + 1} returned ${res.status}`);
+            }
+        } catch (error) {
+            console.error(`[fetchAvailableModels] [${provider}] Key #${i + 1} failed:`, error);
+        }
+    }
+
+    const cleaned = Array.from(allModels).filter(Boolean);
+    console.log(`[fetchAvailableModels] [${provider}] Total unique models found: ${cleaned.length}`);
+    return cleaned;
 };
 
 // Helper to get API Base URL dynamically
 const getApiUrl = () => {
-    if (typeof window !== 'undefined') {
-        const provider = localStorage.getItem('api_provider') || 'gemini';
-
-        // 云雾API
-        if (provider === 'yunwu') {
-            return 'https://yunwu.ai';
-        }
-
-        // 自定义API
-        if (provider === 'custom') {
-            const url = localStorage.getItem('custom_api_url');
-            if (url && url.trim()) return url.trim();
-        }
-
-        // Gemini原生 - 返回undefined使用默认值
-    }
-    return undefined;
+    const config = getProviderConfig();
+    return config.baseUrl;
 };
 
 // Initialize the GenAI client with dynamic key and url
@@ -424,12 +494,27 @@ export const generateImage = async (config: ImageGenerationConfig): Promise<stri
         console.log(`[generateImage] Seedream failed, falling back to Gemini model`);
     }
 
-    let targetModel = IMAGE_PRO_MODEL;
-    if (config.model === 'Nano Banana Pro') targetModel = IMAGE_PRO_MODEL;
-    else if (config.model === 'NanoBanana2') targetModel = IMAGE_NANOBANANA_2_MODEL;
-    else if (config.model === 'Seedream5.0') targetModel = IMAGE_FLASH_MODEL; // fallback
+    // Get selected models from settings (multi-select)
+    const selectedModels = JSON.parse(localStorage.getItem('setting_image_models') || '[]');
+    let targetModels = selectedModels.length > 0 ? selectedModels : [IMAGE_PRO_MODEL];
 
-    const modelsToTry = [...new Set([targetModel, IMAGE_FLASH_MODEL])];
+    const storageKeyIdx = `service_poll_index_image`;
+    let currentIdx = parseInt(localStorage.getItem(storageKeyIdx) || '0', 10);
+    if (currentIdx >= targetModels.length) currentIdx = 0;
+
+    let targetModelId = targetModels[currentIdx];
+    // Update index for next time (Round Robin across service nodes)
+    localStorage.setItem(storageKeyIdx, ((currentIdx + 1) % targetModels.length).toString());
+
+    // Map high-level model names to internal IDs if needed
+    if (targetModelId === 'Nano Banana Pro') targetModelId = IMAGE_PRO_MODEL;
+    else if (targetModelId === 'NanoBanana2') targetModelId = IMAGE_NANOBANANA_2_MODEL;
+    else if (targetModelId === 'Seedream5.0') targetModelId = IMAGE_FLASH_MODEL;
+
+    // Concurrency check: If user has multi-key, the getApiKey() will handle its own poll.
+    // Here we focus on model rotation.
+
+    const modelsToTry = [...new Set([targetModelId, IMAGE_FLASH_MODEL])];
 
     let validAspectRatio = config.aspectRatio;
     const supported = ["1:1", "3:4", "4:3", "9:16", "16:9"];
@@ -531,7 +616,22 @@ export const generateVideo = async (config: VideoGenerationConfig): Promise<stri
         }
 
         let operation;
-        const modelId = config.model === 'Veo 3.1' ? VEO_PRO_MODEL : VEO_FAST_MODEL;
+
+        // Pick video model from settings (Round Robin)
+        const selectedModels = JSON.parse(localStorage.getItem('setting_video_models') || '[]');
+        let targetModels = selectedModels.length > 0 ? selectedModels : [VEO_FAST_MODEL];
+
+        const storageKeyIdx = `service_poll_index_video`;
+        let currentIdx = parseInt(localStorage.getItem(storageKeyIdx) || '0', 10);
+        if (currentIdx >= targetModels.length) currentIdx = 0;
+
+        let targetModelId = targetModels[currentIdx];
+        localStorage.setItem(storageKeyIdx, ((currentIdx + 1) % targetModels.length).toString());
+
+        if (targetModelId === 'Veo 3.1 Pro' || targetModelId === 'Veo 3.1') targetModelId = VEO_PRO_MODEL;
+        else if (targetModelId === 'Veo 3.1 Fast') targetModelId = VEO_FAST_MODEL;
+
+        const modelId = targetModelId;
 
         const commonConfig = {
             numberOfVideos: 1,

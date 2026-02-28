@@ -1,4 +1,7 @@
 
+export type ImageModel = 'Nano Banana Pro' | 'NanoBanana2' | 'Seedream5.0' | 'GPT Image 1.5' | 'Flux.2 Max' | 'Flux Schnell' | 'SDXL';
+export type VideoModel = 'Veo 3.1' | 'Veo 3.1 Fast' | 'Kling 2.0' | 'Kling 2.6' | 'Kling Standard' | 'Kling Pro' | 'Auto';
+
 export type ShapeType = 'square' | 'circle' | 'triangle' | 'star' | 'bubble' | 'arrow-left' | 'arrow-right';
 
 export interface CanvasElement {
@@ -27,7 +30,7 @@ export interface CanvasElement {
 
   // Gen Image/Video specific
   genPrompt?: string;
-  genModel?: 'Nano Banana Pro' | 'Veo 3.1' | 'Veo 3.1 Fast' | 'Kling 2.6';
+  genModel?: ImageModel | VideoModel;
   genAspectRatio?: string;
   genResolution?: '1K' | '2K' | '4K';
   detectedTexts?: { original: string, edited?: string }[];
@@ -96,17 +99,17 @@ export interface ChatMessage {
   attachments?: string[]; // Array of base64 images
   relatedMarkerId?: number;
   // Agent structured data (Lovart-style)
-    agentData?: {
-      model?: string;
-      title?: string;
-      description?: string;
-      imageUrls?: string[];
-      videoUrls?: string[];
-      assets?: any[];
-      adjustments?: string[];
-      analysis?: string;
-      suggestions?: string[]; // 可点击的建议按钮（如"温馨日常故事"、"科技感风格"）
-    };
+  agentData?: {
+    model?: string;
+    title?: string;
+    description?: string;
+    imageUrls?: string[];
+    videoUrls?: string[];
+    assets?: any[];
+    adjustments?: string[];
+    analysis?: string;
+    suggestions?: string[]; // 可点击的建议按钮（如"温馨日常故事"、"科技感风格"）
+  };
   // User skill invocation structured data
   skillData?: {
     id: string;

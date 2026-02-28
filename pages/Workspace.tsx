@@ -20,7 +20,7 @@ import {
     Scan, ZoomIn, Scaling, Wand2, Banana
 } from 'lucide-react';
 import { createChatSession, sendMessage, generateImage, generateVideo, extractTextFromImage, analyzeImageRegion } from '../services/gemini';
-import { ChatMessage, Template, CanvasElement, ShapeType, Marker, Project, ConversationSession } from '../types';
+import { ChatMessage, Template, CanvasElement, ShapeType, Marker, Project, ConversationSession, ImageModel, VideoModel } from '../types';
 import { getProject, saveProject, formatDate } from '../services/storage';
 import { Content } from '@google/genai';
 import { useAgentOrchestrator } from '../hooks/useAgentOrchestrator';
@@ -345,8 +345,8 @@ const Workspace: React.FC = () => {
     const [showModelPreference, setShowModelPreference] = useState(false);
     const [modelPreferenceTab, setModelPreferenceTab] = useState<'image' | 'video' | '3d'>('image');
     const [autoModelSelect, setAutoModelSelect] = useState(true);
-    const [preferredImageModel, setPreferredImageModel] = useState('Nano Banana Pro');
-    const [preferredVideoModel, setPreferredVideoModel] = useState('Veo 3.1');
+    const [preferredImageModel, setPreferredImageModel] = useState<ImageModel>('Nano Banana Pro');
+    const [preferredVideoModel, setPreferredVideoModel] = useState<VideoModel>('Veo 3.1');
     const [preferred3DModel, setPreferred3DModel] = useState('Auto');
 
     // Drag-and-drop state
@@ -374,7 +374,11 @@ const Workspace: React.FC = () => {
     };
 
     // Model preference data
-    const MODEL_OPTIONS = {
+    const MODEL_OPTIONS: {
+        image: { id: ImageModel, name: string, desc: string, time: string }[];
+        video: { id: VideoModel, name: string, desc: string, time: string }[];
+        '3d': { id: string, name: string, desc: string, time: string }[];
+    } = {
         image: [
             { id: 'Nano Banana Pro', name: 'Nano Banana Pro', desc: '高质量图像生成，细节丰富', time: '~20s' },
             { id: 'NanoBanana2', name: 'Nano Banana 2', desc: '新一代极速图像生成', time: '~5s' },
@@ -535,7 +539,7 @@ const Workspace: React.FC = () => {
         try {
             // Find reference images from context (InputBlocks or Canvas)
             let referenceImages: string[] = [];
-            
+
             // 1. From InputBlocks
             const currentBlocks = useAgentStore.getState().inputBlocks;
             const blockFiles = currentBlocks.filter(b => b.type === 'file' && b.file).map(b => b.file!) as File[];
@@ -547,7 +551,7 @@ const Workspace: React.FC = () => {
                         reader.readAsDataURL(f);
                     });
                     referenceImages.push(base64);
-                } catch (_) {}
+                } catch (_) { }
             }
 
             // 2. From Canvas if no blocks
@@ -560,7 +564,7 @@ const Workspace: React.FC = () => {
 
             const resultUrl = await imageGenSkill({
                 prompt: prompt,
-                model: preferredImageModel as any,
+                model: preferredImageModel,
                 aspectRatio: '1:1',
                 referenceImages: referenceImages.length > 0 ? referenceImages : undefined
             });
@@ -623,7 +627,7 @@ const Workspace: React.FC = () => {
             skillData
         };
         addMessage(userMsg);
-        
+
         // 3. 进入打字/思考状态，并重置输入区域
         setIsTyping(true);
         setInputBlocks([{ id: 'init', type: 'text', text: '' }]); // 仅清空输入框，不清空对话消息历史
@@ -1263,7 +1267,7 @@ const Workspace: React.FC = () => {
                 setSelectedElementId(null);
                 setSelectedElementIds([]);
                 setActiveConversationId(''); // 必须清空活跃对话ID，防止保存到旧ID
-                
+
                 // 2. 重置 AI 助手相关的全局 Store 状态 (消息、任务等)
                 useAgentStore.getState().actions.reset();
 
@@ -1632,7 +1636,7 @@ const Workspace: React.FC = () => {
             id: Date.now().toString(), type: 'gen-video',
             x: centerX - startW / 2, y: centerY - startH / 2,
             width: startW, height: startH,
-            zIndex: elements.length + 1, genModel: videoGenModel as any, genAspectRatio: videoGenRatio,
+            zIndex: elements.length + 1, genModel: videoGenModel, genAspectRatio: videoGenRatio,
             genQuality: videoGenQuality as any, genPrompt: '', genDuration: videoGenDuration as any,
             genStartFrame: videoStartFrame ? URL.createObjectURL(videoStartFrame) : undefined,
             genEndFrame: videoEndFrame ? URL.createObjectURL(videoEndFrame) : undefined,
@@ -1724,7 +1728,7 @@ const Workspace: React.FC = () => {
             const resultUrl = await videoGenSkill({
                 prompt: el.genPrompt,
                 aspectRatio: el.genAspectRatio as any || '16:9',
-                model: el.genModel as any || 'Veo 3.1 Fast',
+                model: el.genModel as VideoModel || 'Veo 3.1 Fast',
                 startFrame: startFrame,
                 endFrame: el.genEndFrame,
                 referenceImages: el.genVideoRefs
@@ -4372,7 +4376,7 @@ const Workspace: React.FC = () => {
                                                             {MODEL_OPTIONS.image.map(m => (
                                                                 <button
                                                                     key={m.id}
-                                                                    onClick={() => { setPreferredImageModel(m.id); setShowModelPicker(false); setAutoModelSelect(false); }}
+                                                                    onClick={() => { setPreferredImageModel(m.id as ImageModel); setShowModelPicker(false); setAutoModelSelect(false); }}
                                                                     className={`w-full flex items-center justify-between px-3 py-2.5 rounded-xl text-xs transition-colors ${preferredImageModel === m.id && !autoModelSelect ? 'bg-blue-50 text-blue-700 font-semibold' : 'text-gray-700 hover:bg-gray-50'}`}
                                                                 >
                                                                     <div className="text-left">
@@ -4484,8 +4488,8 @@ const Workspace: React.FC = () => {
                                                                         <div
                                                                             key={model.id}
                                                                             onClick={() => {
-                                                                                if (modelPreferenceTab === 'image') setPreferredImageModel(model.id);
-                                                                                else if (modelPreferenceTab === 'video') setPreferredVideoModel(model.id);
+                                                                                if (modelPreferenceTab === 'image') setPreferredImageModel(model.id as ImageModel);
+                                                                                else if (modelPreferenceTab === 'video') setPreferredVideoModel(model.id as VideoModel);
                                                                                 else setPreferred3DModel(model.id);
                                                                                 setAutoModelSelect(false);
                                                                             }}
