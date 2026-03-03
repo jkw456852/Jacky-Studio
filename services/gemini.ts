@@ -130,7 +130,7 @@ const fetchOpenAIJsonWithFallback = async <T>(
             method: 'POST',
             headers,
             body: JSON.stringify(body),
-        }, { operation: `${contextTag}.openaiPost`, retries: 0 });
+        }, { operation: `${contextTag}.openaiPost`, retries: 0, timeoutMs: 0, idleTimeoutMs: 300000 });
 
         if (res.ok) {
             return res.json();

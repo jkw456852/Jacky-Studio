@@ -55,7 +55,7 @@ export const MessageList: React.FC<MessageListProps> = ({
     }, [messages, currentTask?.progressMessage]);
 
     return (
-        <div className="space-y-4 pb-4 px-4 md:px-6">
+        <div className="space-y-4 pb-4 px-2 md:px-3">
             {messages.map(msg => (
                 <motion.div
                     initial={{ opacity: 0, y: 10 }}
@@ -65,7 +65,7 @@ export const MessageList: React.FC<MessageListProps> = ({
                 >
                     {msg.role === 'user' ? (
                         msg.skillData ? (
-                            <div className="w-full max-w-[85%] xl:max-w-[75%] rounded-3xl rounded-br-md border border-gray-200 bg-white px-4 py-3 text-[13px] text-gray-800 shadow-sm flex flex-col gap-2 overflow-hidden">
+                            <div className="w-full max-w-[95%] xl:max-w-[90%] rounded-3xl rounded-br-md border border-gray-200 bg-white px-4 py-3 text-[13px] text-gray-800 shadow-sm flex flex-col gap-2 overflow-hidden">
                                 <div className="flex items-center gap-2">
                                     <span className="font-semibold text-gray-900">{msg.skillData.name}</span>
                                 </div>
@@ -83,11 +83,11 @@ export const MessageList: React.FC<MessageListProps> = ({
                                 </div>
                             </div>
                         ) : (
-                            <div className="w-full max-w-[85%] xl:max-w-[75%] rounded-3xl rounded-br-md border border-gray-200 bg-white px-4 py-3 shadow-sm flex flex-col gap-2 overflow-hidden">
+                            <div className="w-full max-w-[95%] xl:max-w-[90%] rounded-2xl bg-gray-100 px-4 py-3 flex flex-col gap-2 overflow-hidden">
                                 {msg.attachments && msg.attachments.length > 0 && (
                                     <div className="flex flex-wrap items-center gap-1.5 mb-1">
                                         {msg.attachments.map((att, i) => (
-                                            <div key={i} className="inline-flex items-center gap-1.5 bg-gray-50 border border-gray-100 rounded-lg pl-1 pr-2 py-0.5 select-none hover:bg-gray-100 transition duration-200 cursor-pointer shadow-sm">
+                                            <div key={i} className="inline-flex items-center gap-1.5 bg-white border border-gray-100 rounded-lg pl-1 pr-2 py-0.5 select-none hover:bg-gray-50 transition duration-200 cursor-pointer shadow-sm">
                                                 <div className="w-5 h-5 rounded-sm overflow-hidden flex-shrink-0 bg-white">
                                                     <img src={att} className="w-full h-full object-cover" />
                                                 </div>
@@ -96,7 +96,7 @@ export const MessageList: React.FC<MessageListProps> = ({
                                         ))}
                                     </div>
                                 )}
-                                <div className="text-[13px] text-gray-800 leading-relaxed whitespace-pre-wrap break-words">{msg.text}</div>
+                                <div className="text-[14px] text-gray-800 leading-relaxed whitespace-pre-wrap break-words">{msg.text}</div>
                             </div>
                         )
                     ) : msg.error ? (

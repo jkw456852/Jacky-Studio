@@ -6,13 +6,15 @@ import WorkspaceNew from './pages/Workspace/WorkspaceNew';
 import Projects from './pages/Projects';
 import Settings from './pages/Settings';
 import VideoWorkspace from './pages/VideoWorkspace';
+import Landing from './pages/Landing';
 
 const App: React.FC<{ onExit?: () => void }> = ({ onExit }) => {
   return (
     <Router>
       <div className="min-h-screen bg-gray-50 text-gray-900">
         <Routes>
-          <Route path="/" element={<Home onExit={onExit} />} />
+          <Route path="/" element={<Landing />} />
+          <Route path="/dashboard" element={<Home onExit={onExit} />} />
           <Route path="/projects" element={<Projects onExit={onExit} />} />
           <Route path="/workspace/:id" element={<Workspace />} />
           <Route path="/video-workspace" element={<VideoWorkspace />} />

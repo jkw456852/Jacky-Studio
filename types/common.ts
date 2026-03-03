@@ -8,6 +8,8 @@ export interface CanvasElement {
   id: string;
   type: 'image' | 'video' | 'shape' | 'text' | 'gen-image' | 'gen-video' | 'group';
   url?: string;
+  originalUrl?: string;
+  proxyUrl?: string;
   shapeType?: ShapeType;
   // Text specific properties
   text?: string;

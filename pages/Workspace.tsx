@@ -281,6 +281,84 @@ type ToolType =
   | "brush"
   | "eraser";
 
+const PROXY_TRIGGER_PIXELS = 8_000_000;
+const DEFAULT_PROXY_MAX_DIM = 2560;
+
+const fileToDataUrl = (file: File): Promise<string> => {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = (event) => resolve((event.target?.result as string) || "");
+    reader.onerror = () => reject(reader.error || new Error("Failed to read file"));
+    reader.readAsDataURL(file);
+  });
+};
+
+const makeImageProxyDataUrl = async (
+  file: File,
+  maxDim: number = DEFAULT_PROXY_MAX_DIM,
+): Promise<{
+  originalUrl: string;
+  displayUrl: string;
+  originalWidth: number;
+  originalHeight: number;
+  displayWidth: number;
+  displayHeight: number;
+}> => {
+  const originalUrl = await fileToDataUrl(file);
+  const full = await createImageBitmap(file);
+  const originalWidth = full.width;
+  const originalHeight = full.height;
+  const pixelCount = originalWidth * originalHeight;
+
+  let displayUrl = originalUrl;
+  let displayWidth = originalWidth;
+  let displayHeight = originalHeight;
+
+  if (pixelCount > PROXY_TRIGGER_PIXELS) {
+    const scale = Math.min(1, maxDim / Math.max(originalWidth, originalHeight));
+    const targetW = Math.max(1, Math.round(originalWidth * scale));
+    const targetH = Math.max(1, Math.round(originalHeight * scale));
+
+    let proxyBitmap: ImageBitmap | null = null;
+    try {
+      proxyBitmap = await createImageBitmap(file, {
+        resizeWidth: targetW,
+        resizeHeight: targetH,
+        resizeQuality: "high",
+      });
+    } catch {
+      proxyBitmap = null;
+    }
+
+    const canvas = document.createElement("canvas");
+    canvas.width = targetW;
+    canvas.height = targetH;
+    const ctx = canvas.getContext("2d");
+    if (ctx) {
+      if (proxyBitmap) {
+        ctx.drawImage(proxyBitmap, 0, 0, targetW, targetH);
+      } else {
+        ctx.drawImage(full, 0, 0, targetW, targetH);
+      }
+      displayUrl = canvas.toDataURL("image/webp", 0.85);
+      displayWidth = targetW;
+      displayHeight = targetH;
+    }
+
+    proxyBitmap?.close?.();
+  }
+
+  full.close?.();
+  return {
+    originalUrl,
+    displayUrl,
+    originalWidth,
+    originalHeight,
+    displayWidth,
+    displayHeight,
+  };
+};
+
 // Utility to compress image to max dimensions to save storage and improve performance
 const compressImage = (file: File, maxDim: number = 2048): Promise<string> => {
   return new Promise((resolve) => {
@@ -390,6 +468,12 @@ interface InputBlock {
   file?: File;
 }
 
+const getElementDisplayUrl = (el: CanvasElement): string | undefined =>
+  el.proxyUrl || el.url;
+
+const getElementSourceUrl = (el: CanvasElement): string | undefined =>
+  el.originalUrl || el.url;
+
 // (Removed legacy localStorage conversation logic - now completely handled by IndexedDB within the Project object to prevent QuotaExceeded errors and isolate conversations)
 
 // Using IndexedDB now for saveConversations via saveProject
@@ -422,8 +506,8 @@ const LayerItem = ({
       {el.type === "text" && (
         <span className="font-serif text-gray-500 text-[10px]">T</span>
       )}
-      {el.type === "image" && el.url && (
-        <img src={el.url} className="w-full h-full object-cover" />
+      {el.type === "image" && getElementDisplayUrl(el) && (
+        <img src={getElementDisplayUrl(el)} className="w-full h-full object-cover" />
       )}
       {(el.type === "video" || el.type === "gen-video") && (
         <Video size={14} className="text-gray-500" />
@@ -2329,7 +2413,9 @@ const Workspace: React.FC = () => {
       try {
         // 允许同时处理多个新增选中的图片
         for (const targetEl of imageEls) {
-          const resp = await fetch(targetEl.url!);
+          const sourceUrl = getElementSourceUrl(targetEl);
+          if (!sourceUrl) continue;
+          const resp = await fetch(sourceUrl);
           const blob = await resp.blob();
           if (pendingPickRequestRef.current !== requestId) return;
           const file = new File([blob], `canvas-${targetEl.id.slice(-6)}.png`, {
@@ -2387,6 +2473,17 @@ const Workspace: React.FC = () => {
   // Performance: store drag positions in ref to avoid re-renders during drag
   const dragOffsetsRef = useRef<Record<string, { x: number; y: number }>>({});
   const rafIdRef = useRef<number>(0);
+  const panRafIdRef = useRef<number>(0);
+  const panStartRef = useRef({ x: 0, y: 0 });
+  const panChangedRef = useRef(false);
+  const resizeRafIdRef = useRef<number>(0);
+  const resizePreviewRef = useRef<{
+    id: string;
+    x: number;
+    y: number;
+    width: number;
+    height: number;
+  } | null>(null);
 
   const saveToHistory = (
     newElements: CanvasElement[],
@@ -3730,38 +3827,71 @@ const Workspace: React.FC = () => {
     };
 
     files.forEach((file, index) => {
-      const reader = new FileReader();
-      reader.onload = (event) => {
-        const result = event.target?.result as string;
-        if (type === "image") {
-          const img = new Image();
-          img.onload = () => {
+      if (type === "image") {
+        void (async () => {
+          try {
+            const {
+              originalUrl,
+              displayUrl,
+              originalWidth,
+              originalHeight,
+              displayWidth,
+              displayHeight,
+            } = await makeImageProxyDataUrl(file);
             const containerW = window.innerWidth - (showAssistant ? 480 : 0);
             const containerH = window.innerHeight;
             const centerX = (containerW / 2 - pan.x) / (zoom / 100);
             const centerY = (containerH / 2 - pan.y) / (zoom / 100);
-
-            let width = img.width;
-            let height = img.height;
-
-            // Offset multiple images slightly
             const offset = index * 20;
 
             const newElement: CanvasElement = {
               id: Date.now().toString() + index,
               type: "image",
-              url: result,
-              x: centerX - width / 2 + offset,
-              y: centerY - height / 2 + offset,
-              width,
-              height,
+              url: displayUrl,
+              originalUrl,
+              proxyUrl:
+                displayUrl !== originalUrl
+                  ? displayUrl
+                  : undefined,
+              x: centerX - displayWidth / 2 + offset,
+              y: centerY - displayHeight / 2 + offset,
+              width: displayWidth,
+              height: displayHeight,
               zIndex: elements.length + index + 1,
+              genAspectRatio: `${originalWidth}:${originalHeight}`,
             };
             newElementsToAppend.push(newElement);
-            checkDone();
-          };
-          img.src = result;
-        } else {
+          } catch (error) {
+            console.warn("Failed to create image proxy, fallback to dataURL", error);
+            const fallbackUrl = await fileToDataUrl(file);
+            const img = new Image();
+            img.onload = () => {
+              const containerW = window.innerWidth - (showAssistant ? 480 : 0);
+              const containerH = window.innerHeight;
+              const centerX = (containerW / 2 - pan.x) / (zoom / 100);
+              const centerY = (containerH / 2 - pan.y) / (zoom / 100);
+              const offset = index * 20;
+              newElementsToAppend.push({
+                id: Date.now().toString() + index,
+                type: "image",
+                url: fallbackUrl,
+                x: centerX - img.width / 2 + offset,
+                y: centerY - img.height / 2 + offset,
+                width: img.width,
+                height: img.height,
+                zIndex: elements.length + index + 1,
+              });
+              checkDone();
+            };
+            img.onerror = () => checkDone();
+            img.src = fallbackUrl;
+            return;
+          }
+          checkDone();
+        })();
+      } else {
+        void (async () => {
+          const result = await fileToDataUrl(file);
           const containerW = window.innerWidth - (showAssistant ? 480 : 0);
           const containerH = window.innerHeight;
           const centerX = (containerW / 2 - pan.x) / (zoom / 100);
@@ -3781,9 +3911,8 @@ const Workspace: React.FC = () => {
           };
           newElementsToAppend.push(newElement);
           checkDone();
-        }
-      };
-      reader.readAsDataURL(file);
+        })();
+      }
     });
 
     setShowInsertMenu(false);
@@ -3818,29 +3947,61 @@ const Workspace: React.FC = () => {
     };
 
     files.forEach((file, index) => {
-      const reader = new FileReader();
-      reader.onload = (event) => {
-        const result = event.target?.result as string;
-        if (file.type.startsWith("image/")) {
-          const img = new Image();
-          img.onload = () => {
-            let width = img.width;
-            let height = img.height;
+      if (file.type.startsWith("image/")) {
+        void (async () => {
+          try {
+            const {
+              originalUrl,
+              displayUrl,
+              originalWidth,
+              originalHeight,
+              displayWidth,
+              displayHeight,
+            } = await makeImageProxyDataUrl(file);
             const offset = index * 20;
             newElementsToAppend.push({
               id: Date.now().toString() + index,
               type: "image",
-              url: result,
-              x: canvasDropX - width / 2 + offset,
-              y: canvasDropY - height / 2 + offset,
-              width,
-              height,
+              url: displayUrl,
+              originalUrl,
+              proxyUrl:
+                displayUrl !== originalUrl
+                  ? displayUrl
+                  : undefined,
+              x: canvasDropX - displayWidth / 2 + offset,
+              y: canvasDropY - displayHeight / 2 + offset,
+              width: displayWidth,
+              height: displayHeight,
               zIndex: elements.length + index + 1,
+              genAspectRatio: `${originalWidth}:${originalHeight}`,
             });
-            checkDone();
-          };
-          img.src = result;
-        } else {
+          } catch (error) {
+            console.warn("Failed to create drop image proxy", error);
+            const fallbackUrl = await fileToDataUrl(file);
+            const img = new Image();
+            img.onload = () => {
+              const offset = index * 20;
+              newElementsToAppend.push({
+                id: Date.now().toString() + index,
+                type: "image",
+                url: fallbackUrl,
+                x: canvasDropX - img.width / 2 + offset,
+                y: canvasDropY - img.height / 2 + offset,
+                width: img.width,
+                height: img.height,
+                zIndex: elements.length + index + 1,
+              });
+              checkDone();
+            };
+            img.onerror = () => checkDone();
+            img.src = fallbackUrl;
+            return;
+          }
+          checkDone();
+        })();
+      } else {
+        void (async () => {
+          const result = await fileToDataUrl(file);
           const width = 800;
           const height = 450;
           const offset = index * 20;
@@ -3855,9 +4016,8 @@ const Workspace: React.FC = () => {
             zIndex: elements.length + index + 1,
           });
           checkDone();
-        }
-      };
-      reader.readAsDataURL(file);
+        })();
+      }
     });
   };
   const handleRefImageUpload = async (
@@ -3940,6 +4100,8 @@ const Workspace: React.FC = () => {
       (document.activeElement as HTMLElement)?.blur();
       setIsPanning(true);
       setDragStart({ x: e.clientX, y: e.clientY });
+      panStartRef.current = panRef.current;
+      panChangedRef.current = false;
       return;
     }
 
@@ -3960,6 +4122,8 @@ const Workspace: React.FC = () => {
       } else {
         setIsPanning(true);
         setDragStart({ x: e.clientX, y: e.clientY });
+        panStartRef.current = panRef.current;
+        panChangedRef.current = false;
       }
     }
   };
@@ -3997,29 +4161,42 @@ const Workspace: React.FC = () => {
           newHeight = newWidth / ratio;
         }
       }
-      setElements((prev) =>
-        prev.map((el) => {
-          if (el.id === selectedElementId) {
-            const ar = getClosestAspectRatio(newWidth, newHeight);
-            return {
-              ...el,
-              x: newX,
-              y: newY,
-              width: newWidth,
-              height: newHeight,
-              genAspectRatio: el.type === "gen-image" ? ar : el.genAspectRatio,
-            };
-          }
-          return el;
-        }),
-      );
+      resizePreviewRef.current = {
+        id: selectedElementId,
+        x: newX,
+        y: newY,
+        width: newWidth,
+        height: newHeight,
+      };
+      cancelAnimationFrame(resizeRafIdRef.current);
+      resizeRafIdRef.current = requestAnimationFrame(() => {
+        const dom = document.getElementById(`canvas-el-${selectedElementId}`);
+        if (dom) {
+          dom.style.left = `${newX}px`;
+          dom.style.top = `${newY}px`;
+          dom.style.width = `${newWidth}px`;
+          dom.style.height = `${newHeight}px`;
+        }
+      });
       return;
     }
     if (isPanning) {
       const dx = e.clientX - dragStart.x;
       const dy = e.clientY - dragStart.y;
-      setPan((prev) => ({ x: prev.x + dx, y: prev.y + dy }));
-      setDragStart({ x: e.clientX, y: e.clientY });
+      const nextPan = {
+        x: panStartRef.current.x + dx,
+        y: panStartRef.current.y + dy,
+      };
+      panRef.current = nextPan;
+      panChangedRef.current = true;
+      cancelAnimationFrame(panRafIdRef.current);
+      panRafIdRef.current = requestAnimationFrame(() => {
+        const layer = canvasLayerRef.current;
+        if (layer) {
+          layer.style.transform = `translate(${nextPan.x}px, ${nextPan.y}px) scale(${zoom / 100})`;
+          layer.style.willChange = "transform";
+        }
+      });
     } else if (isMarqueeSelecting) {
       // 限制框选范围在画布容器内
       const rect = containerRef.current?.getBoundingClientRect();
@@ -4159,9 +4336,36 @@ const Workspace: React.FC = () => {
 
   const handleMouseUp = () => {
     if (isResizing) {
+      cancelAnimationFrame(resizeRafIdRef.current);
       setIsResizing(false);
       setResizeHandle(null);
-      saveToHistory(elements, markers);
+      const preview = resizePreviewRef.current;
+      if (preview) {
+        const nextElements = elements.map((el) => {
+          if (el.id === preview.id) {
+            const ar = getClosestAspectRatio(preview.width, preview.height);
+            return {
+              ...el,
+              x: preview.x,
+              y: preview.y,
+              width: preview.width,
+              height: preview.height,
+              genAspectRatio: el.type === "gen-image" ? ar : el.genAspectRatio,
+            };
+          }
+          return el;
+        });
+        setElements(nextElements);
+        saveToHistory(nextElements, markers);
+      }
+      resizePreviewRef.current = null;
+    }
+    if (isPanning) {
+      cancelAnimationFrame(panRafIdRef.current);
+      if (panChangedRef.current) {
+        setPan(panRef.current);
+      }
+      panChangedRef.current = false;
     }
     if (isDraggingElement && selectedElementId) {
       // Commit drag positions from ref to React state
@@ -4262,7 +4466,9 @@ const Workspace: React.FC = () => {
         e.stopPropagation();
         e.preventDefault();
         try {
-          const resp = await fetch(pickedEl.url);
+          const sourceUrl = getElementSourceUrl(pickedEl) || pickedEl.url;
+          if (!sourceUrl) return;
+          const resp = await fetch(sourceUrl);
           const blob = await resp.blob();
           const file = new File(
             [blob],
@@ -7433,8 +7639,8 @@ const Workspace: React.FC = () => {
                     onDoubleClick={() => {
                       if (el.type === "text") {
                         setEditingTextId(el.id);
-                      } else if (el.url) {
-                        setPreviewUrl(el.url);
+                      } else if (getElementSourceUrl(el)) {
+                        setPreviewUrl(getElementSourceUrl(el) || null);
                       }
                     }}
                   >
@@ -7616,9 +7822,12 @@ const Workspace: React.FC = () => {
                         {el.url ? (
                           <>
                             <img
-                              src={el.url}
+                              src={getElementDisplayUrl(el)}
                               className={`w-full h-full ${el.type === "image" ? "w-full h-full" : "object-cover"}`}
                               draggable={false}
+                              decoding="async"
+                              loading="lazy"
+                              style={{ willChange: "transform", contain: "paint" }}
                             />
                             {/* Resize Handles - Only for Image & Selected */}
                             {isSelected && (

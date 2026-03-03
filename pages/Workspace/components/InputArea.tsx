@@ -137,6 +137,7 @@ export const InputArea: React.FC<InputAreaProps> = ({
 }) => {
     const [editingMarkerId, setEditingMarkerId] = useState<string | null>(null);
     const [editingMarkerLabel, setEditingMarkerLabel] = useState('');
+    const [isAllInputSelected, setIsAllInputSelected] = useState(false);
     const inputBlocks = useAgentStore(s => s.inputBlocks);
     const activeBlockId = useAgentStore(s => s.activeBlockId);
     const videoGenRatio = useAgentStore(s => s.videoGenRatio);
@@ -197,6 +198,29 @@ export const InputArea: React.FC<InputAreaProps> = ({
         files.forEach((f) => {
             if (f.type.startsWith('image/') || f.type.startsWith('video/')) {
                 appendInputFile(f);
+            }
+        });
+    };
+
+    const clearAllInputBlocks = () => {
+        const textId = `text-${Date.now()}`;
+        setInputBlocks([{ id: textId, type: 'text', text: '' }]);
+        setActiveBlockId(textId);
+        setSelectedChipId(null);
+        setIsAllInputSelected(false);
+    };
+
+    const moveCaretToLeftOfFirstChip = () => {
+        const textId = `text-${Date.now()}`;
+        const currentBlocks = useAgentStore.getState().inputBlocks;
+        setInputBlocks([{ id: textId, type: 'text', text: '' }, ...currentBlocks]);
+        setActiveBlockId(textId);
+        setSelectedChipId(null);
+        setIsAllInputSelected(false);
+        requestAnimationFrame(() => {
+            const leftEl = document.getElementById(`input-block-${textId}`);
+            if (leftEl) {
+                setCECursorPos(leftEl, 0);
             }
         });
     };
@@ -402,13 +426,31 @@ export const InputArea: React.FC<InputAreaProps> = ({
                 {/* Text Input Area - Lovart style: inline mixed chips + text */}
                 <div
                     className={`px-3 pt-1.5 pb-1.5 cursor-text transition-all`}
+                    onKeyDownCapture={(e) => {
+                        if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'a') {
+                            e.preventDefault();
+                            const selection = window.getSelection();
+                            if (selection) selection.removeAllRanges();
+                            setIsAllInputSelected(true);
+                            setSelectedChipId(null);
+                            return;
+                        }
+
+                        if (isAllInputSelected && (e.key === 'Backspace' || e.key === 'Delete')) {
+                            e.preventDefault();
+                            clearAllInputBlocks();
+                            return;
+                        }
+                    }}
                     onMouseDown={(e) => {
+                        if (isAllInputSelected) setIsAllInputSelected(false);
                         commitPendingAttachments();
                         const target = e.target as HTMLElement;
                         if (target.closest('[id^="file-chip-"]') || target.closest('[id^="marker-chip-"]')) return;
                         selectLatestCanvasChip();
                     }}
                     onClick={(e) => {
+                        if (isAllInputSelected) setIsAllInputSelected(false);
                         if (e.target === e.currentTarget || (e.target as HTMLElement).closest('.input-flow-container') === e.currentTarget.querySelector('.input-flow-container')) {
                             const lastText = inputBlocks.filter(b => b.type === 'text').pop();
                             const targetId = lastText?.id || inputBlocks[inputBlocks.length - 1].id;
@@ -435,9 +477,10 @@ export const InputArea: React.FC<InputAreaProps> = ({
                                             id={`marker-chip-${block.id}`}
                                             initial={{ scale: 0, opacity: 0 }}
                                             animate={{ scale: 1, opacity: 1 }}
-                                            className={`inline-flex items-center gap-0 rounded-full pl-[2px] pr-1 cursor-default relative group select-none h-6 transition-all border ${isSelected ? 'bg-blue-50 border-blue-300 ring-1 ring-blue-400' : 'bg-gray-50/50 border-gray-100 hover:bg-gray-100'}`}
+                                            className={`inline-flex items-center gap-0 rounded-full pl-[2px] pr-1 cursor-default relative group select-none h-6 transition-all border ${isAllInputSelected || isSelected ? 'bg-blue-50 border-blue-300 ring-1 ring-blue-400' : 'bg-gray-50/50 border-gray-100 hover:bg-gray-100'}`}
                                             onClick={(e) => {
                                                 e.stopPropagation();
+                                                setIsAllInputSelected(false);
                                                 const markerId = (file as any).markerId;
                                                 if (isSelected) {
                                                     setEditingMarkerId(markerId);
@@ -542,9 +585,10 @@ export const InputArea: React.FC<InputAreaProps> = ({
                                         <div
                                             key={block.id}
                                             id={`file-chip-${block.id}`}
-                                            className={`inline-flex items-center gap-1 rounded-full pl-[2px] pr-1.5 select-none relative group h-6 cursor-default transition-all border shrink-0 ${isSelected ? 'bg-blue-50 border-blue-300 ring-1 ring-blue-400' : isInputFocused ? 'bg-blue-50/30 border-blue-100' : 'bg-gray-50/50 border-gray-100 hover:bg-gray-100'}`}
+                                            className={`inline-flex items-center gap-1 rounded-full pl-[2px] pr-1.5 select-none relative group h-6 cursor-default transition-all border shrink-0 ${isAllInputSelected || isSelected ? 'bg-blue-50 border-blue-300 ring-1 ring-blue-400' : isInputFocused ? 'bg-blue-50/30 border-blue-100' : 'bg-gray-50/50 border-gray-100 hover:bg-gray-100'}`}
                                             onClick={(e) => {
                                                 e.stopPropagation();
+                                                setIsAllInputSelected(false);
                                                 const markerId = (file as any).markerId;
                                                 if (isSelected) {
                                                     setEditingMarkerId(markerId);
@@ -569,7 +613,10 @@ export const InputArea: React.FC<InputAreaProps> = ({
                             if (block.type === 'text') {
                                 const textBlocks = inputBlocks.filter(b => b.type === 'text');
                                 const isLastTextBlock = textBlocks[textBlocks.length - 1]?.id === block.id;
-                                const placeholder = isLastTextBlock && textBlocks.length <= 1 ? (creationMode === 'agent' ? "请输入你的设计需求" : "今天我们要创作什么") : "";
+                                const hasText = (block.text || '').trim().length > 0;
+                                const placeholder = isLastTextBlock && textBlocks.length <= 1 && pendingAttachments.length === 0
+                                    ? (creationMode === 'agent' ? "请输入你的设计需求" : "今天我们要创作什么")
+                                    : "";
 
                                 return (
                                     <span
@@ -577,11 +624,12 @@ export const InputArea: React.FC<InputAreaProps> = ({
                                         id={`input-block-${block.id}`}
                                         contentEditable
                                         suppressContentEditableWarning
-                                        className="ce-placeholder bg-transparent border-none outline-none text-sm text-gray-800"
+                                        className={`ce-placeholder border-none outline-none text-sm ${isAllInputSelected && hasText ? 'bg-blue-100 text-blue-900 rounded px-0.5' : 'bg-transparent text-gray-800'}`}
                                         data-placeholder={placeholder}
-                                        style={{ display: 'inline-block', verticalAlign: 'top', lineHeight: '22px', whiteSpace: 'pre-wrap', wordBreak: 'break-all', caretColor: '#111827', minWidth: '2px', flex: isLastTextBlock ? (pendingAttachments.length > 0 ? '0 1 auto' : '1 1 auto') : '0 1 auto' }}
+                                        style={{ display: 'inline-block', verticalAlign: 'top', lineHeight: '22px', whiteSpace: 'pre-wrap', wordBreak: 'break-all', caretColor: '#111827', minWidth: '4px', margin: '0 2px', flex: isLastTextBlock ? (pendingAttachments.length > 0 ? '0 1 auto' : '1 1 auto') : '0 1 auto' }}
                                         ref={el => { if (el && document.activeElement !== el && el.textContent !== (block.text || '')) el.textContent = block.text || ''; }}
                                         onInput={(e) => {
+                                            if (isAllInputSelected) setIsAllInputSelected(false);
                                             setInputBlocks(useAgentStore.getState().inputBlocks.map(b => b.id === block.id ? { ...b, text: e.currentTarget.textContent || '' } : b));
                                             if (selectedChipId) setSelectedChipId(null);
                                         }}
@@ -596,60 +644,49 @@ export const InputArea: React.FC<InputAreaProps> = ({
                                                 setSelectedChipId(null);
                                             }
 
-                                            const selection = window.getSelection();
-                                            if (!selection || selection.rangeCount === 0) return;
-                                            const range = selection.getRangeAt(0);
-                                            const pos = range.startOffset;
-                                            const textLen = block.text?.length || 0;
+                                            const pos = getCECursorPos(e.currentTarget);
+                                            const textLen = (e.currentTarget.textContent || '').length;
                                             const blockIndex = inputBlocks.findIndex(b => b.id === block.id);
 
                                             if (e.key === 'ArrowLeft' && pos === 0) {
+                                                if (isAllInputSelected) setIsAllInputSelected(false);
                                                 const prevBlock = inputBlocks[blockIndex - 1];
                                                 if (prevBlock && prevBlock.type === 'file') {
                                                     e.preventDefault();
                                                     if (selectedChipId === prevBlock.id) {
-                                                        // 绗簩闃舵锛氬凡閫変腑锛屾墽琛岃烦杞?
                                                         const prevPrev = inputBlocks[blockIndex - 2];
                                                         if (prevPrev?.type === 'text') {
                                                             const prevEl = document.getElementById(`input-block-${prevPrev.id}`);
                                                             if (prevEl) {
-                                                                prevEl.focus();
-                                                                const range = document.createRange();
-                                                                range.selectNodeContents(prevEl);
-                                                                range.collapse(false);
-                                                                selection.removeAllRanges();
-                                                                selection.addRange(range);
+                                                                setCECursorPos(prevEl, (prevEl.textContent || '').length);
                                                             }
+                                                            setSelectedChipId(null);
+                                                        } else if (prevPrev?.type === 'file') {
+                                                            setSelectedChipId(prevPrev.id);
                                                         }
-                                                        setSelectedChipId(null);
                                                     } else {
-                                                        // 绗竴闃舵锛氬厛閫変腑鍥剧墖
                                                         setSelectedChipId(prevBlock.id);
                                                     }
                                                 }
                                             }
 
                                             if (e.key === 'ArrowRight' && pos === textLen) {
+                                                if (isAllInputSelected) setIsAllInputSelected(false);
                                                 const nextBlock = inputBlocks[blockIndex + 1];
                                                 if (nextBlock && nextBlock.type === 'file') {
                                                     e.preventDefault();
                                                     if (selectedChipId === nextBlock.id) {
-                                                        // 绗簩闃舵锛氬凡閫変腑锛屾墽琛岃烦杞?
                                                         const nextNext = inputBlocks[blockIndex + 2];
                                                         if (nextNext?.type === 'text') {
                                                             const nextEl = document.getElementById(`input-block-${nextNext.id}`);
                                                             if (nextEl) {
-                                                                nextEl.focus();
-                                                                const range = document.createRange();
-                                                                range.selectNodeContents(nextEl);
-                                                                range.collapse(true);
-                                                                selection.removeAllRanges();
-                                                                selection.addRange(range);
+                                                                setCECursorPos(nextEl, 0);
                                                             }
+                                                            setSelectedChipId(null);
+                                                        } else if (nextNext?.type === 'file') {
+                                                            setSelectedChipId(nextNext.id);
                                                         }
-                                                        setSelectedChipId(null);
                                                     } else {
-                                                        // 绗竴闃舵锛氬厛閫変腑鍥剧墖
                                                         setSelectedChipId(nextBlock.id);
                                                     }
                                                 }
@@ -678,6 +715,47 @@ export const InputArea: React.FC<InputAreaProps> = ({
                                                     } else {
                                                         setSelectedChipId(nextBlock.id);
                                                     }
+                                                }
+                                            }
+
+                                            if (selectedChipId && e.key === 'ArrowLeft') {
+                                                if (isAllInputSelected) setIsAllInputSelected(false);
+                                                e.preventDefault();
+                                                const chipIndex = inputBlocks.findIndex(b => b.id === selectedChipId);
+                                                if (chipIndex === -1) return;
+                                                const prevBlock = inputBlocks[chipIndex - 1];
+                                                if (prevBlock?.type === 'text') {
+                                                    const prevEl = document.getElementById(`input-block-${prevBlock.id}`);
+                                                    if (prevEl) {
+                                                        setCECursorPos(prevEl, (prevEl.textContent || '').length);
+                                                    }
+                                                    setSelectedChipId(null);
+                                                    return;
+                                                }
+                                                if (prevBlock?.type === 'file') {
+                                                    setSelectedChipId(prevBlock.id);
+                                                    return;
+                                                }
+
+                                                moveCaretToLeftOfFirstChip();
+                                            }
+
+                                            if (selectedChipId && e.key === 'ArrowRight') {
+                                                if (isAllInputSelected) setIsAllInputSelected(false);
+                                                e.preventDefault();
+                                                const chipIndex = inputBlocks.findIndex(b => b.id === selectedChipId);
+                                                if (chipIndex === -1) return;
+                                                const nextBlock = inputBlocks[chipIndex + 1];
+                                                if (nextBlock?.type === 'text') {
+                                                    const nextEl = document.getElementById(`input-block-${nextBlock.id}`);
+                                                    if (nextEl) {
+                                                        setCECursorPos(nextEl, 0);
+                                                    }
+                                                    setSelectedChipId(null);
+                                                    return;
+                                                }
+                                                if (nextBlock?.type === 'file') {
+                                                    setSelectedChipId(nextBlock.id);
                                                 }
                                             }
 
@@ -723,17 +801,17 @@ export const InputArea: React.FC<InputAreaProps> = ({
                         <div className="relative">
                             <button
                                 onClick={() => setShowModeSelector(!showModeSelector)}
-                                className="h-9 px-4 rounded-full flex items-center gap-2 text-[14px] font-bold transition-all bg-white border border-blue-500 text-blue-500 shadow-[0_0_15px_rgba(59,130,246,0.1)] hover:shadow-[0_0_20px_rgba(59,130,246,0.2)]"
+                                className="h-8 px-3.5 rounded-full flex items-center justify-center gap-1.5 text-[13px] font-medium transition-all bg-white border border-blue-200 text-blue-500 hover:bg-blue-50/50 hover:border-blue-300 shadow-sm"
                             >
                                 {creationMode === 'agent' && <><Sparkles size={15} /> Agent</>}
                                 {creationMode === 'image' && <><ImageIcon size={15} /> 图像</>}
                                 {creationMode === 'video' && <><Video size={15} /> 视频</>}
                             </button>
                             {showModeSelector && (
-                                <div className="absolute bottom-full left-0 mb-3 w-40 bg-white rounded-2xl shadow-xl border border-gray-100 py-2 z-50 overflow-hidden">
-                                    <button onClick={() => { setCreationMode('agent'); setShowModeSelector(false); setIsAgentMode(true); }} className="w-full px-4 py-2.5 flex items-center gap-2.5 text-sm font-medium hover:bg-gray-50 transition text-gray-700"><Sparkles size={14} className="text-blue-500" /> Agent</button>
-                                    <button onClick={() => { setCreationMode('image'); setShowModeSelector(false); setIsAgentMode(false); }} className="w-full px-4 py-2.5 flex items-center gap-2.5 text-sm font-medium hover:bg-gray-50 transition text-gray-700"><ImageIcon size={14} className="text-blue-500" /> 图像生成器</button>
-                                    <button onClick={() => { setCreationMode('video'); setShowModeSelector(false); setIsAgentMode(false); }} className="w-full px-4 py-2.5 flex items-center gap-2.5 text-sm font-medium hover:bg-gray-50 transition text-gray-700"><Video size={14} className="text-blue-500" /> 视频生成器</button>
+                                <div className="absolute bottom-full left-0 mb-3 w-[160px] bg-white rounded-2xl shadow-xl border border-gray-100 py-2 z-50 overflow-hidden">
+                                    <button onClick={() => { setCreationMode('agent'); setShowModeSelector(false); setIsAgentMode(true); }} className={`w-full px-4 py-2.5 flex items-center justify-between text-sm font-medium hover:bg-gray-50 transition ${creationMode === 'agent' ? 'text-blue-500' : 'text-gray-600'}`}><div className="flex items-center gap-2.5"><Sparkles size={14} className={creationMode === 'agent' ? 'text-blue-500' : 'text-gray-400'} /> Agent</div>{creationMode === 'agent' && <Check size={14} strokeWidth={2.5} />}</button>
+                                    <button onClick={() => { setCreationMode('image'); setShowModeSelector(false); setIsAgentMode(false); }} className={`w-full px-4 py-2.5 flex items-center justify-between text-sm font-medium hover:bg-gray-50 transition ${creationMode === 'image' ? 'text-blue-500' : 'text-gray-600'}`}><div className="flex items-center gap-2.5"><ImageIcon size={14} className={creationMode === 'image' ? 'text-blue-500' : 'text-gray-400'} /> 图像生成器</div>{creationMode === 'image' && <Check size={14} strokeWidth={2.5} />}</button>
+                                    <button onClick={() => { setCreationMode('video'); setShowModeSelector(false); setIsAgentMode(false); }} className={`w-full px-4 py-2.5 flex items-center justify-between text-sm font-medium hover:bg-gray-50 transition ${creationMode === 'video' ? 'text-blue-500' : 'text-gray-600'}`}><div className="flex items-center gap-2.5"><Video size={14} className={creationMode === 'video' ? 'text-blue-500' : 'text-gray-400'} /> 视频生成器</div>{creationMode === 'video' && <Check size={14} strokeWidth={2.5} />}</button>
                                 </div>
                             )}
                         </div>
