@@ -4,10 +4,9 @@ import { motion } from "framer-motion";
 import {
   Home as HomeIcon,
   Folder,
-  User,
-  Info,
   Plus,
   Settings,
+  Video,
 } from "lucide-react";
 
 interface SidebarProps {
@@ -49,45 +48,40 @@ const Sidebar: React.FC<SidebarProps> = ({ onNewProject }) => {
         <div className="w-12 py-6 bg-card/80 backdrop-blur-xl rounded-full shadow-premium flex flex-col items-center gap-6 border border-border/50">
           <button
             onClick={() => navigate("/")}
-            className={`p-2 rounded-full transition ${
-              isActive("/")
-                ? "bg-gray-100 text-black shadow-sm"
-                : "text-gray-400 hover:text-black hover:bg-gray-50"
-            }`}
+            className={`p-2 rounded-full transition ${isActive("/")
+              ? "bg-gray-100 text-black shadow-sm"
+              : "text-gray-400 hover:text-black hover:bg-gray-50"
+              }`}
             title="首页"
           >
             <HomeIcon size={20} />
           </button>
           <button
             onClick={() => navigate("/projects")}
-            className={`p-2 rounded-full transition ${
-              isActive("/projects")
-                ? "bg-gray-100 text-black shadow-sm"
-                : "text-gray-400 hover:text-black hover:bg-gray-50"
-            }`}
+            className={`p-2 rounded-full transition ${isActive("/projects")
+              ? "bg-gray-100 text-black shadow-sm"
+              : "text-gray-400 hover:text-black hover:bg-gray-50"
+              }`}
             title="项目"
           >
             <Folder size={20} />
           </button>
           <button
-            className="p-2 text-gray-400 hover:text-black hover:bg-gray-50 rounded-full transition"
-            title="用户中心"
+            onClick={() => navigate("/video-workspace")}
+            className={`p-2 rounded-full transition ${isActive("/video-workspace")
+              ? "bg-gray-100 text-black shadow-sm"
+              : "text-gray-400 hover:text-black hover:bg-gray-50"
+              }`}
+            title="Video Studio"
           >
-            <User size={20} />
-          </button>
-          <button
-            className="p-2 text-gray-400 hover:text-black hover:bg-gray-50 rounded-full transition"
-            title="信息"
-          >
-            <Info size={20} />
+            <Video size={20} />
           </button>
           <button
             onClick={() => navigate("/settings")}
-            className={`p-2 rounded-full transition ${
-              isActive("/settings")
-                ? "bg-gray-100 text-black shadow-sm"
-                : "text-gray-400 hover:text-black hover:bg-gray-50"
-            }`}
+            className={`p-2 rounded-full transition ${isActive("/settings")
+              ? "bg-gray-100 text-black shadow-sm"
+              : "text-gray-400 hover:text-black hover:bg-gray-50"
+              }`}
             title="设置 / API Key"
           >
             <Settings size={20} />
@@ -111,7 +105,7 @@ const Sidebar: React.FC<SidebarProps> = ({ onNewProject }) => {
           <Folder size={20} strokeWidth={isActive("/projects") ? 2.5 : 2} />
           <span className="text-[10px] font-black uppercase tracking-tighter">项目</span>
         </button>
-        
+
         {/* 中间突出按钮 */}
         <div className="-translate-y-4">
           <button
@@ -123,10 +117,11 @@ const Sidebar: React.FC<SidebarProps> = ({ onNewProject }) => {
         </div>
 
         <button
-          className="flex flex-col items-center gap-1 text-gray-400"
+          onClick={() => navigate("/video-workspace")}
+          className={`flex flex-col items-center gap-1 ${isActive("/video-workspace") ? "text-black" : "text-gray-400"}`}
         >
-          <User size={20} />
-          <span className="text-[10px] font-black uppercase tracking-tighter">我的</span>
+          <Video size={20} strokeWidth={isActive("/video-workspace") ? 2.5 : 2} />
+          <span className="text-[10px] font-black uppercase tracking-tighter">视频</span>
         </button>
         <button
           onClick={() => navigate("/settings")}

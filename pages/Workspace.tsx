@@ -139,7 +139,7 @@ import { smartEditSkill } from "../services/skills/smart-edit.skill";
 import { touchEditSkill } from "../services/skills/touch-edit.skill";
 import { exportSkill } from "../services/skills/export.skill";
 import { executeSkill } from "../services/skills";
-import { useClothingStudioChatStore } from "../stores/clothingStudioChat.store";
+import { useClothingStudioChatStore, useClothingState } from "../stores/clothingStudioChat.store";
 import { uploadImage } from "../utils/uploader";
 import {
   addTopicMemoryItem,
@@ -147,7 +147,9 @@ import {
   saveTopicAsset,
   syncClothingTopicMemory,
   upsertTopicSnapshot,
+  loadTopicSnapshot,
 } from "../services/topic-memory";
+import { getMemoryKey } from "../services/topicMemory/key";
 import type {
   Requirements,
   ModelGenOptions,
@@ -732,20 +734,61 @@ const Workspace: React.FC = () => {
     width: number;
     height: number;
   } | null>(null);
-  const clothingState = useClothingStudioChatStore();
+  const clothingState = useClothingState();
   const clothingActions = useClothingStudioChatStore((s) => s.actions);
   const [clothingWorkflowError, setClothingWorkflowError] = useState<
     string | null
   >(null);
 
-  const getCurrentTopicId = () => String(activeConversationId || id || "").trim();
-  const ensureTopicId = () => {
-    const existing = getCurrentTopicId();
+  const getCurrentConversationId = () => String(activeConversationId || "").trim();
+  const buildMemoryKey = (conversationId: string) => {
+    const workspaceId = String(id || "").trim();
+    const convId = String(conversationId || "").trim();
+    if (!workspaceId || !convId) return "";
+    return getMemoryKey(workspaceId, convId);
+  };
+  const getCurrentTopicId = () => buildMemoryKey(getCurrentConversationId());
+  const ensureConversationId = () => {
+    const existing = getCurrentConversationId();
     if (existing) return existing;
-    const next = `session-${Date.now()}`;
+    const next = `conv-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
     setActiveConversationId(next);
     return next;
   };
+  const ensureTopicId = () => buildMemoryKey(ensureConversationId());
+
+  useEffect(() => {
+      const topicId = getCurrentTopicId();
+      if (!topicId) return;
+    const store = useClothingStudioChatStore.getState();
+    store.actions.setActiveSession(topicId);
+    
+    (async () => {
+      const snapshot = await loadTopicSnapshot(topicId);
+      if (snapshot?.clothingStudio) {
+        const cs = snapshot.clothingStudio;
+        const actions = store.actions;
+        if (cs.productImageRefs?.length) {
+          actions.addProductImages(cs.productImageRefs.map(r => ({ id: r.assetId, url: r.url || '' })), topicId);
+        }
+        if (cs.productAnchorRef?.url) {
+          actions.setProductAnchorUrl(cs.productAnchorRef.url, topicId);
+        }
+        if (cs.modelAnchorSheetRef?.url) {
+          actions.setModelAnchorSheetUrl(cs.modelAnchorSheetRef.url, topicId);
+        }
+        if (cs.modelRef?.url) {
+          actions.setModelImage({ id: cs.modelRef.assetId, url: cs.modelRef.url }, topicId);
+        }
+        if (cs.analysis) {
+          actions.setAnalysis(cs.analysis as any, topicId);
+        }
+        if (cs.requirements) {
+          actions.setRequirements(cs.requirements, topicId);
+        }
+      }
+    })();
+  }, [activeConversationId, id]);
 
   useEffect(() => {
     const topicId = getCurrentTopicId();
@@ -1732,7 +1775,12 @@ const Workspace: React.FC = () => {
   };
 
   // Agent orchestration
-  const projectContext = useProjectContext(id || "", projectTitle, elements);
+  const projectContext = useProjectContext(
+    id || "",
+    projectTitle,
+    elements,
+    getCurrentConversationId(),
+  );
   const {
     currentTask,
     isUploadingAttachments,
@@ -2009,7 +2057,8 @@ const Workspace: React.FC = () => {
     if (!text && attachments.length === 0) return;
 
     // 首次发送时初始化会话 ID，确保消息能关联到正确的会话
-    const effectiveConversationId = ensureTopicId();
+    const effectiveConversationId = ensureConversationId();
+    const effectiveTopicId = buildMemoryKey(effectiveConversationId);
 
     const attachmentPreviews = attachments.map((f) => URL.createObjectURL(f));
 
@@ -2034,8 +2083,7 @@ const Workspace: React.FC = () => {
 
     try {
       const requestMetadata = {
-        topicId:
-          effectiveConversationId || id || `session-${Date.now()}`,
+        topicId: effectiveTopicId,
         enableWebSearch: isWeb,
         creationMode,
         preferredAspectRatio:
@@ -2856,7 +2904,7 @@ const Workspace: React.FC = () => {
         setHistoryStep(0);
         setSelectedElementId(null);
         setSelectedElementIds([]);
-        setActiveConversationId(""); // 必须清空活跃对话ID，防止保存到旧ID
+        setActiveConversationId("");
 
         // 2. 重置 AI 助手相关的全局 Store 状态 (消息、任务等)
         useAgentStore.getState().actions.reset();
@@ -2871,6 +2919,7 @@ const Workspace: React.FC = () => {
               setConversations(project.conversations);
               const activeC = project.conversations.find((c) => c.id === id);
               if (activeC) {
+                setActiveConversationId(activeC.id);
                 // 深度持久化消息到 store
                 useAgentStore.getState().actions.setMessages(activeC.messages);
               }
@@ -2995,7 +3044,8 @@ const Workspace: React.FC = () => {
   useEffect(() => {
     if (messages.length === 0 || !id) return;
     setConversations((prev) => {
-      const conversationId = activeConversationId || id;
+      const conversationId = activeConversationId;
+      if (!conversationId) return prev;
       let updated = [...prev];
       const idx = updated.findIndex((c) => c.id === conversationId);
 
@@ -4511,7 +4561,7 @@ const Workspace: React.FC = () => {
   };
 
   const startNewChat = () => {
-    setActiveConversationId("");
+    setActiveConversationId(`conv-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`);
     clearMessages();
     setInputBlocks([{ id: "init", type: "text", text: "" }]);
     setMarkers([]);
@@ -7051,6 +7101,7 @@ const Workspace: React.FC = () => {
       <AnimatePresence>
         {showAssistant && (
           <AssistantSidebar
+            workspaceId={id || ""}
             showAssistant={showAssistant}
             setShowAssistant={setShowAssistant}
             conversations={conversations}

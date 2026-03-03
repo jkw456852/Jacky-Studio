@@ -1,4 +1,5 @@
 import { openWorkspaceDB, TOPIC_ASSET_STORE, TOPIC_MEMORY_ITEM_STORE, TOPIC_SNAPSHOT_STORE } from './storage';
+import { parseMemoryKey } from './topicMemory/key';
 
 export type TopicAssetRole =
   | 'product'
@@ -16,7 +17,8 @@ export type AssetRef = {
 };
 
 type TopicSnapshot = {
-  topicId: string;
+  memoryKey: string;
+  topicId: string; // deprecated: kept for backward compatibility
   updatedAt: number;
   summaryText: string;
   pinned: {
@@ -49,7 +51,8 @@ type TopicSnapshot = {
 
 type TopicMemoryItem = {
   id: string;
-  topicId: string;
+  memoryKey: string;
+  topicId: string; // deprecated: kept for backward compatibility
   type: 'constraint' | 'instruction' | 'analysis' | 'asset_tag' | 'plan' | 'issue';
   text: string;
   tags?: string[];
@@ -59,7 +62,8 @@ type TopicMemoryItem = {
 
 type TopicAsset = {
   assetId: string;
-  topicId: string;
+  memoryKey: string;
+  topicId: string; // deprecated: kept for backward compatibility
   role: TopicAssetRole;
   mime: string;
   url?: string;
@@ -71,14 +75,32 @@ type TopicAsset = {
 
 const makeId = (prefix: string) => `${prefix}-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
 
-async function getSnapshot(topicId: string): Promise<TopicSnapshot | null> {
+async function getSnapshot(memoryKey: string): Promise<TopicSnapshot | null> {
   const db = await openWorkspaceDB();
   return new Promise((resolve, reject) => {
     const tx = db.transaction(TOPIC_SNAPSHOT_STORE, 'readonly');
-    const req = tx.objectStore(TOPIC_SNAPSHOT_STORE).get(topicId);
+    const req = tx.objectStore(TOPIC_SNAPSHOT_STORE).get(memoryKey);
     req.onsuccess = () => resolve((req.result as TopicSnapshot) || null);
     req.onerror = () => reject(req.error);
   });
+}
+
+function getCandidateKeys(memoryKey: string): string[] {
+  const base = String(memoryKey || '').trim();
+  if (!base) return [];
+  const parsed = parseMemoryKey(base);
+  return dedupe([base, parsed?.conversationId || '']);
+}
+
+async function loadSnapshotByAnyKey(memoryKey: string): Promise<{ snapshot: TopicSnapshot | null; resolvedKey: string | null }> {
+  const keys = getCandidateKeys(memoryKey);
+  for (const key of keys) {
+    const snapshot = await getSnapshot(key);
+    if (snapshot) {
+      return { snapshot, resolvedKey: key };
+    }
+  }
+  return { snapshot: null, resolvedKey: null };
 }
 
 async function putSnapshot(snapshot: TopicSnapshot): Promise<void> {
@@ -93,14 +115,17 @@ async function putSnapshot(snapshot: TopicSnapshot): Promise<void> {
 
 export async function loadTopicSnapshot(topicId: string): Promise<TopicSnapshot | null> {
   if (!topicId) return null;
-  return getSnapshot(topicId);
+  const loaded = await loadSnapshotByAnyKey(topicId);
+  return loaded.snapshot;
 }
 
 export async function upsertTopicSnapshot(topicId: string, patch: Partial<TopicSnapshot>): Promise<void> {
   if (!topicId) return;
-  const current = await getSnapshot(topicId);
+  const loaded = await loadSnapshotByAnyKey(topicId);
+  const current = loaded.snapshot;
   const next: TopicSnapshot = {
-    topicId,
+    memoryKey: topicId,
+    topicId: parseMemoryKey(topicId)?.conversationId || topicId,
     updatedAt: Date.now(),
     summaryText: patch.summaryText ?? current?.summaryText ?? '',
     pinned: {
@@ -112,17 +137,31 @@ export async function upsertTopicSnapshot(topicId: string, patch: Partial<TopicS
   await putSnapshot(next);
 }
 
-export async function addTopicMemoryItem(input: Omit<TopicMemoryItem, 'id' | 'createdAt'>): Promise<void> {
+export async function addTopicMemoryItem(input: Omit<TopicMemoryItem, 'id' | 'createdAt' | 'memoryKey'>): Promise<void> {
   if (!input.topicId || !input.text?.trim()) return;
   const db = await openWorkspaceDB();
   const normalized = normalizeText(input.text);
+  const memoryKey = input.topicId;
+  const legacyTopicId = parseMemoryKey(memoryKey)?.conversationId || input.topicId;
 
   const existing = await new Promise<TopicMemoryItem[]>((resolve, reject) => {
     const tx = db.transaction(TOPIC_MEMORY_ITEM_STORE, 'readonly');
-    const idx = tx.objectStore(TOPIC_MEMORY_ITEM_STORE).index('topicId');
-    const req = idx.getAll(input.topicId);
-    req.onsuccess = () => resolve((req.result as TopicMemoryItem[]) || []);
-    req.onerror = () => reject(req.error);
+    const store = tx.objectStore(TOPIC_MEMORY_ITEM_STORE);
+    const byMemoryReq = store.index('memoryKey').getAll(memoryKey);
+    byMemoryReq.onsuccess = () => {
+      const byMemory = (byMemoryReq.result as TopicMemoryItem[]) || [];
+      if (legacyTopicId === memoryKey) {
+        resolve(byMemory);
+        return;
+      }
+      const byLegacyReq = store.index('topicId').getAll(legacyTopicId);
+      byLegacyReq.onsuccess = () => {
+        const byLegacy = (byLegacyReq.result as TopicMemoryItem[]) || [];
+        resolve([...byMemory, ...byLegacy]);
+      };
+      byLegacyReq.onerror = () => reject(byLegacyReq.error);
+    };
+    byMemoryReq.onerror = () => reject(byMemoryReq.error);
   });
 
   if (existing.some((x) => x.type === input.type && normalizeText(x.text) === normalized)) {
@@ -133,6 +172,8 @@ export async function addTopicMemoryItem(input: Omit<TopicMemoryItem, 'id' | 'cr
     const tx = db.transaction(TOPIC_MEMORY_ITEM_STORE, 'readwrite');
     const req = tx.objectStore(TOPIC_MEMORY_ITEM_STORE).put({
       ...input,
+      memoryKey,
+      topicId: legacyTopicId,
       id: makeId('mem'),
       createdAt: Date.now(),
     } as TopicMemoryItem);
@@ -145,9 +186,12 @@ export async function saveTopicAsset(topicId: string, role: TopicAssetRole, data
   if (!topicId) return null;
   if (!data.url && !data.blob) return null;
   const assetId = makeId('asset');
+  const memoryKey = topicId;
+  const legacyTopicId = parseMemoryKey(memoryKey)?.conversationId || topicId;
   const asset: TopicAsset = {
     assetId,
-    topicId,
+    memoryKey,
+    topicId: legacyTopicId,
     role,
     mime: data.mime || data.blob?.type || 'application/octet-stream',
     url: data.url,
@@ -172,7 +216,8 @@ export async function saveTopicAssetFromFile(topicId: string, role: TopicAssetRo
 
 export async function syncClothingTopicMemory(topicId: string, patch: Partial<NonNullable<TopicSnapshot['clothingStudio']>>): Promise<void> {
   if (!topicId) return;
-  const current = await getSnapshot(topicId);
+  const loaded = await loadSnapshotByAnyKey(topicId);
+  const current = loaded.snapshot;
   const nextClothing = {
     productImageRefs: current?.clothingStudio?.productImageRefs || [],
     ...current?.clothingStudio,
@@ -244,15 +289,22 @@ export async function deleteTopicMemory(topicId: string): Promise<void> {
   const db = await openWorkspaceDB();
   const tx = db.transaction([TOPIC_SNAPSHOT_STORE, TOPIC_MEMORY_ITEM_STORE, TOPIC_ASSET_STORE], 'readwrite');
 
-  tx.objectStore(TOPIC_SNAPSHOT_STORE).delete(topicId);
+  const keys = getCandidateKeys(topicId);
+  for (const key of keys) {
+    tx.objectStore(TOPIC_SNAPSHOT_STORE).delete(key);
+  }
 
-  await deleteByTopicId(tx.objectStore(TOPIC_MEMORY_ITEM_STORE).index('topicId'), topicId);
-  await deleteByTopicId(tx.objectStore(TOPIC_ASSET_STORE).index('topicId'), topicId);
+  for (const key of keys) {
+    await deleteByIndexValue(tx.objectStore(TOPIC_MEMORY_ITEM_STORE).index('memoryKey'), key);
+    await deleteByIndexValue(tx.objectStore(TOPIC_MEMORY_ITEM_STORE).index('topicId'), key);
+    await deleteByIndexValue(tx.objectStore(TOPIC_ASSET_STORE).index('memoryKey'), key);
+    await deleteByIndexValue(tx.objectStore(TOPIC_ASSET_STORE).index('topicId'), key);
+  }
 }
 
-function deleteByTopicId(index: IDBIndex, topicId: string): Promise<void> {
+function deleteByIndexValue(index: IDBIndex, value: string): Promise<void> {
   return new Promise((resolve, reject) => {
-    const req = index.openCursor(IDBKeyRange.only(topicId));
+    const req = index.openCursor(IDBKeyRange.only(value));
     req.onsuccess = () => {
       const cursor = req.result;
       if (!cursor) {

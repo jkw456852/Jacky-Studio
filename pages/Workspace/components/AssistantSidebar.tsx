@@ -7,12 +7,14 @@ import {
 import { useAgentStore } from '../../../stores/agent.store';
 import { useClothingStudioChatStore } from '../../../stores/clothingStudioChat.store';
 import { deleteTopicMemory } from '../../../services/topic-memory';
+import { getMemoryKey } from '../../../services/topicMemory/key';
 import { MessageList } from './MessageList';
 import { InputArea } from './InputArea';
 import { ConversationSession, ImageModel, VideoModel, Marker } from '../../../types';
 import type { Requirements, ModelGenOptions } from '../../../types/workflow.types';
 
 interface AssistantSidebarProps {
+    workspaceId: string;
     showAssistant: boolean;
     setShowAssistant: (show: boolean) => void;
     conversations: ConversationSession[];
@@ -68,6 +70,7 @@ interface AssistantSidebarProps {
 }
 
 export const AssistantSidebar: React.FC<AssistantSidebarProps> = ({
+    workspaceId,
     showAssistant, setShowAssistant, conversations, setConversations,
     activeConversationId, setActiveConversationId,
     handleSend, handleSmartGenerate, setPreviewUrl,
@@ -103,6 +106,13 @@ export const AssistantSidebar: React.FC<AssistantSidebarProps> = ({
     const [historySearch, setHistorySearch] = useState('');
     const [showFileListModal, setShowFileListModal] = useState(false);
 
+    const createConversationId = () => `conv-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+    const toMemoryKey = (conversationId: string) => {
+        if (!workspaceId || !conversationId) return conversationId;
+        if (conversationId.includes(':')) return conversationId;
+        return getMemoryKey(workspaceId, conversationId);
+    };
+
 
 
     return (
@@ -123,7 +133,7 @@ export const AssistantSidebar: React.FC<AssistantSidebarProps> = ({
                 <div className="flex items-center gap-0.5">
                     <button
                         className="h-7 px-2.5 text-xs text-gray-500 hover:text-gray-800 hover:bg-gray-100 flex items-center justify-center rounded-lg transition-all"
-                        onClick={() => { setActiveConversationId(''); clearMessages(); setPrompt(''); setCreationMode('agent'); }}
+                        onClick={() => { setActiveConversationId(createConversationId()); clearMessages(); setPrompt(''); setCreationMode('agent'); }}
                     >
                         <CirclePlus size={15} strokeWidth={1.5} className="mr-1" />
                         新对话
@@ -155,7 +165,7 @@ export const AssistantSidebar: React.FC<AssistantSidebarProps> = ({
 
                                 <button
                                     className="w-full flex items-center justify-center h-8 text-xs mb-3 border border-dashed rounded-md hover:bg-gray-50 transition-colors"
-                                    onClick={() => { setActiveConversationId(''); clearMessages(); setShowHistoryPopover(false); }}
+                                    onClick={() => { setActiveConversationId(createConversationId()); clearMessages(); setShowHistoryPopover(false); }}
                                 >
                                     <CirclePlus size={14} strokeWidth={1.5} className="mr-1" />
                                     新对话
@@ -186,8 +196,8 @@ export const AssistantSidebar: React.FC<AssistantSidebarProps> = ({
                                                         e.stopPropagation();
                                                         const updated = conversations.filter(c => c.id !== conversation.id);
                                                         setConversations(updated);
-                                                        void deleteTopicMemory(conversation.id);
-                                                        if (activeConversationId === conversation.id) { setActiveConversationId(''); clearMessages(); }
+                                                        void deleteTopicMemory(toMemoryKey(conversation.id));
+                                                        if (activeConversationId === conversation.id) { setActiveConversationId(createConversationId()); clearMessages(); }
                                                     }}
                                                     className="text-gray-300 hover:text-red-400 transition flex-shrink-0"
                                                 >

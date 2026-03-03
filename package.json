@@ -5,7 +5,8 @@
   "type": "module",
   "scripts": {
     "dev": "vite",
-    "build": "vite build",
+    "build:video": "cd XC-VIDEO && npm install && npm run build",
+    "build": "npm run build:video && vite build",
     "preview": "vite preview"
   },
   "dependencies": {
@@ -19,6 +20,7 @@
     "react-dom": "^19.2.4",
     "react-router-dom": "^7.13.0",
     "tailwind-merge": "^3.4.0",
+    "xcaistudio": "file:XC-VIDEO",
     "zod": "^4.3.6",
     "zustand": "^5.0.11"
   },
@@ -30,6 +32,7 @@
     "@types/react-dom": "^19.2.3",
     "@vitejs/plugin-react": "^5.0.0",
     "autoprefixer": "^10.4.24",
+    "concurrently": "^9.2.1",
     "postcss": "^8.5.6",
     "tailwindcss": "^4.1.18",
     "typescript": "~5.8.2",

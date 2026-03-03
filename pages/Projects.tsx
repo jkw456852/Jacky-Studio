@@ -8,9 +8,16 @@ import {
 import { Project } from '../types';
 import { getProject, getProjects, deleteProject, saveProject } from '../services/storage';
 import { deleteTopicMemory } from '../services/topic-memory';
+import { getMemoryKey } from '../services/topicMemory/key';
 import { AnimatePresence } from 'framer-motion';
 import { SettingsModal } from '../components/SettingsModal';
 import Sidebar from '../components/Sidebar';
+
+const toMemoryKey = (workspaceId: string, conversationId: string): string => {
+  if (!workspaceId || !conversationId) return conversationId;
+  if (conversationId.includes(':')) return conversationId;
+  return getMemoryKey(workspaceId, conversationId);
+};
 
 
 
@@ -242,7 +249,7 @@ const Projects: React.FC<{ onExit?: () => void }> = ({ onExit }) => {
           const project = await getProject(id);
           const conversations = project?.conversations || [];
           for (const conversation of conversations) {
-              await deleteTopicMemory(conversation.id);
+              await deleteTopicMemory(toMemoryKey(id, conversation.id));
           }
           await deleteTopicMemory(id);
           await deleteProject(id);
@@ -257,7 +264,7 @@ const Projects: React.FC<{ onExit?: () => void }> = ({ onExit }) => {
               const project = await getProject(id);
               const conversations = project?.conversations || [];
               for (const conversation of conversations) {
-                  await deleteTopicMemory(conversation.id);
+                  await deleteTopicMemory(toMemoryKey(id, conversation.id));
               }
               await deleteTopicMemory(id);
               await deleteProject(id);

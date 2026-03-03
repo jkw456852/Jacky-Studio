@@ -179,6 +179,7 @@ export interface AgentChatMessage extends ChatMessage {
 export interface ProjectContext {
   projectId: string;
   projectTitle: string;
+  conversationId: string;
   brandInfo?: {
     name?: string;
     colors?: string[];

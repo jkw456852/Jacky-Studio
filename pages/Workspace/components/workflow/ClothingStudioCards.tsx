@@ -2,7 +2,7 @@ import React, { useMemo, useState, useRef, useEffect } from 'react';
 import { Download, PlusCircle, Shirt, UserRound, Sparkles, Play, XCircle, RefreshCw, Eye, MousePointer2 } from 'lucide-react';
 import { motion, AnimatePresence, useScroll, useSpring } from 'framer-motion';
 import type { WorkflowUiMessage, Requirements, ModelGenOptions } from '../../../../types/workflow.types';
-import { useClothingStudioChatStore } from '../../../../stores/clothingStudioChat.store';
+import { useClothingState, useClothingStudioChatStore } from '../../../../stores/clothingStudioChat.store';
 import { PLATFORM_OPTIONS, LANGUAGE_OPTIONS, COUNT_OPTIONS, REQUIREMENT_TEMPLATES, REQUIREMENT_TAGS } from '../../../../constants/clothing-requirements';
 
 // ----------------------------------------------------------------------
@@ -122,7 +122,7 @@ export const ClothingStudioCards: React.FC<ClothingStudioCardsProps> = ({
   onInsertToCanvas,
   onRetryFailed,
 }) => {
-  const state = useClothingStudioChatStore();
+  const state = useClothingState();
   const [form, setForm] = useState<Requirements>(state.requirements);
   const [modelForm, setModelForm] = useState<ModelGenOptions>(state.modelOptions);
   const [showAdvanced, setShowAdvanced] = useState(false);
@@ -338,7 +338,7 @@ export const ClothingStudioCards: React.FC<ClothingStudioCardsProps> = ({
            <p className="mt-1 text-[10px] opacity-90 font-bold uppercase tracking-widest">{message.text || 'Processing visual layers...'}</p>
            <div className="mt-4 flex gap-3">
               <button 
-                onClick={() => state.actions.cancelGenerating()} 
+                onClick={() => useClothingStudioChatStore.getState().actions.cancelGenerating()} 
                 className="text-[10px] font-bold bg-white/20 hover:bg-white/30 px-3 py-1.5 rounded-full backdrop-blur-md transition-all active:scale-95"
               >
                 ABORT

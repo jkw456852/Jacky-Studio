@@ -8,6 +8,7 @@ import { uploadImage } from '../utils/uploader';
 import { useImageHostStore } from '../stores/imageHost.store';
 import { localPreRoute } from '../services/agents/local-router';
 import { addTopicMemoryItem, buildTopicPinnedContext, extractConstraintHints, upsertTopicSnapshot } from '../services/topic-memory';
+import { getMemoryKey } from '../services/topicMemory/key';
 
 interface CanvasState {
   elements: CanvasElement[];
@@ -185,7 +186,12 @@ export function useAgentOrchestrator(options: UseAgentOrchestratorOptions) {
         conversationHistory: useAgentStore.getState().messages
       };
 
-      const topicId = String((metadata as any)?.topicId || projectContext.projectId || '').trim();
+      const activeConversationId = String(projectContext.conversationId || '').trim();
+      const topicId = String(
+        (metadata as any)?.topicId ||
+        (activeConversationId ? getMemoryKey(projectContext.projectId, activeConversationId) : '') ||
+        ''
+      ).trim();
       let topicPinnedContext = '';
       let topicPinnedRefs: string[] = [];
       if (topicId) {

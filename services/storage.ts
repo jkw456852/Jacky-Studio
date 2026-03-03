@@ -5,7 +5,7 @@ export const STORE_NAME = 'projects';
 export const TOPIC_SNAPSHOT_STORE = 'topic_snapshots';
 export const TOPIC_MEMORY_ITEM_STORE = 'topic_memory_items';
 export const TOPIC_ASSET_STORE = 'topic_assets';
-const DB_VERSION = 2;
+const DB_VERSION = 3;
 
 export const openWorkspaceDB = (): Promise<IDBDatabase> => {
   return new Promise((resolve, reject) => {
@@ -14,23 +14,39 @@ export const openWorkspaceDB = (): Promise<IDBDatabase> => {
     request.onsuccess = () => resolve(request.result);
     request.onupgradeneeded = (event) => {
       const db = (event.target as IDBOpenDBRequest).result;
+      const oldVersion = (event as any).oldVersion;
+      
       if (!db.objectStoreNames.contains(STORE_NAME)) {
         db.createObjectStore(STORE_NAME, { keyPath: 'id' });
       }
+      
       if (!db.objectStoreNames.contains(TOPIC_SNAPSHOT_STORE)) {
-        db.createObjectStore(TOPIC_SNAPSHOT_STORE, { keyPath: 'topicId' });
+        db.createObjectStore(TOPIC_SNAPSHOT_STORE, { keyPath: 'memoryKey' });
+      } else if (oldVersion < 3) {
+        const store = db.transaction(TOPIC_SNAPSHOT_STORE, 'versionchange').objectStore(TOPIC_SNAPSHOT_STORE);
+        store.createIndex('memoryKey', 'memoryKey', { unique: true });
       }
+      
       if (!db.objectStoreNames.contains(TOPIC_MEMORY_ITEM_STORE)) {
         const store = db.createObjectStore(TOPIC_MEMORY_ITEM_STORE, { keyPath: 'id' });
+        store.createIndex('memoryKey', 'memoryKey', { unique: false });
         store.createIndex('topicId', 'topicId', { unique: false });
         store.createIndex('type', 'type', { unique: false });
         store.createIndex('createdAt', 'createdAt', { unique: false });
+      } else if (oldVersion < 3) {
+        const store = db.transaction(TOPIC_MEMORY_ITEM_STORE, 'versionchange').objectStore(TOPIC_MEMORY_ITEM_STORE);
+        store.createIndex('memoryKey', 'memoryKey', { unique: false });
       }
+      
       if (!db.objectStoreNames.contains(TOPIC_ASSET_STORE)) {
         const store = db.createObjectStore(TOPIC_ASSET_STORE, { keyPath: 'assetId' });
+        store.createIndex('memoryKey', 'memoryKey', { unique: false });
         store.createIndex('topicId', 'topicId', { unique: false });
         store.createIndex('role', 'role', { unique: false });
         store.createIndex('createdAt', 'createdAt', { unique: false });
+      } else if (oldVersion < 3) {
+        const store = db.transaction(TOPIC_ASSET_STORE, 'versionchange').objectStore(TOPIC_ASSET_STORE);
+        store.createIndex('memoryKey', 'memoryKey', { unique: false });
       }
     };
   });
