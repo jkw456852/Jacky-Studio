@@ -45,7 +45,7 @@ interface NodeProps {
 const IMAGE_ASPECT_RATIOS = ['1:1', '3:4', '4:3', '9:16', '16:9'];
 const VIDEO_ASPECT_RATIOS = ['1:1', '3:4', '4:3', '9:16', '16:9'];
 const IMAGE_RESOLUTIONS = ['1k', '2k', '4k'];
-const VIDEO_RESOLUTIONS = ['480p', '720p', '1080p'];
+const VIDEO_RESOLUTIONS = ['1k', '2k', '4k'];
 const IMAGE_COUNTS = [1, 2, 3, 4];
 const VIDEO_COUNTS = [1, 2, 3, 4];
 
@@ -53,21 +53,27 @@ const VIDEO_COUNTS = [1, 2, 3, 4];
 const MODEL_CONFIGS: Record<string, any> = {
     'veo-3.1-fast-generate-preview': {
         ratios: ['1:1', '4:3', '3:4', '16:9', '9:16', '21:9'],
-        resolutions: ['720p', '1080p', '4k'],
+        resolutions: ['1k', '2k'],
         durations: [4, 6, 8]
     },
     'veo-3.1-generate-preview': {
         ratios: ['1:1', '4:3', '3:4', '16:9', '9:16', '21:9'],
-        resolutions: ['720p', '1080p', '4k'],
+        resolutions: ['1k', '2k', '4k'],
         durations: [4, 6, 8]
     },
     'sora-2': {
         ratios: ['1:1', '4:3', '3:4', '16:9', '9:16', '21:9'],
-        resolutions: ['720p'],
+        resolutions: ['1k', '2k'],
+        durations: [4, 8, 10, 12, 15]
+    },
+    'sora-2-pro': {
+        ratios: ['1:1', '4:3', '3:4', '16:9', '9:16', '21:9'],
+        resolutions: ['1k', '2k', '4k'],
         durations: [4, 8, 10, 12, 15]
     },
     'kling-3.0': {
         ratios: ['16:9', '9:16', '1:1'],
+        resolutions: ['1k', '2k'],
         qualities: [{ l: 'Standard', v: 'std' }, { l: 'Pro', v: 'pro' }],
         durations: [5, 10]
     }

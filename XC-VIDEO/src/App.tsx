@@ -1,18 +1,18 @@
 
 // ... existing imports
 import React, { useState, useRef, useEffect, useCallback } from 'react';
-import { Node } from './components/Node';
-import { SidebarDock } from './components/SidebarDock';
-import { AssistantPanel } from './components/AssistantPanel';
-import { ImageCropper } from './components/ImageCropper';
-import { SketchEditor } from './components/SketchEditor';
-import { SmartSequenceDock } from './components/SmartSequenceDock';
-import { SonicStudio } from './components/SonicStudio';
-import { SettingsModal } from './components/SettingsModal';
-import { AppNode, NodeType, NodeStatus, Connection, ContextMenuState, Group, Workflow, SmartSequenceItem } from './types';
-import { generateImageFromText, generateVideo, analyzeVideo, editImageWithText, planStoryboard, orchestrateVideoPrompt, compileMultiFramePrompt, urlToBase64, extractLastFrame, generateAudio } from './services/geminiService';
-import { getGenerationStrategy } from './services/videoStrategies';
-import { saveToStorage, loadFromStorage } from './services/storage';
+import { Node } from '../components/Node';
+import { SidebarDock } from '../components/SidebarDock';
+import { AssistantPanel } from '../components/AssistantPanel';
+import { ImageCropper } from '../components/ImageCropper';
+import { SketchEditor } from '../components/SketchEditor';
+import { SmartSequenceDock } from '../components/SmartSequenceDock';
+import { SonicStudio } from '../components/SonicStudio';
+import { SettingsModal } from '../components/SettingsModal';
+import { AppNode, NodeType, NodeStatus, Connection, ContextMenuState, Group, Workflow, SmartSequenceItem } from '../types';
+import { generateImageFromText, generateVideo, analyzeVideo, editImageWithText, planStoryboard, orchestrateVideoPrompt, compileMultiFramePrompt, urlToBase64, extractLastFrame, generateAudio } from '../services/geminiService';
+import { getGenerationStrategy } from '../services/videoStrategies';
+import { saveToStorage, loadFromStorage } from '../services/storage';
 import {
     Plus, Copy, Trash2, Type, Image as ImageIcon, Video as VideoIcon,
     ScanFace, Brush, MousePointerClick, LayoutTemplate, X, Film, Link, RefreshCw, Upload,
@@ -304,7 +304,8 @@ export const App = () => {
 
     // --- Persistence ---
     useEffect(() => {
-        if (window.aistudio) window.aistudio.hasSelectedApiKey().then(hasKey => { if (!hasKey) window.aistudio.openSelectKey(); });
+        const win = window as any;
+        if (win.aistudio) win.aistudio.hasSelectedApiKey().then((hasKey: boolean) => { if (!hasKey) win.aistudio.openSelectKey(); });
         const loadData = async () => {
             try {
                 const sAssets = await loadFromStorage<any[]>('assets'); if (sAssets) setAssetHistory(sAssets);
@@ -447,7 +448,7 @@ export const App = () => {
             model: type === NodeType.VIDEO_GENERATOR ? 'veo-3.1-fast-generate-preview' :
                 type === NodeType.VIDEO_ANALYZER ? 'gemini-3-pro-preview' :
                     type === NodeType.AUDIO_GENERATOR ? 'gemini-2.5-flash-preview-tts' :
-                        type.includes('IMAGE') ? 'gemini-3-pro-image-preview' :
+                        type === NodeType.IMAGE_GENERATOR || type === NodeType.IMAGE_TO_IMAGE || type === NodeType.IMAGE_TO_VIDEO ? 'gemini-3-pro-image-preview' :
                             'gemini-3-pro-preview',
             generationMode: type === NodeType.VIDEO_GENERATOR ? 'DEFAULT' : undefined, // Initialize as DEFAULT (Off)
             ...initialData
@@ -825,7 +826,7 @@ export const App = () => {
 
                             newNodes.forEach(async (n) => {
                                 try {
-                                    const res = await generateImageFromText(n.data.prompt!, { model: n.data.model!, aspectRatio: n.data.aspectRatio, resolution: n.data.resolution, count: 1 });
+                                    const res = await generateImageFromText(n.data.prompt!, n.data.model!, [], { aspectRatio: n.data.aspectRatio, resolution: n.data.resolution, count: 1 });
                                     handleNodeUpdate(n.id, { image: res[0], images: res, status: NodeStatus.SUCCESS });
                                 } catch (e: any) {
                                     handleNodeUpdate(n.id, { error: e.message, status: NodeStatus.ERROR });
@@ -838,7 +839,7 @@ export const App = () => {
                     }
                 }
 
-                const res = await generateImageFromText(enhancedPrompt, { model, aspectRatio, count: node.data.imageCount, initialImage });
+                const res = await generateImageFromText(enhancedPrompt, model, initialImage ? [initialImage] : [], { aspectRatio, count: node.data.imageCount });
                 handleNodeUpdate(id, { image: res[0], images: res });
 
             } else if (isVideoOrImageToVideo) {
@@ -860,13 +861,11 @@ export const App = () => {
                 //     finalPrompt = `${prompt} - 角色参考图像已提供`;
                 // }
 
-                const res = await generateVideo(finalPrompt, {
-                    model,
+                const res = await generateVideo(finalPrompt, model, {
                     aspectRatio: node.data.aspectRatio || '16:9',
                     duration: node.data.duration || 5,
-                    resolution: node.data.resolution || '720p',
-                    imageInput: initialImage // Pass the image input for Image-to-Video
-                });
+                    resolution: node.data.resolution || '1k'
+                }, initialImage);
 
                 if (res.isFallbackImage) {
                     handleNodeUpdate(id, {

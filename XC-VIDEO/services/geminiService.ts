@@ -418,17 +418,27 @@ export const generateImageFromText = async (
         effectiveModel = 'gemini-3-pro-image-preview';
     }
 
+    // --- Resolution Mapping for Images (1k, 2k, 4k) ---
+    // If Yunwu or supported, we might pass size. For Google GenAI SDK, it's often automatic or via aspect ratio.
+    // However, if we need to call a raw endpoint for images too, we'd do it here.
+    // For now, we'll assume Gemini SDK handles it via metadata or just prompt quality.
+    let size = options.resolution || '1k';
+    let apiSize = '1024x1024';
+    if (size === '1k') apiSize = '1024x1024';
+    else if (size === '2k') apiSize = '2048x2048';
+    else if (size === '4k') apiSize = '4096x4096';
+
     // Prepare Contents
     const parts: Part[] = [];
 
     // Add Input Images if available (Image-to-Image)
     for (const base64 of inputImages) {
-        const cleanBase64 = base64.replace(/^data:image\/\w+;base64,/, "");
-        const mimeType = base64.match(/^data:(image\/\w+);base64,/)?.[1] || "image/png";
+        const cleanBase64 = base64.replace(/^data:image\/[a-zA-Z+]+;base64,/, "");
+        const mimeType = base64.match(/^data:(image\/[a-zA-Z+]+);base64,/)?.[1] || "image/png";
         parts.push({ inlineData: { data: cleanBase64, mimeType } });
     }
 
-    parts.push({ text: prompt });
+    parts.push({ text: prompt + ` (resolution: ${apiSize})` });
 
     try {
         const response = await ai.models.generateContent({
@@ -486,6 +496,8 @@ export const generateVideo = async (
             effectiveModel = 'veo-3.1-generate-preview';
         } else if (model === 'sora-2') {
             effectiveModel = 'sora-2-all'; // Yunwu sora-2 with 10s/15s support
+        } else if (model === 'sora-2-pro') {
+            effectiveModel = 'sora-2-pro-all'; // Yunwu sora-2-pro
         } else if (model === 'kling-3.0') {
             effectiveModel = 'kling-v1-5'; // Kling mapping
         }
@@ -503,7 +515,21 @@ export const generateVideo = async (
 
     const qualitySuffix = ", cinematic lighting, highly detailed, photorealistic, 4k, smooth motion, professional color grading";
     let enhancedPrompt = prompt + qualitySuffix;
-    let resolution = options.resolution || (effectiveModel.includes('pro') ? '1080p' : '720p');
+
+    // --- Resolution Mapping (1k, 2k, 4k) ---
+    let resolution = options.resolution || (effectiveModel.includes('pro') ? '2k' : '1k');
+
+    // Map to API specific resolution strings
+    let apiResolution = resolution;
+    if (isYunwu) {
+        if (resolution === '1k') apiResolution = '720p';
+        else if (resolution === '2k') apiResolution = '1080p';
+        else if (resolution === '4k') apiResolution = '4k';
+    } else {
+        if (resolution === '1k') apiResolution = '720p';
+        else if (resolution === '2k') apiResolution = '1080p';
+        else if (resolution === '4k') apiResolution = '4k';
+    }
 
     let finalInputImageBase64: string | null = null;
     if (inputImageBase64) {
@@ -527,7 +553,7 @@ export const generateVideo = async (
                         model: effectiveModel,
                         prompt: enhancedPrompt,
                         duration: options.duration || 5, // send as number
-                        size: resolution
+                        size: apiResolution
                     };
                     if (finalInputImageBase64) {
                         payload.image_url = finalInputImageBase64;
