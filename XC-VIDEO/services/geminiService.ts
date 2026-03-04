@@ -16,7 +16,7 @@ const pickRandomKey = (keys: string[]): string => {
     return keys[Math.floor(Math.random() * keys.length)];
 };
 
-const getClient = () => {
+export const getRawConfig = () => {
     const activeProviderId = localStorage.getItem('api_provider') || 'yunwu';
     const providersRaw = localStorage.getItem('api_providers');
 
@@ -49,7 +49,7 @@ const getClient = () => {
         : localStorage.getItem('yunwu_api_key') || '';
 
     const rawApiKey = process.env.API_KEY || providerApiKey || legacyKey;
-    
+
     if (!rawApiKey) {
         throw new Error("API Key is missing. Please configure your API Key in XC-STUDIO Settings.");
     }
@@ -60,9 +60,14 @@ const getClient = () => {
 
     const normalizedBaseUrl = providerBaseUrl.replace(/\/+$/, '').replace(/\/v\d+(beta)?$/i, '');
 
+    return { apiKey, baseUrl: normalizedBaseUrl };
+};
+
+export const getClient = () => {
+    const { apiKey, baseUrl } = getRawConfig();
     return new GoogleGenAI({
         apiKey,
-        httpOptions: { baseUrl: normalizedBaseUrl }
+        httpOptions: { baseUrl }
     });
 };
 
@@ -469,6 +474,8 @@ export const generateVideo = async (
     referenceImages?: string[]
 ): Promise<{ uri: string, isFallbackImage?: boolean, videoMetadata?: any, uris?: string[] }> => {
     const ai = getClient();
+    const { apiKey, baseUrl } = getRawConfig();
+    const isYunwu = baseUrl.includes('yunwu.ai');
 
     // --- Model Normalization for Yunwu AI ---
     let effectiveModel = model;
@@ -477,112 +484,147 @@ export const generateVideo = async (
     } else if (model === 'veo-3.1-generate-preview') {
         effectiveModel = 'veo-3.1-generate-preview';
     } else if (model === 'sora-2') {
-        effectiveModel = 'sora-2'; 
+        effectiveModel = 'sora-2';
     } else if (model === 'kling-3.0') {
         effectiveModel = 'kling-v1-5';
     }
-    
-    // --- Quality Optimization ---
+
     const qualitySuffix = ", cinematic lighting, highly detailed, photorealistic, 4k, smooth motion, professional color grading";
     let enhancedPrompt = prompt + qualitySuffix;
-
-    // --- Model Selection & Resolution ---
     let resolution = options.resolution || (effectiveModel.includes('pro') ? '1080p' : '720p');
 
-    // --- Preparation ---
-    const config: any = {
-        numberOfVideos: 1,
-        aspectRatio: options.aspectRatio || '16:9',
-        resolution: resolution as any,
-        duration: options.duration || (effectiveModel.includes('veo') ? 4 : 5)
-    };
-
-    // Kling specific quality
-    if (effectiveModel.includes('kling') && options.videoQuality) {
-        config.quality = options.videoQuality;
-    }
-
-    // Prepare Inputs
-    let inputs: any = { prompt: enhancedPrompt };
-
-    // 1. Handle Input Image (Image-to-Video)
     let finalInputImageBase64: string | null = null;
     if (inputImageBase64) {
         try {
             const compat = await convertImageToCompatibleFormat(inputImageBase64);
-            inputs.image = { imageBytes: compat.data, mimeType: compat.mimeType };
-            finalInputImageBase64 = compat.fullDataUri; // Store for fallback
+            finalInputImageBase64 = compat.fullDataUri;
         } catch (e) {
-            console.warn("Veo Input Image Conversion Failed:", e);
+            console.warn("Input Image Conversion Failed:", e);
         }
-    } else if (options.generationMode === 'CHARACTER_REF' && referenceImages) {
-        // Character Ref usually passes image as 'image' prop in current SDK or via specific prompt structure
-        // Here we assume it was passed as inputImageBase64 by strategy
-    }
-
-    // 2. Handle Video Input (e.g. for edit/continuation)
-    if (videoInput) {
-        inputs.video = videoInput;
-    }
-
-    // 3. Handle Reference Images (for FrameWeaver/CharacterRef if supported)
-    if (referenceImages && referenceImages.length > 0 && effectiveModel === 'veo-3.1-generate-preview') {
-        // Some Veo models support referenceImages config
-        // Converting references
-        const refsPayload = [];
-        for (const ref of referenceImages) {
-            const c = await convertImageToCompatibleFormat(ref);
-            refsPayload.push({ image: { imageBytes: c.data, mimeType: c.mimeType }, referenceType: 'ASSET' });
-        }
-        config.referenceImages = refsPayload;
     }
 
     const count = options.count || 1;
 
     try {
-        // --- Parallel Generation for Count > 1 ---
-        // We use Promise.allSettled to ensure that if one generation fails, others can still succeed.
         const operations = [];
         for (let i = 0; i < count; i++) {
             operations.push(retryWithBackoff(async () => {
-                let op = await ai.models.generateVideos({
-                    model: effectiveModel,
-                    ...inputs,
-                    config: config
-                });
+                if (isYunwu) {
+                    // Yunwu Raw API Call
+                    const payload: any = {
+                        model: effectiveModel,
+                        prompt: enhancedPrompt,
+                        duration: options.duration || 5, // send as number
+                        size: resolution
+                    };
+                    if (finalInputImageBase64) {
+                        payload.image_url = finalInputImageBase64;
+                    }
 
-                // Poll for completion
-                while (!op.done) {
-                    await wait(5000); // 5s polling
-                    op = await ai.operations.getVideosOperation({ operation: op });
+                    // Attempt fetching OpenAI standard video endpoint
+                    let res = await fetch(`${baseUrl}/v1/videos`, {
+                        method: 'POST',
+                        headers: {
+                            'Content-Type': 'application/json',
+                            'Authorization': `Bearer ${apiKey}`
+                        },
+                        body: JSON.stringify(payload)
+                    });
+
+                    if (!res.ok) {
+                        const errText = await res.text();
+                        throw new Error(`Yunwu Video API Error (${res.status}): ${errText}`);
+                    }
+
+                    let data = await res.json();
+
+                    // Handle async task polling logic standard in some OpenAI proxies
+                    if (data.id || data.task_id) {
+                        const taskId = data.id || data.task_id;
+                        let maxPolls = 60; // 5 mins max
+                        while (maxPolls > 0) {
+                            await wait(5000); // Poll every 5 seconds
+                            const pollRes = await fetch(`${baseUrl}/v1/videos/tasks/${taskId}`, {
+                                headers: { 'Authorization': `Bearer ${apiKey}` }
+                            });
+                            if (pollRes.ok) {
+                                const pollData = await pollRes.json();
+                                if (pollData.url || pollData.video_url || (pollData.data && pollData.data[0]?.url)) {
+                                    data = pollData; // done
+                                    break;
+                                }
+                                if (pollData.status === 'failed' || pollData.status === 'error') {
+                                    throw new Error(`Video Generation Failed: ${JSON.stringify(pollData)}`);
+                                }
+                                // else assume processing and continue loop
+                            } else {
+                                // sometimes polling endpoint is just /v1/videos/{id}
+                                const altPollRes = await fetch(`${baseUrl}/v1/videos/${taskId}`, {
+                                    headers: { 'Authorization': `Bearer ${apiKey}` }
+                                });
+                                if (altPollRes.ok) {
+                                    const altPollData = await altPollRes.json();
+                                    if (altPollData.url || altPollData.video_url || (altPollData.data && altPollData.data[0]?.url)) {
+                                        data = altPollData;
+                                        break;
+                                    }
+                                }
+                            }
+                            maxPolls--;
+                        }
+                    }
+
+                    // Extract actual URL
+                    let foundUrl = '';
+                    if (data.data && data.data[0] && data.data[0].url) {
+                        foundUrl = data.data[0].url;
+                    } else if (data.url) {
+                        foundUrl = data.url;
+                    } else if (data.video_url) {
+                        foundUrl = data.video_url;
+                    }
+
+                    if (!foundUrl) {
+                        throw new Error("Unable to parse video URL. Response: " + JSON.stringify(data));
+                    }
+                    return foundUrl;
+
+                } else {
+                    // Google GenAI native
+                    const config: any = {
+                        numberOfVideos: 1,
+                        aspectRatio: options.aspectRatio || '16:9',
+                        resolution: resolution as any,
+                        duration: options.duration || 5
+                    };
+                    const inputs: any = { prompt: enhancedPrompt };
+                    if (finalInputImageBase64) {
+                        inputs.image = { imageBytes: finalInputImageBase64.replace(/^data:image\/[a-zA-Z+]+;base64,/, ""), mimeType: "image/png" };
+                    }
+                    let op = await ai.models.generateVideos({ model: effectiveModel, ...inputs, config });
+                    while (!op.done) {
+                        await wait(5000);
+                        op = await ai.operations.getVideosOperation({ operation: op });
+                    }
+                    const vid = op.response?.generatedVideos?.[0]?.video;
+                    if (!vid?.uri) throw new Error("No valid URI from gemini response");
+                    return `${vid.uri}&key=${apiKey}`;
                 }
-                return op;
             }));
         }
 
         const results = await Promise.allSettled(operations);
-
-        // Collect successful URIs
         const validUris: string[] = [];
-        let primaryMetadata = null;
 
         for (const res of results) {
             if (res.status === 'fulfilled') {
-                const vid = res.value.response?.generatedVideos?.[0]?.video;
-                if (vid?.uri) {
-                    // Fetch to hydrate (and check access) - usually frontend needs key appended
-                    // But here we just return the URI. Frontend appends key.
-                    const fullUri = `${vid.uri}&key=${process.env.API_KEY}`;
-                    validUris.push(fullUri);
-                    if (!primaryMetadata) primaryMetadata = vid;
-                }
+                validUris.push(res.value);
             } else {
                 console.warn("One of the video generations failed:", res.reason);
             }
         }
 
         if (validUris.length === 0) {
-            // If ALL failed, try to find a meaningful error from the first failure
             const firstError = results.find(r => r.status === 'rejected') as PromiseRejectedResult;
             throw firstError?.reason || new Error("Video generation failed (No valid URIs).");
         }
@@ -590,7 +632,6 @@ export const generateVideo = async (
         return {
             uri: validUris[0],
             uris: validUris,
-            videoMetadata: primaryMetadata,
             isFallbackImage: false
         };
 
