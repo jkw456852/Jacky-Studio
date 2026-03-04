@@ -24,8 +24,6 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose })
   const handleSave = () => {
     localStorage.setItem('pollo_api_key', polloKey.trim());
     localStorage.setItem('yunwu_api_key', yunwuKey.trim());
-    // Ensure yunwu is the active provider if we are saving these settings
-    localStorage.setItem('api_provider', 'yunwu');
     setIsSaved(true);
     setTimeout(() => setIsSaved(false), 2000);
     setTimeout(onClose, 500);

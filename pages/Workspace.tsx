@@ -746,6 +746,7 @@ const Workspace: React.FC = () => {
     panRef.current = pan;
   }, [zoom, pan]);
   const [elements, setElements] = useState<CanvasElement[]>([]);
+  const elementsRef = useRef<CanvasElement[]>([]);
   const [selectedElementId, setSelectedElementId] = useState<string | null>(
     null,
   );
@@ -784,6 +785,7 @@ const Workspace: React.FC = () => {
   const [showShapeMenu, setShowShapeMenu] = useState(false);
   const [focusedGroupId, setFocusedGroupId] = useState<string | null>(null);
   const [markers, setMarkers] = useState<Marker[]>([]);
+  const markersRef = useRef<Marker[]>([]);
   const [isCtrlPressed, setIsCtrlPressed] = useState(false);
   const [hoveredMarkerId, setHoveredMarkerId] = useState<number | null>(null);
   const [editingMarkerId, setEditingMarkerId] = useState<string | null>(null);
@@ -824,6 +826,15 @@ const Workspace: React.FC = () => {
   const [isHoveringVideoFrames, setIsHoveringVideoFrames] = useState<{
     [id: string]: boolean;
   }>({});
+
+  useEffect(() => {
+    elementsRef.current = elements;
+  }, [elements]);
+
+  useEffect(() => {
+    markersRef.current = markers;
+  }, [markers]);
+
   const inputBlocks = useAgentStore((s) => s.inputBlocks);
   const activeBlockId = useAgentStore((s) => s.activeBlockId);
   const selectionIndex = useAgentStore((s) => s.selectionIndex);
@@ -2905,8 +2916,11 @@ const Workspace: React.FC = () => {
       displayHeight,
     } = await makeImageProxyFromUrl(resultUrl, DEFAULT_PROXY_MAX_DIM, viewport);
 
-    const updated = elements.map((e) => {
+    const baseElements = elementsRef.current;
+    let changed = false;
+    const nextElements = baseElements.map((e) => {
       if (e.id !== elementId) return e;
+      changed = true;
       return {
         ...e,
         isGenerating: false,
@@ -2919,21 +2933,33 @@ const Workspace: React.FC = () => {
       };
     });
 
-    setElements(updated);
-    saveToHistory(updated, markers);
+    if (!changed) return;
+    elementsRef.current = nextElements;
+    setElements(nextElements);
+    saveToHistory(nextElements, markersRef.current);
+  };
+
+  const setElementGeneratingState = (elementId: string, isGenerating: boolean) => {
+    const baseElements = elementsRef.current;
+    let changed = false;
+    const nextElements = baseElements.map((e) => {
+      if (e.id !== elementId) return e;
+      if (e.isGenerating === isGenerating) return e;
+      changed = true;
+      return { ...e, isGenerating };
+    });
+    if (!changed) return;
+    elementsRef.current = nextElements;
+    setElements(nextElements);
   };
 
   // --- Image Processing Handlers ---
 
   const handleUpscale = async () => {
     if (!selectedElementId) return;
-    const el = elements.find((e) => e.id === selectedElementId);
+    const el = elementsRef.current.find((e) => e.id === selectedElementId);
     if (!el || !el.url) return;
-
-    const update1 = elements.map((e) =>
-      e.id === selectedElementId ? { ...e, isGenerating: true } : e,
-    );
-    setElements(update1);
+    setElementGeneratingState(selectedElementId, true);
 
     try {
       const base64Ref = await urlToBase64(el.url);
@@ -2950,22 +2976,15 @@ const Workspace: React.FC = () => {
       }
     } catch (e) {
       console.error(e);
-      const updateFail = elements.map((e) =>
-        e.id === selectedElementId ? { ...e, isGenerating: false } : e,
-      );
-      setElements(updateFail);
+      setElementGeneratingState(selectedElementId, false);
     }
   };
 
   const handleRemoveBg = async () => {
     if (!selectedElementId) return;
-    const el = elements.find((e) => e.id === selectedElementId);
+    const el = elementsRef.current.find((e) => e.id === selectedElementId);
     if (!el || !el.url) return;
-
-    const update1 = elements.map((e) =>
-      e.id === selectedElementId ? { ...e, isGenerating: true } : e,
-    );
-    setElements(update1);
+    setElementGeneratingState(selectedElementId, true);
 
     try {
       const base64Ref = await urlToBase64(el.url);
@@ -2981,16 +3000,13 @@ const Workspace: React.FC = () => {
       }
     } catch (e) {
       console.error(e);
-      const updateFail = elements.map((e) =>
-        e.id === selectedElementId ? { ...e, isGenerating: false } : e,
-      );
-      setElements(updateFail);
+      setElementGeneratingState(selectedElementId, false);
     }
   };
 
   const handleEditTextClick = async () => {
     if (!selectedElementId) return;
-    const el = elements.find((e) => e.id === selectedElementId);
+    const el = elementsRef.current.find((e) => e.id === selectedElementId);
     if (!el || !el.url) return;
 
     setIsExtractingText(true);
@@ -3009,14 +3025,11 @@ const Workspace: React.FC = () => {
 
   const handleApplyTextEdits = async () => {
     if (!selectedElementId || detectedTexts.length === 0) return;
-    const el = elements.find((e) => e.id === selectedElementId);
+    const el = elementsRef.current.find((e) => e.id === selectedElementId);
     if (!el || !el.url) return;
 
     setShowTextEditModal(false);
-    const update1 = elements.map((e) =>
-      e.id === selectedElementId ? { ...e, isGenerating: true } : e,
-    );
-    setElements(update1);
+    setElementGeneratingState(selectedElementId, true);
 
     // Construct prompt for text replacement
     let editPrompt = "Edit the text in the image. ";
@@ -3031,10 +3044,7 @@ const Workspace: React.FC = () => {
 
     if (changes.length === 0) {
       // No changes, just revert loading state
-      const updateRevert = elements.map((e) =>
-        e.id === selectedElementId ? { ...e, isGenerating: false } : e,
-      );
-      setElements(updateRevert);
+      setElementGeneratingState(selectedElementId, false);
       return;
     }
 
@@ -3058,21 +3068,15 @@ const Workspace: React.FC = () => {
       }
     } catch (e) {
       console.error(e);
-      const updateFail = elements.map((e) =>
-        e.id === selectedElementId ? { ...e, isGenerating: false } : e,
-      );
-      setElements(updateFail);
+      setElementGeneratingState(selectedElementId, false);
     }
   };
 
   const handleFastEditRun = async () => {
     if (!selectedElementId || !fastEditPrompt) return;
-    const el = elements.find((e) => e.id === selectedElementId);
+    const el = elementsRef.current.find((e) => e.id === selectedElementId);
     if (!el || !el.url) return;
-    const update1 = elements.map((e) =>
-      e.id === selectedElementId ? { ...e, isGenerating: true } : e,
-    );
-    setElements(update1);
+    setElementGeneratingState(selectedElementId, true);
     try {
       const base64Ref = await urlToBase64(el.url);
       const resultUrl = await imageGenSkill({
@@ -3090,10 +3094,7 @@ const Workspace: React.FC = () => {
       }
     } catch (e) {
       console.error(e);
-      const updateFail = elements.map((e) =>
-        e.id === selectedElementId ? { ...e, isGenerating: false } : e,
-      );
-      setElements(updateFail);
+      setElementGeneratingState(selectedElementId, false);
     }
   };
 

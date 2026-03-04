@@ -5,6 +5,17 @@ import { SmartSequenceItem, VideoGenerationMode } from "../types";
 
 // --- Initialization ---
 
+const parseApiKeys = (raw: string): string[] => {
+    return raw
+        .split('\n')
+        .map((k) => k.trim())
+        .filter((k) => !!k);
+};
+
+const pickRandomKey = (keys: string[]): string => {
+    return keys[Math.floor(Math.random() * keys.length)];
+};
+
 const getClient = () => {
     const activeProviderId = localStorage.getItem('api_provider') || 'yunwu';
     const providersRaw = localStorage.getItem('api_providers');
@@ -24,10 +35,7 @@ const getClient = () => {
                         providerBaseUrl = activeProvider.baseUrl.trim();
                     }
                     if (typeof activeProvider.apiKey === 'string') {
-                        providerApiKey = activeProvider.apiKey
-                            .split('\n')
-                            .map((k: string) => k.trim())
-                            .find((k: string) => !!k) || '';
+                        providerApiKey = activeProvider.apiKey;
                     }
                 }
             }
@@ -47,14 +55,8 @@ const getClient = () => {
     }
 
     // --- Polling / Random Selection Logic ---
-    let apiKey = rawApiKey;
-    if (rawApiKey.includes('\n')) {
-        const keys = rawApiKey.split('\n').map(k => k.trim()).filter(k => !!k);
-        if (keys.length > 0) {
-            // Pick a random key from the list
-            apiKey = keys[Math.floor(Math.random() * keys.length)];
-        }
-    }
+    const keys = parseApiKeys(rawApiKey);
+    const apiKey = keys.length > 1 ? pickRandomKey(keys) : (keys[0] || rawApiKey.trim());
 
     const normalizedBaseUrl = providerBaseUrl.replace(/\/+$/, '').replace(/\/v\d+(beta)?$/i, '');
 
@@ -403,12 +405,12 @@ export const generateImageFromText = async (
 
     // Fallback/Correction for model names
     let effectiveModel = model;
-    if (model === 'Nnaobanana2') {
+    if (model === 'Nnaobanana2' || model === 'NanoBanana2') {
         effectiveModel = 'gemini-3.1-flash-image-preview';
     } else if (model.includes('imagen')) {
         effectiveModel = 'imagen-3.0-generate-002';
     } else if (model === 'gemini-3-pro-image-preview') {
-        effectiveModel = 'gemini-3.1-flash-image-preview'; // Or specific pro image model
+        effectiveModel = 'gemini-3-pro-image-preview';
     }
 
     // Prepare Contents
@@ -480,10 +482,6 @@ export const generateVideo = async (
         effectiveModel = 'kling-v1-5';
     }
     
-    // Ensure we are using the correct provider if user has set yunwu_api_key
-    const activeProvider = localStorage.getItem('api_provider') || 'yunwu';
-    // Yunwu often expects specific model names or prepends
-
     // --- Quality Optimization ---
     const qualitySuffix = ", cinematic lighting, highly detailed, photorealistic, 4k, smooth motion, professional color grading";
     let enhancedPrompt = prompt + qualitySuffix;
