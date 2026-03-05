@@ -1123,6 +1123,15 @@ export interface ImageGenerationConfig {
     referenceMode?: 'style' | 'product';
 }
 
+export interface ImageEditConfig {
+    sourceImage: string;
+    prompt: string;
+    model?: string;
+    aspectRatio?: string;
+    maskImage?: string;
+    referenceImages?: string[];
+}
+
 const clamp01 = (value: number): number => Math.min(1, Math.max(0, value));
 
 const strengthToRepeats = (strength: number): number => {
@@ -1189,6 +1198,116 @@ const normalizeReferenceToDataUrl = async (input: string): Promise<string | null
             return await blobToDataUrl(blob);
         } catch {
             return null;
+        }
+    }
+
+    return null;
+};
+
+const buildEditPrompt = (prompt: string, hasMask: boolean): string => {
+    const maskRule = hasMask
+        ? `
+[Mask Rule]
+- The second image is a binary mask.
+- White area means editable region.
+- Black area means locked region and must stay unchanged.
+- Seamlessly blend edited area with surrounding pixels.
+`
+        : '';
+
+    return `${maskRule}
+[Edit Goal]
+${prompt}
+
+[Hard Constraints]
+- Keep identity, product structure, and non-edited regions unchanged.
+- Preserve camera perspective and global composition unless explicitly requested.
+`.trim();
+};
+
+export const editImage = async (config: ImageEditConfig): Promise<string | null> => {
+    const sourceDataUrl = await normalizeReferenceToDataUrl(config.sourceImage);
+    if (!sourceDataUrl) {
+        throw new Error('Invalid source image for edit');
+    }
+
+    const maskDataUrl = config.maskImage
+        ? await normalizeReferenceToDataUrl(config.maskImage)
+        : null;
+
+    const refs: string[] = [];
+    for (const input of config.referenceImages || []) {
+        const normalized = await normalizeReferenceToDataUrl(input);
+        if (normalized) refs.push(normalized);
+    }
+
+    const sourceMatch = sourceDataUrl.match(/^data:(.+);base64,(.+)$/);
+    if (!sourceMatch) {
+        throw new Error('Invalid source image payload');
+    }
+
+    const parts: any[] = [
+        {
+            inlineData: {
+                mimeType: sourceMatch[1],
+                data: sourceMatch[2],
+            },
+        },
+    ];
+
+    if (maskDataUrl) {
+        const maskMatch = maskDataUrl.match(/^data:(.+);base64,(.+)$/);
+        if (maskMatch) {
+            parts.push({
+                inlineData: {
+                    mimeType: maskMatch[1],
+                    data: maskMatch[2],
+                },
+            });
+        }
+    }
+
+    for (const ref of refs) {
+        const match = ref.match(/^data:(.+);base64,(.+)$/);
+        if (!match) continue;
+        parts.push({
+            inlineData: {
+                mimeType: match[1],
+                data: match[2],
+            },
+        });
+    }
+
+    const editPrompt = buildEditPrompt(config.prompt, !!maskDataUrl);
+    parts.push({ text: editPrompt });
+
+    const model = (config.model || IMAGE_PRO_MODEL).trim() || IMAGE_PRO_MODEL;
+    const aspectRatio = config.aspectRatio || '1:1';
+
+    console.info('[imgedit] request', {
+        model,
+        hasMask: !!maskDataUrl,
+        refCount: refs.length,
+        promptChars: editPrompt.length,
+        providerBaseUrl: getApiUrl(),
+    });
+
+    const response = await retryWithBackoff<GenerateContentResponse>(() =>
+        getClient().models.generateContent({
+            model,
+            contents: { parts },
+            config: {
+                imageConfig: {
+                    aspectRatio,
+                },
+            },
+        }),
+    );
+
+    const outParts = response.candidates?.[0]?.content?.parts || [];
+    for (const part of outParts) {
+        if (part.inlineData?.data) {
+            return `data:image/png;base64,${part.inlineData.data}`;
         }
     }
 

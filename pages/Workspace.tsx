@@ -951,6 +951,17 @@ const Workspace: React.FC = () => {
   const toolbarExpandTimer = useRef<NodeJS.Timeout | null>(null);
   const [eraserMode, setEraserMode] = useState(false);
   const brushSize = useAgentStore((s) => s.brushSize);
+  const [eraserMaskDataUrl, setEraserMaskDataUrl] = useState<string | null>(null);
+  const [eraserHistory, setEraserHistory] = useState<
+    Array<{ display: string; mask: string }>
+  >([]);
+  const [eraserHasPaint, setEraserHasPaint] = useState(false);
+  const [isDrawingEraser, setIsDrawingEraser] = useState(false);
+  const eraserCanvasRef = useRef<HTMLCanvasElement>(null);
+  const eraserMaskCanvasRef = useRef<HTMLCanvasElement | null>(null);
+  const eraserInitKeyRef = useRef<string>("");
+  const eraserCursorRef = useRef<HTMLDivElement>(null);
+  const eraserLastPointRef = useRef<{ x: number; y: number } | null>(null);
 
   // Touch Edit States
   const [touchEditMode, setTouchEditMode] = useState(false);
@@ -1734,16 +1745,148 @@ const Workspace: React.FC = () => {
   };
 
   const handleUndoEraser = () => {
-    console.log("Undo eraser");
+    if (eraserHistory.length === 0) return;
+    const canvas = eraserCanvasRef.current;
+    const maskCanvas = eraserMaskCanvasRef.current;
+    if (!canvas) return;
+
+    const previous = eraserHistory[eraserHistory.length - 1];
+    const ctx = canvas.getContext("2d");
+    const maskCtx = maskCanvas?.getContext("2d");
+    if (!ctx || !maskCtx || !maskCanvas) return;
+
+    const displayImg = new Image();
+    const maskImg = new Image();
+    let displayReady = false;
+    let maskReady = false;
+    const flush = () => {
+      if (!displayReady || !maskReady) return;
+      ctx.clearRect(0, 0, canvas.width, canvas.height);
+      ctx.drawImage(displayImg, 0, 0, canvas.width, canvas.height);
+      maskCtx.clearRect(0, 0, maskCanvas.width, maskCanvas.height);
+      maskCtx.drawImage(maskImg, 0, 0, maskCanvas.width, maskCanvas.height);
+      setEraserMaskDataUrl(previous.mask);
+      setEraserHistory((prev) => prev.slice(0, -1));
+      const imageData = maskCtx.getImageData(0, 0, maskCanvas.width, maskCanvas.height).data;
+      let hasPaint = false;
+      for (let i = 0; i < imageData.length; i += 4) {
+        if (imageData[i] > 0) {
+          hasPaint = true;
+          break;
+        }
+      }
+      setEraserHasPaint(hasPaint);
+    };
+    displayImg.onload = () => {
+      displayReady = true;
+      flush();
+    };
+    maskImg.onload = () => {
+      maskReady = true;
+      flush();
+    };
+    displayImg.src = previous.display;
+    maskImg.src = previous.mask;
   };
+
+  useEffect(() => {
+    if (!eraserMode) return;
+    if (!selectedElementId) return;
+    const current = elements.find((e) => e.id === selectedElementId);
+    if (!current || (current.type !== "image" && current.type !== "gen-image")) {
+      return;
+    }
+
+    const displayCanvas = eraserCanvasRef.current;
+    if (!displayCanvas) return;
+    const width = Math.max(1, Math.round(current.width));
+    const height = Math.max(1, Math.round(current.height));
+    const initKey = `${current.id}:${width}x${height}`;
+
+    if (eraserInitKeyRef.current === initKey && eraserMaskCanvasRef.current) {
+      return;
+    }
+
+    displayCanvas.width = width;
+    displayCanvas.height = height;
+    const displayCtx = displayCanvas.getContext("2d");
+    if (!displayCtx) return;
+    displayCtx.clearRect(0, 0, width, height);
+
+    const maskCanvas = document.createElement("canvas");
+    maskCanvas.width = width;
+    maskCanvas.height = height;
+    const maskCtx = maskCanvas.getContext("2d");
+    if (!maskCtx) return;
+    maskCtx.fillStyle = "#000000";
+    maskCtx.fillRect(0, 0, width, height);
+
+    eraserMaskCanvasRef.current = maskCanvas;
+    eraserInitKeyRef.current = initKey;
+    setEraserMaskDataUrl(maskCanvas.toDataURL("image/png"));
+    setEraserHistory([]);
+    setEraserHasPaint(false);
+  }, [eraserMode, selectedElementId, elements]);
 
   const handleClearEraser = () => {
-    console.log("Clear eraser path");
+    const canvas = eraserCanvasRef.current;
+    const maskCanvas = eraserMaskCanvasRef.current;
+    if (!canvas) return;
+    const ctx = canvas.getContext("2d");
+    const maskCtx = maskCanvas?.getContext("2d");
+    if (!ctx || !maskCtx || !maskCanvas) return;
+    ctx.clearRect(0, 0, canvas.width, canvas.height);
+    maskCtx.clearRect(0, 0, maskCanvas.width, maskCanvas.height);
+    setEraserMaskDataUrl(maskCanvas.toDataURL("image/png"));
+    setEraserHistory([]);
+    setEraserHasPaint(false);
+    eraserLastPointRef.current = null;
   };
 
-  const handleExecuteEraser = () => {
-    setEraserMode(false);
-    console.log("Execute erase");
+  const handleExecuteEraser = async () => {
+    if (!selectedElementId || !eraserMaskDataUrl) {
+      setEraserMode(false);
+      return;
+    }
+    const el = elementsRef.current.find((e) => e.id === selectedElementId);
+    if (!el || !el.url) {
+      setEraserMode(false);
+      return;
+    }
+
+    setElementGeneratingState(selectedElementId, true);
+    try {
+      const sourceImage = await urlToBase64(getElementSourceUrl(el) || el.url);
+      const result = await smartEditSkill({
+        sourceUrl: sourceImage,
+        maskImage: eraserMaskDataUrl,
+        editType: "object-remove",
+        parameters: {
+          prompt:
+            "Remove objects in white mask area only. Keep black mask area unchanged. Blend naturally.",
+          editModel: "gemini-3-pro-image-preview",
+          aspectRatio: el.genAspectRatio || "1:1",
+        },
+      });
+
+      if (result) {
+        await applyGeneratedImageToElement(selectedElementId, result, true);
+      } else {
+        throw new Error("No result from eraser edit");
+      }
+    } catch (error) {
+      console.error("Execute eraser failed", error);
+      setElementGeneratingState(selectedElementId, false);
+    } finally {
+      setEraserMode(false);
+      setIsDrawingEraser(false);
+      setEraserMaskDataUrl(null);
+      setEraserHistory([]);
+      setEraserHasPaint(false);
+      eraserMaskCanvasRef.current = null;
+      eraserInitKeyRef.current = "";
+      eraserLastPointRef.current = null;
+    }
   };
 
   const handleVectorRedraw = async () => {
@@ -2075,6 +2218,53 @@ const Workspace: React.FC = () => {
         .map((b) => b.file!) as File[]);
     const isWeb = overrideWeb ?? webEnabled;
 
+    const selectedIdsSnapshot =
+      selectedElementIds.length > 0
+        ? [...selectedElementIds]
+        : selectedElementId
+          ? [selectedElementId]
+          : [];
+    const elementsSnapshot = [...elementsRef.current];
+
+    const collectCanvasSelectionReferenceUrls = (): string[] => {
+      const urls: string[] = [];
+      const seen = new Set<string>();
+      const pushUrl = (url?: string) => {
+        if (!url || typeof url !== "string") return;
+        const normalized = url.trim();
+        if (!normalized || seen.has(normalized)) return;
+        seen.add(normalized);
+        urls.push(normalized);
+      };
+
+      if (selectedIdsSnapshot.length > 0) {
+        for (const el of elementsSnapshot) {
+          if (!selectedIdsSnapshot.includes(el.id)) continue;
+          if (el.type !== "image" && el.type !== "gen-image") continue;
+          pushUrl(getElementSourceUrl(el) || el.url);
+        }
+      }
+
+      const confirmedCanvasIds = (currentBlocks || [])
+        .filter((b) => b.type === "file" && b.file && (b.file as any)._canvasElId)
+        .map((b) => (b.file as any)._canvasElId as string);
+      for (const canvasId of confirmedCanvasIds) {
+        const hit = elementsSnapshot.find((e) => e.id === canvasId);
+        if (!hit) continue;
+        pushUrl(getElementSourceUrl(hit) || hit.url);
+      }
+
+      const pendingAttachments = useAgentStore.getState().pendingAttachments || [];
+      for (const pending of pendingAttachments) {
+        if (pending.source !== "canvas" || !pending.canvasElId) continue;
+        const hit = elementsSnapshot.find((e) => e.id === pending.canvasElId);
+        if (!hit) continue;
+        pushUrl(getElementSourceUrl(hit) || hit.url);
+      }
+
+      return urls;
+    };
+
     if (skillData?.id === "clothing-studio-workflow") {
       try {
         setIsTyping(true);
@@ -2330,6 +2520,7 @@ const Workspace: React.FC = () => {
     try {
       let researchPayload: SearchResponse | null = null;
       let researchReferenceImageUrls: string[] = [];
+      const canvasSelectionReferenceUrls = collectCanvasSelectionReferenceUrls();
       let researchWebPages: Array<{
         title: string;
         url: string;
@@ -2408,7 +2599,12 @@ const Workspace: React.FC = () => {
           creationMode === "video" ? videoGenRatio : imageGenRatio,
         skillData,
         multimodalContext: {
-          referenceImageUrls: researchReferenceImageUrls,
+          referenceImageUrls: Array.from(
+            new Set([
+              ...canvasSelectionReferenceUrls,
+              ...researchReferenceImageUrls,
+            ]),
+          ),
           referenceWebPages: researchWebPages,
           research: researchPayload
             ? {
@@ -5954,58 +6150,216 @@ ${analysis}
     }
 
     // ERASER MODE UI
-    if (eraserMode) {
+  if (eraserMode) {
+      const selectedImageEl = selectedElementId
+        ? elements.find((e) => e.id === selectedElementId)
+        : null;
+      const canDrawMask =
+        !!selectedImageEl &&
+        (selectedImageEl.type === "image" || selectedImageEl.type === "gen-image") &&
+        !!selectedImageEl.url;
+
+      const syncMaskSnapshot = () => {
+        const maskCanvas = eraserMaskCanvasRef.current;
+        if (!maskCanvas) return;
+        const data = maskCanvas.toDataURL("image/png");
+        setEraserMaskDataUrl(data);
+      };
+
+      const getPointerPos = (event: React.PointerEvent<HTMLCanvasElement>) => {
+        const canvas = eraserCanvasRef.current;
+        if (!canvas) return null;
+        const rect = canvas.getBoundingClientRect();
+        const x = ((event.clientX - rect.left) / rect.width) * canvas.width;
+        const y = ((event.clientY - rect.top) / rect.height) * canvas.height;
+        return { x, y };
+      };
+
+      const getCanvasBrushSize = () => {
+        const viewScale = Math.max(0.001, zoom / 100);
+        return Math.max(4, brushSize) / viewScale;
+      };
+
+      const updateEraserCursor = (
+        event: React.PointerEvent<HTMLCanvasElement>,
+      ) => {
+        const canvas = eraserCanvasRef.current;
+        const cursor = eraserCursorRef.current;
+        if (!canvas || !cursor) return;
+        const rect = canvas.getBoundingClientRect();
+        const viewScale = Math.max(0.001, zoom / 100);
+        const x = (event.clientX - rect.left) / viewScale;
+        const y = (event.clientY - rect.top) / viewScale;
+        const size = Math.max(8, brushSize / viewScale);
+        cursor.style.width = `${size}px`;
+        cursor.style.height = `${size}px`;
+        cursor.style.transform = `translate3d(${x - size / 2}px, ${y - size / 2}px, 0)`;
+        cursor.style.opacity = "1";
+      };
+
+      const hideEraserCursor = () => {
+        const cursor = eraserCursorRef.current;
+        if (!cursor) return;
+        cursor.style.opacity = "0";
+        cursor.style.transform = "translate3d(-9999px,-9999px,0)";
+      };
+
+      const handleEraserPointerDown = (event: React.PointerEvent<HTMLCanvasElement>) => {
+        if (!canDrawMask) return;
+        const canvas = eraserCanvasRef.current;
+        const maskCanvas = eraserMaskCanvasRef.current;
+        if (!canvas) return;
+        const ctx = canvas.getContext("2d");
+        const maskCtx = maskCanvas?.getContext("2d");
+        if (!ctx || !maskCtx || !maskCanvas) return;
+        const pt = getPointerPos(event);
+        if (!pt) return;
+
+        event.stopPropagation();
+
+        setEraserHistory((prev) => [
+          ...prev,
+          {
+            display: canvas.toDataURL("image/png"),
+            mask: maskCanvas.toDataURL("image/png"),
+          },
+        ]);
+
+        setIsDrawingEraser(true);
+        canvas.setPointerCapture(event.pointerId);
+        const canvasBrushSize = getCanvasBrushSize();
+        ctx.lineCap = "round";
+        ctx.lineJoin = "round";
+        ctx.strokeStyle = "rgba(0, 0, 0, 0.22)";
+        ctx.globalAlpha = 1;
+        ctx.lineWidth = canvasBrushSize;
+        ctx.shadowColor = "rgba(0, 0, 0, 0.28)";
+        ctx.shadowBlur = 6;
+        maskCtx.lineCap = "round";
+        maskCtx.lineJoin = "round";
+        maskCtx.strokeStyle = "#FFFFFF";
+        maskCtx.globalAlpha = 1;
+        maskCtx.lineWidth = canvasBrushSize;
+        ctx.beginPath();
+        ctx.moveTo(pt.x, pt.y);
+        maskCtx.beginPath();
+        maskCtx.moveTo(pt.x, pt.y);
+        eraserLastPointRef.current = pt;
+        updateEraserCursor(event);
+      };
+
+      const handleEraserPointerMove = (event: React.PointerEvent<HTMLCanvasElement>) => {
+        updateEraserCursor(event);
+        if (!isDrawingEraser) return;
+        const canvas = eraserCanvasRef.current;
+        const maskCanvas = eraserMaskCanvasRef.current;
+        if (!canvas) return;
+        const ctx = canvas.getContext("2d");
+        const maskCtx = maskCanvas?.getContext("2d");
+        if (!ctx || !maskCtx) return;
+        const pt = getPointerPos(event);
+        if (!pt) return;
+        event.stopPropagation();
+
+        const last = eraserLastPointRef.current || pt;
+        const canvasBrushSize = getCanvasBrushSize();
+        ctx.save();
+        ctx.beginPath();
+        ctx.lineCap = "round";
+        ctx.lineJoin = "round";
+        ctx.strokeStyle = "rgba(0, 0, 0, 0.12)";
+        ctx.lineWidth = canvasBrushSize * 1.08;
+        ctx.shadowColor = "rgba(0, 0, 0, 0.28)";
+        ctx.shadowBlur = 10;
+        ctx.moveTo(last.x, last.y);
+        ctx.lineTo(pt.x, pt.y);
+        ctx.stroke();
+        ctx.restore();
+
+        ctx.beginPath();
+        ctx.lineCap = "round";
+        ctx.lineJoin = "round";
+        ctx.strokeStyle = "rgba(0, 0, 0, 0.22)";
+        ctx.lineWidth = canvasBrushSize;
+        ctx.shadowColor = "rgba(0, 0, 0, 0.28)";
+        ctx.shadowBlur = 6;
+        ctx.moveTo(last.x, last.y);
+        ctx.lineTo(pt.x, pt.y);
+        ctx.stroke();
+
+        maskCtx.lineTo(pt.x, pt.y);
+        maskCtx.stroke();
+        eraserLastPointRef.current = pt;
+      };
+
+      const handleEraserPointerUp = (event: React.PointerEvent<HTMLCanvasElement>) => {
+        if (!isDrawingEraser) return;
+        const canvas = eraserCanvasRef.current;
+        const maskCanvas = eraserMaskCanvasRef.current;
+        if (canvas) {
+          const ctx = canvas.getContext("2d");
+          const maskCtx = maskCanvas?.getContext("2d");
+          ctx?.closePath();
+          maskCtx?.closePath();
+          if (ctx) {
+            ctx.shadowBlur = 0;
+            ctx.shadowColor = "transparent";
+          }
+          canvas.releasePointerCapture(event.pointerId);
+        }
+        event.stopPropagation();
+        setIsDrawingEraser(false);
+        setEraserHasPaint(true);
+        syncMaskSnapshot();
+        eraserLastPointRef.current = null;
+      };
+
       return (
         <>
-          {/* Top Hint */}
           <div
-            className="absolute bg-white px-4 py-2 rounded-full shadow-lg border border-gray-100 flex items-center gap-2 text-sm text-gray-600 z-50 whitespace-nowrap animate-in slide-in-from-bottom-2 fade-in"
+            className="absolute bg-white/95 rounded-xl shadow-[0_10px_30px_rgba(0,0,0,0.10)] border border-black/[0.06] p-3.5 z-50 animate-in zoom-in-95 fade-in duration-150"
             style={{
-              left: canvasCenterX,
-              top: topToolbarTop - 50 / adaptiveScale,
-              transform: `translateX(-50%) scale(${1 / adaptiveScale})`,
-              transformOrigin: "bottom center",
+              left: elX + el.width + 12 / adaptiveScale,
+              top: elY,
+              width: 304,
+              transform: `scale(${1 / adaptiveScale})`,
+              transformOrigin: "top left",
               pointerEvents: "auto",
+              backdropFilter: "blur(12px)",
             }}
           >
-            <span>在图片上绘制选区，</span>
-            <kbd className="bg-gray-100 px-1.5 py-0.5 rounded text-xs border border-gray-200 font-sans">
-              Alt
-            </kbd>{" "}
-            <span>擦除，</span>
-            <kbd className="bg-gray-100 px-1.5 py-0.5 rounded text-xs border border-gray-200 font-sans">
-              Esc
-            </kbd>{" "}
-            <span>退出</span>
-          </div>
-
-          {/* Eraser Toolbar */}
-          <div
-            className="absolute bg-white rounded-xl shadow-[0_8px_30px_rgba(0,0,0,0.12)] border border-gray-100 p-2 flex items-center gap-3 z-50 animate-in zoom-in-95 fade-in duration-200"
-            style={{
-              left: canvasCenterX,
-              top: topToolbarTop,
-              transform: `translateX(-50%) scale(${1 / adaptiveScale})`,
-              transformOrigin: "bottom center",
-              pointerEvents: "auto",
-            }}
-          >
-            <div className="flex items-center gap-2 px-2 border-r border-gray-100">
-              <Eraser size={18} className="text-blue-500 fill-blue-500/20" />
-              <span className="text-sm font-medium text-gray-900">擦除</span>
+            <div className="flex items-center justify-between gap-3 mb-3">
+              <div className="flex items-center gap-2 text-sm font-semibold text-gray-900">
+                <Eraser size={14} className="text-gray-900" />
+                橡皮工具
+              </div>
+              <div className="flex items-center gap-1">
+                <button
+                  onClick={handleUndoEraser}
+                  className="p-1.5 text-gray-500 hover:text-black hover:bg-gray-100 rounded-md transition"
+                  title="撤销"
+                >
+                  <RotateCw className="-scale-x-100" size={14} />
+                </button>
+                <button
+                  onClick={handleClearEraser}
+                  className="p-1.5 text-gray-500 hover:text-red-500 hover:bg-red-50 rounded-md transition"
+                  title="清空"
+                >
+                  <Trash2 size={14} />
+                </button>
+              </div>
             </div>
 
-            <div className="flex items-center gap-3 px-2">
-              <div
-                className={`w-6 h-6 rounded-full border border-gray-300 flex items-center justify-center`}
-              >
+            <div className="flex items-center gap-2.5 mb-3.5">
+              <div className="w-5 h-5 rounded-full border border-gray-300 flex items-center justify-center">
                 <div
-                  className="bg-gray-800 rounded-full"
+                  className="bg-black rounded-full"
                   style={{
-                    width: Math.max(4, brushSize / 4),
-                    height: Math.max(4, brushSize / 4),
+                    width: Math.max(4, brushSize / 5),
+                    height: Math.max(4, brushSize / 5),
                   }}
-                ></div>
+                />
               </div>
               <input
                 type="range"
@@ -6013,45 +6367,89 @@ ${analysis}
                 max="100"
                 value={brushSize}
                 onChange={(e) => setBrushSize(Number(e.target.value))}
-                className="w-32 h-1 bg-gray-200 rounded-lg appearance-none cursor-pointer accent-gray-900 hover:accent-black"
+                className="flex-1 h-1.5 bg-gray-200 rounded-lg appearance-none cursor-pointer accent-black"
               />
-              <div className="w-8 text-xs text-gray-500 text-right">
-                {brushSize}px
-              </div>
+              <div className="w-8 text-[11px] text-gray-500 text-right">{brushSize}</div>
             </div>
 
-            <div className="w-px h-6 bg-gray-200"></div>
-
-            <button
-              onClick={handleUndoEraser}
-              className="p-2 text-gray-500 hover:text-black hover:bg-gray-50 rounded-lg transition"
-              title="Undo"
-            >
-              <RotateCw className="-scale-x-100" size={16} />
-            </button>
-
-            <button
-              onClick={handleClearEraser}
-              className="p-2 text-gray-500 hover:text-red-500 hover:bg-red-50 rounded-lg transition mr-1"
-              title="Reset/Clear"
-            >
-              <Trash2 size={16} />
-            </button>
-
-            <button
-              onClick={handleExecuteEraser}
-              className="px-4 py-1.5 bg-gray-900 text-white shadow-md shadow-gray-200 font-medium text-xs rounded-lg hover:bg-black hover:scale-105 transition"
-            >
-              执行擦除
-            </button>
-
-            <button
-              onClick={() => setEraserMode(false)}
-              className="absolute -top-2 -right-2 bg-white rounded-full p-0.5 border shadow-sm text-gray-400 hover:text-black"
-            >
-              <X size={12} />
-            </button>
+            <div className="grid grid-cols-2 gap-2">
+              <button
+                onClick={() => {
+                  setEraserMode(false);
+                  setIsDrawingEraser(false);
+                  setEraserMaskDataUrl(null);
+                  setEraserHistory([]);
+                  setEraserHasPaint(false);
+                  eraserLastPointRef.current = null;
+                  const cursor = eraserCursorRef.current;
+                  if (cursor) {
+                    cursor.style.opacity = "0";
+                    cursor.style.transform = "translate3d(-9999px,-9999px,0)";
+                  }
+                }}
+                className="h-8 rounded-lg border border-gray-200 text-xs font-medium text-gray-600 hover:bg-gray-50 transition"
+              >
+                取消
+              </button>
+              <button
+                onClick={handleExecuteEraser}
+                disabled={!canDrawMask || !eraserHasPaint}
+                className="h-8 rounded-lg bg-black text-white text-xs font-medium hover:bg-gray-800 transition disabled:opacity-40 disabled:cursor-not-allowed"
+              >
+                立即使用
+              </button>
+            </div>
           </div>
+
+          {canDrawMask && selectedImageEl && (
+            <div
+              className="absolute pointer-events-none"
+              style={{
+                left: elX,
+                top: elY,
+                width: el.width,
+                height: el.height,
+                zIndex: (selectedImageEl.zIndex || 1) + 1000,
+              }}
+            >
+              <canvas
+                ref={eraserCanvasRef}
+                width={Math.max(1, Math.round(el.width))}
+                height={Math.max(1, Math.round(el.height))}
+                className="w-full h-full pointer-events-auto"
+                style={{
+                  background: "transparent",
+                  cursor: "none",
+                  borderRadius: "12px",
+                }}
+                onPointerEnter={updateEraserCursor}
+                onPointerDown={handleEraserPointerDown}
+                onPointerMove={handleEraserPointerMove}
+                onPointerUp={handleEraserPointerUp}
+                onPointerLeave={(e) => {
+                  handleEraserPointerUp(e);
+                  hideEraserCursor();
+                }}
+              />
+              <div
+                ref={eraserCursorRef}
+                className="absolute left-0 top-0 pointer-events-none rounded-full"
+                style={{
+                  width: Math.max(8, brushSize),
+                  height: Math.max(8, brushSize),
+                  background: isDrawingEraser
+                    ? "rgba(0,0,0,0.14)"
+                    : "rgba(0,0,0,0.08)",
+                  border: `${brushSize > 42 ? 1 : 2}px solid rgba(255,255,255,0.95)`,
+                  boxShadow:
+                    "0 0 0 1px rgba(0,0,0,0.45), 0 8px 20px rgba(0,0,0,0.08)",
+                  transform: "translate3d(-9999px,-9999px,0)",
+                  opacity: 0,
+                  zIndex: 60,
+                }}
+              />
+            </div>
+          )}
         </>
       );
     }
@@ -6613,27 +7011,27 @@ ${analysis}
     } else {
       // Config state
       const toolbarTop = elY + el.height + 16;
-      const toolbarDesignWidth = 420;
       const inverseScale = 100 / zoom;
 
       return (
         <div
           id="active-floating-toolbar"
-          className="absolute bg-white rounded-[24px] shadow-[0_12px_40px_rgba(0,0,0,0.12)] border border-gray-100/80 z-[100] animate-in fade-in zoom-in-95 duration-200 overflow-visible origin-top"
+          className="absolute bg-[#F8F9FA] rounded-[20px] shadow-[0_12px_40px_rgba(0,0,0,0.12)] border border-gray-200/60 z-[100] animate-in fade-in zoom-in-95 duration-200 overflow-visible origin-top flex flex-col"
           style={{
             left: canvasCenterX,
             top: toolbarTop,
-            width: `${toolbarDesignWidth}px`,
+            minWidth: `420px`,
+            width: `max-content`,
             transform: `translateX(-50%) scale(${inverseScale})`,
             pointerEvents: "auto",
           }}
           onMouseDown={(e) => e.stopPropagation()}
         >
           {/* Prompt textarea */}
-          <div className="px-4 pt-4 pb-0">
+          <div className="px-4 pt-4 pb-1 flex-grow">
             <textarea
               placeholder="今天我们要创作什么"
-              className="w-full text-sm text-gray-700 placeholder:text-gray-300 bg-transparent border-none outline-none resize-none h-16 p-1 mb-0"
+              className="w-full text-[14px] font-medium text-gray-800 placeholder:text-gray-400/80 bg-transparent border-none outline-none resize-none h-12 p-0 mb-0 leading-relaxed"
               value={el.genPrompt || ""}
               onChange={(e) =>
                 updateSelectedElement({ genPrompt: e.target.value })
@@ -6642,122 +7040,113 @@ ${analysis}
             />
           </div>
 
-          {/* Collapsible Frame Upload Panel */}
-          {(showFramePanel || isHoveringVideoFrames[el.id]) &&
-            videoToolbarTab === "frames" && (
+          <div className={`px-4 pb-2 relative z-10 ${videoToolbarTab === "frames" ? "block" : "hidden"}`}>
+            <div className="flex items-center gap-2.5 w-max relative">
+              {/* 首帧 Card */}
               <div
-                className="px-5 pb-2 animate-in slide-in-from-bottom-2 fade-in duration-200"
-                onMouseEnter={() =>
-                  setIsHoveringVideoFrames((prev) => ({
-                    ...prev,
-                    [el.id]: true,
-                  }))
-                }
-                onMouseLeave={() =>
-                  setIsHoveringVideoFrames((prev) => ({
-                    ...prev,
-                    [el.id]: false,
-                  }))
+                className="relative group/startframe w-10 h-10 transition-colors z-20 cursor-pointer shadow-sm bg-white rounded-[10px] border border-gray-200 flex flex-col justify-center items-center overflow-visible"
+                onClick={() =>
+                  document.getElementById(`start-frame-${el.id}`)?.click()
                 }
               >
-                <div className="flex items-center gap-0 w-max pl-1">
-                  {/* 首帧 Card */}
-                  <div
-                    className="relative group/startframe w-11 h-11 transform -rotate-[4deg] origin-bottom-left transition-transform hover:-translate-y-1 hover:rotate-0 z-10 cursor-pointer shadow-[0_2px_8px_rgba(0,0,0,0.04)]"
-                    onClick={() =>
-                      document.getElementById(`start-frame-${el.id}`)?.click()
-                    }
-                  >
-                    {el.genStartFrame ? (
-                      <div className="w-full h-full rounded-[10px] overflow-hidden border border-gray-200 bg-white relative">
-                        <img
-                          src={el.genStartFrame}
-                          className="w-full h-full object-cover"
-                        />
-                        <div
-                          className="absolute -top-1.5 -right-1.5 bg-gray-600/90 text-white rounded-full p-0.5 cursor-pointer hover:bg-red-500 opacity-0 group-hover/startframe:opacity-100 transition-opacity z-10"
-                          onClick={(ev) => {
-                            ev.stopPropagation();
-                            updateSelectedElement({ genStartFrame: undefined });
-                          }}
-                        >
-                          <X size={10} />
-                        </div>
-                      </div>
-                    ) : (
-                      <div className="w-full h-full border border-gray-200 bg-white rounded-[10px] flex items-center justify-center cursor-pointer hover:border-blue-400 hover:bg-blue-50/50 transition-colors">
-                        <Plus size={14} className="text-gray-400" />
-                      </div>
-                    )}
-                    <input
-                      type="file"
-                      id={`start-frame-${el.id}`}
-                      className="hidden"
-                      accept="image/*"
-                      onChange={(e) => handleVideoRefUpload(e, "start")}
-                    />
-                  </div>
-
-                  {/* 尾帧 Card */}
-                  <div
-                    className="relative group/endframe w-11 h-11 transform rotate-[4deg] origin-bottom-right transition-transform hover:-translate-y-1 hover:rotate-0 z-0 -ml-1.5 cursor-pointer shadow-[0_2px_8px_rgba(0,0,0,0.04)]"
-                    onClick={() =>
-                      document.getElementById(`end-frame-${el.id}`)?.click()
-                    }
-                  >
-                    {el.genEndFrame ? (
-                      <div className="w-full h-full rounded-[10px] overflow-hidden border border-gray-200 bg-white relative">
-                        <img
-                          src={el.genEndFrame}
-                          className="w-full h-full object-cover"
-                        />
-                        <div
-                          className="absolute -top-1.5 -right-1.5 bg-gray-600/90 text-white rounded-full p-0.5 cursor-pointer hover:bg-red-500 opacity-0 group-hover/endframe:opacity-100 transition-opacity z-10"
-                          onClick={(ev) => {
-                            ev.stopPropagation();
-                            updateSelectedElement({ genEndFrame: undefined });
-                          }}
-                        >
-                          <X size={10} />
-                        </div>
-                      </div>
-                    ) : (
-                      <div className="w-full h-full border border-gray-200 bg-white rounded-[10px] flex items-center justify-center cursor-pointer hover:border-blue-400 hover:bg-blue-50/50 transition-colors">
-                        <Plus size={14} className="text-gray-400" />
-                      </div>
-                    )}
-                    <input
-                      type="file"
-                      id={`end-frame-${el.id}`}
-                      className="hidden"
-                      accept="image/*"
-                      onChange={(e) => handleVideoRefUpload(e, "end")}
-                    />
-                  </div>
-                </div>
+                {el.genStartFrame ? (
+                  <>
+                    <div className="w-full h-full rounded-[10px] overflow-hidden relative">
+                      <img
+                        src={el.genStartFrame}
+                        className="w-full h-full object-cover"
+                      />
+                      <div className="absolute bottom-0 left-0 right-0 bg-black/40 text-[8px] text-white py-0.5 text-center">首帧</div>
+                    </div>
+                    <div
+                      className="absolute -top-1.5 -right-1.5 bg-gray-600/90 text-white rounded-full p-0.5 cursor-pointer hover:bg-red-500 opacity-0 group-hover/startframe:opacity-100 transition-opacity z-30"
+                      onClick={(ev) => {
+                        ev.stopPropagation();
+                        updateSelectedElement({ genStartFrame: undefined });
+                      }}
+                    >
+                      <X size={8} />
+                    </div>
+                  </>
+                ) : (
+                  <>
+                    <Plus size={14} className="text-gray-400" />
+                    <span className="text-[8px] text-gray-400 font-bold">首帧</span>
+                  </>
+                )}
+                <input
+                  type="file"
+                  id={`start-frame-${el.id}`}
+                  className="hidden"
+                  accept="image/*"
+                  onChange={(e) => handleVideoRefUpload(e, "start")}
+                />
               </div>
-            )}
+
+              {/* 尾帧 Card */}
+              <div
+                className="relative group/endframe w-10 h-10 transition-colors z-10 cursor-pointer shadow-sm bg-white rounded-[10px] border border-gray-200 flex flex-col justify-center items-center overflow-visible"
+                onClick={() =>
+                  document.getElementById(`end-frame-${el.id}`)?.click()
+                }
+              >
+                {el.genEndFrame ? (
+                  <>
+                    <div className="w-full h-full rounded-[10px] overflow-hidden relative">
+                      <img
+                        src={el.genEndFrame}
+                        className="w-full h-full object-cover"
+                      />
+                      <div className="absolute bottom-0 left-0 right-0 bg-black/40 text-[8px] text-white py-0.5 text-center">尾帧</div>
+                    </div>
+                    <div
+                      className="absolute -top-1.5 -right-1.5 bg-gray-600/90 text-white rounded-full p-0.5 cursor-pointer hover:bg-red-500 opacity-0 group-hover/endframe:opacity-100 transition-opacity z-30"
+                      onClick={(ev) => {
+                        ev.stopPropagation();
+                        updateSelectedElement({ genEndFrame: undefined });
+                      }}
+                    >
+                      <X size={8} />
+                    </div>
+                  </>
+                ) : (
+                  <>
+                    <Plus size={14} className="text-gray-400" />
+                    <span className="text-[8px] text-gray-400 font-bold">尾帧</span>
+                  </>
+                )}
+                <input
+                  type="file"
+                  id={`end-frame-${el.id}`}
+                  className="hidden"
+                  accept="image/*"
+                  onChange={(e) => handleVideoRefUpload(e, "end")}
+                />
+              </div>
+            </div>
+          </div>
 
           {/* Multi-Ref Upload Panel */}
-          {showFramePanel && videoToolbarTab === "multi" && (
-            <div className="px-3 pb-2 animate-in slide-in-from-top-2 duration-200 overflow-x-auto">
-              <div className="flex items-center gap-3 py-2 w-max">
+          <div className={`px-4 pb-2 relative ${videoToolbarTab === "multi" ? "block" : "hidden"}`}>
+            <div className="flex items-center gap-2.5 w-max">
                 {(el.genVideoRefs || []).map((refImage, index) => (
-                  <div key={index} className="relative group/multiref shrink-0">
+                  <div key={index} className="relative group/multiref shrink-0 overflow-visible">
                     <div
-                      className="w-14 h-14 rounded-xl overflow-hidden border border-gray-200 relative cursor-pointer shadow-sm"
+                      className="w-10 h-10 rounded-[10px] border border-gray-200 relative cursor-pointer shadow-sm overflow-visible"
                       onClick={() =>
                         document
                           .getElementById(`multi-frame-${el.id}-${index}`)
                           ?.click()
                       }
                     >
-                      <img
-                        src={refImage}
-                        className="w-full h-full object-cover"
-                      />
+                      <div className="w-full h-full rounded-[10px] overflow-hidden">
+                        <img
+                          src={refImage}
+                          className="w-full h-full object-cover"
+                        />
+                      </div>
                       <div
-                        className="absolute -top-1.5 -right-1.5 bg-gray-600 text-white rounded-full p-0.5 cursor-pointer hover:bg-red-500 opacity-0 group-hover/multiref:opacity-100 transition z-10"
+                        className="absolute -top-1.5 -right-1.5 bg-gray-600 text-white rounded-full p-0.5 cursor-pointer hover:bg-red-500 opacity-0 group-hover/multiref:opacity-100 transition z-30"
                         onClick={(ev) => {
                           ev.stopPropagation();
                           const newRefs = [...(el.genVideoRefs || [])];
@@ -6778,25 +7167,21 @@ ${analysis}
                   </div>
                 ))}
                 {(el.genVideoRefs || []).length < 5 && (
-                  <div className="relative group/upload shrink-0 w-14 h-14">
-                    {/* Back stacked cards */}
-                    <div className="absolute inset-0 bg-white border border-gray-200 rounded-xl transform rotate-[8deg] translate-x-1.5 translate-y-0.5 transition-transform group-hover/upload:rotate-[12deg] group-hover/upload:translate-x-2 z-0"></div>
-                    <div className="absolute inset-0 bg-white border border-gray-200 rounded-xl transform rotate-[4deg] translate-x-1 translate-y-0.5 transition-transform group-hover/upload:rotate-[6deg] group-hover/upload:translate-x-1 z-0"></div>
-
+                  <div className="relative group/upload shrink-0 w-10 h-10">
                     <div
                       onClick={() =>
                         document
                           .getElementById(`multi-frame-new-${el.id}`)
                           ?.click()
                       }
-                      className="relative w-full h-full bg-white border-2 border-dashed border-gray-300 rounded-xl flex flex-col items-center justify-center cursor-pointer hover:border-blue-400 hover:bg-blue-50/50 transition z-10"
+                      className="relative w-full h-full bg-white border border-dashed border-gray-300 rounded-[10px] flex flex-col items-center justify-center cursor-pointer hover:border-blue-400 hover:bg-blue-50/50 transition z-10"
                     >
                       <Plus
-                        size={16}
-                        className="text-gray-400 group-hover/upload:text-blue-500 transition"
+                        size={14}
+                        className="text-gray-400 group-hover/upload:text-blue-500"
                       />
-                      <span className="text-[10px] text-gray-400 group-hover/upload:text-blue-500 mt-0.5">
-                        多图参考
+                      <span className="text-[8px] text-gray-400 group-hover/upload:text-blue-500">
+                        参考图
                       </span>
                     </div>
                     <input
@@ -6810,61 +7195,56 @@ ${analysis}
                 )}
               </div>
             </div>
-          )}
 
           {/* Bottom Controls Bar */}
-          <div className="flex items-center justify-between px-4 pb-4 pt-1 bg-white relative rounded-b-[24px]">
+          <div className="flex items-center justify-between px-3 py-1.5 bg-transparent relative z-30">
             {/* Left: Tabs (Pill style) */}
-            <div
-              className="flex items-center gap-0 bg-[#F5F5F7] rounded-full p-[3px] relative z-20"
-              onMouseEnter={() =>
-                setIsHoveringVideoFrames((prev) => ({ ...prev, [el.id]: true }))
-              }
-              onMouseLeave={() =>
-                setIsHoveringVideoFrames((prev) => ({
-                  ...prev,
-                  [el.id]: false,
-                }))
-              }
-            >
+            <div className="flex items-center gap-0 bg-[#F0F2F5] rounded-full p-[3px] relative shrink-0">
               <button
                 onClick={() => {
                   updateSelectedElement({ genFirstLastMode: "startEnd" });
                   setVideoToolbarTab("frames");
                 }}
-                className={`px-4 py-1 text-[11px] font-bold tracking-widest rounded-full transition-all duration-300 z-10 border ${videoToolbarTab === "frames" ? "bg-white text-gray-800 shadow-sm border-gray-100" : "text-gray-400 hover:text-gray-600 border-transparent bg-transparent"}`}
+                className={`px-4 py-1.5 text-[12px] font-medium rounded-full transition-all duration-300 whitespace-nowrap shrink-0 ${videoToolbarTab === "frames" ? "bg-white text-gray-800 shadow-[0_2px_8px_rgba(0,0,0,0.06)]" : "text-gray-500 hover:text-gray-700 bg-transparent"}`}
                 tabIndex={-1}
               >
                 首尾帧
               </button>
-              {el.genModel === "Veo 3.1" && (
+              {el.genModel === "Veo 3.1" ? (
                 <button
                   onClick={() => {
                     updateSelectedElement({ genFirstLastMode: "multiRef" });
                     setVideoToolbarTab("multi");
                   }}
-                  className={`px-4 py-1 text-[11px] font-bold tracking-widest rounded-full transition-all duration-300 border ${videoToolbarTab === "multi" ? "bg-white text-gray-800 shadow-sm border-gray-100" : "text-gray-400 hover:text-gray-600 border-transparent bg-transparent"}`}
+                  className={`px-4 py-1.5 text-[12px] font-medium rounded-full transition-all duration-300 whitespace-nowrap shrink-0 ${videoToolbarTab === "multi" ? "bg-white text-gray-800 shadow-[0_2px_8px_rgba(0,0,0,0.06)]" : "text-gray-500 hover:text-gray-700 bg-transparent"}`}
                   tabIndex={-1}
                 >
                   多图参考
+                </button>
+              ) : (
+                <button
+                  className={`px-4 py-1.5 text-[12px] font-medium rounded-full transition-all duration-300 text-gray-500 hover:text-gray-700 bg-transparent whitespace-nowrap shrink-0`}
+                  tabIndex={-1}
+                >
+                  动作控制
                 </button>
               )}
             </div>
 
             {/* Right: Model, Ratio, Generate */}
-            <div className="flex items-center gap-1.5 relative z-20">
+            <div className="flex items-center gap-1.5 relative z-20 shrink-0">
               {/* Model Dropdown */}
               <div className="relative">
                 <button
                   onClick={() => setShowVideoModelPicker(!showVideoModelPicker)}
-                  className="h-8 px-2 flex items-center gap-1.5 text-[11px] font-bold text-gray-700 hover:bg-gray-100 rounded-full transition whitespace-nowrap"
+                  className={`h-8 px-2.5 flex items-center gap-1.5 text-[12px] font-semibold transition whitespace-nowrap overflow-hidden max-w-[150px] shrink-0 rounded-lg ${showVideoModelPicker ? "bg-gray-100 text-gray-900" : "text-gray-500 hover:text-gray-800 hover:bg-gray-50/80"}`}
                   tabIndex={-1}
                 >
-                  <Box size={13} className="text-gray-600" />
-                  <span>{el.genModel || "Veo 3.1 Fast"}</span>
+                  <Box size={14} className={`shrink-0 ${showVideoModelPicker ? "text-blue-500" : "text-gray-400"}`} />
+                  <span className="truncate">{el.genModel || "Veo 3.1 Fast"}</span>
                   <ChevronDown
                     size={12}
-                    className={`text-gray-400 transition-transform ${showVideoModelPicker ? "rotate-180" : ""}`}
+                    className={`text-gray-400 transition-transform duration-300 shrink-0 ${showVideoModelPicker ? "rotate-180" : ""}`}
                   />
                 </button>
                 {showVideoModelPicker && (
@@ -6947,14 +7327,13 @@ ${analysis}
                     setShowRatioPicker(!showRatioPicker);
                     setShowVideoModelPicker(false);
                   }}
-                  className={`h-8 px-2 rounded-full border text-[11px] transition flex items-center gap-1.5 font-bold ${showRatioPicker ? "border-transparent bg-gray-100 text-black" : "border-transparent text-gray-600 hover:bg-gray-100"}`}
+                  className={`h-8 px-2.5 rounded-lg text-[12px] transition flex items-center gap-1.5 font-semibold shrink-0 whitespace-nowrap ${showRatioPicker ? "bg-gray-100 text-gray-900" : "text-gray-500 hover:text-gray-800 hover:bg-gray-50/80"}`}
                   tabIndex={-1}
                 >
-                  {el.genAspectRatio || "16:9"} • {el.genDuration || "8s"} •{" "}
-                  {el.genQuality || "1080p"}
+                  {el.genAspectRatio || "16:9"} • {el.genDuration || "8s"}
                   <ChevronDown
                     size={12}
-                    className={`text-gray-400 transition-transform ${showRatioPicker ? "rotate-180" : ""}`}
+                    className={`text-gray-400 transition-transform duration-300 ${showRatioPicker ? "rotate-180" : ""}`}
                   />
                 </button>
                 {showRatioPicker && (
@@ -7032,28 +7411,6 @@ ${analysis}
                         ))}
                       </div>
                     </div>
-
-                    {/* Quality section */}
-                    <div>
-                      <div className="text-[11px] text-gray-400 uppercase tracking-widest font-bold mb-3">
-                        画质
-                      </div>
-                      <div className="flex bg-[#F5F5F7] rounded-[10px] p-1">
-                        {["720p", "1080p", "4k"].map((quality) => (
-                          <button
-                            key={quality}
-                            onClick={() =>
-                              updateSelectedElement({
-                                genQuality: quality as any,
-                              })
-                            }
-                            className={`flex-1 py-1 text-xs font-bold rounded-lg transition-all ${(el.genQuality || "1080p") === quality ? "bg-white shadow-sm text-black" : "text-gray-500 hover:text-gray-800"}`}
-                          >
-                            {quality}
-                          </button>
-                        ))}
-                      </div>
-                    </div>
                   </div>
                 )}
               </div>
@@ -7061,17 +7418,17 @@ ${analysis}
               <button
                 onClick={() => handleGenVideo(el.id)}
                 disabled={!el.genPrompt || el.isGenerating}
-                className={`h-7 w-10 ml-1 rounded-[10px] flex items-center justify-center transition-all ${!el.genPrompt || el.isGenerating ? "bg-gray-100 text-gray-400" : "bg-[#E5E7EB] hover:bg-[#D1D5DB] text-gray-500 shadow-sm"}`}
+                className={`h-9 w-12 ml-1 rounded-xl flex items-center justify-center transition-all duration-300 shadow-sm ${!el.genPrompt || el.isGenerating ? "bg-gray-100 text-gray-400" : "bg-gradient-to-br from-blue-500 to-indigo-600 hover:from-blue-600 hover:to-indigo-700 text-white shadow-[0_4px_12px_rgba(79,70,229,0.3)] hover:shadow-[0_6px_16px_rgba(79,70,229,0.4)] hover:-translate-y-0.5"}`}
                 tabIndex={-1}
               >
                 {el.isGenerating ? (
-                  <Loader2 size={14} className="animate-spin text-gray-500" />
+                  <Loader2 size={16} className="animate-spin text-white/80" />
                 ) : (
                   <Sparkles
-                    size={14}
+                    size={16}
                     fill="currentColor"
-                    className="opacity-80"
-                    strokeWidth={1}
+                    className={!el.genPrompt ? "opacity-60" : "opacity-100"}
+                    strokeWidth={1.5}
                   />
                 )}
               </button>

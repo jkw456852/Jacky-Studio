@@ -1,8 +1,9 @@
-import { generateImage, refineImagePrompt } from '../gemini';
+import { editImage, generateImage, refineImagePrompt } from '../gemini';
 
 export interface SmartEditParams {
   sourceUrl: string;
   editType: 'background-remove' | 'object-remove' | 'upscale' | 'style-transfer' | 'extend';
+  maskImage?: string;
   parameters?: Record<string, any>;
 }
 
@@ -38,14 +39,37 @@ export async function smartEditSkill(params: SmartEditParams): Promise<string | 
       }
     }
 
-    // Use the robust generateImage helper instead of raw SDK call
-    const result = await generateImage({
-      prompt: finalPrompt,
-      model: generationModel,
-      aspectRatio: '1:1', // Default for smart edit results, unless specified
-      imageSize: params.editType === 'upscale' ? (params.parameters?.factor >= 4 ? '4K' : '2K') : '1K',
-      referenceImage: params.sourceUrl
-    });
+    let result: string | null = null;
+
+    const editModel = params.parameters?.editModel || 'gemini-3-pro-image-preview';
+    const shouldUseEditPath =
+      !!params.maskImage ||
+      params.editType === 'object-remove' ||
+      params.editType === 'background-remove' ||
+      params.editType === 'style-transfer' ||
+      params.editType === 'extend';
+
+    if (shouldUseEditPath) {
+      result = await editImage({
+        sourceImage: params.sourceUrl,
+        maskImage: params.maskImage,
+        prompt: finalPrompt,
+        model: editModel,
+        aspectRatio: params.parameters?.aspectRatio || '1:1',
+        referenceImages: params.parameters?.referenceImages,
+      });
+    }
+
+    if (!result) {
+      // fallback to current robust generation flow
+      result = await generateImage({
+        prompt: finalPrompt,
+        model: generationModel,
+        aspectRatio: '1:1', // Default for smart edit results, unless specified
+        imageSize: params.editType === 'upscale' ? (params.parameters?.factor >= 4 ? '4K' : '2K') : '1K',
+        referenceImage: params.sourceUrl
+      });
+    }
 
     return result;
   } catch (error) {

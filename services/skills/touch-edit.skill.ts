@@ -1,4 +1,4 @@
-import { getClient } from '../gemini';
+import { editImage, getClient } from '../gemini';
 import { TouchEditSkillParams } from '../../types/skill.types';
 
 export async function touchEditSkill(params: TouchEditSkillParams): Promise<{
@@ -29,29 +29,14 @@ export async function touchEditSkill(params: TouchEditSkillParams): Promise<{
       return { analysis, editedImage: null };
     }
 
-    const editResponse = await getClient().models.generateContent({
+    const editedImage = await editImage({
+      sourceImage: params.imageData,
+      prompt: `Edit the region at position (${params.regionX}, ${params.regionY}), size ${params.regionWidth}x${params.regionHeight}. Instruction: ${params.editInstruction}`,
       model: 'gemini-3-pro-image-preview',
-      contents: {
-        parts: [
-          { inlineData: { mimeType: matches[1], data: matches[2] } },
-          {
-            text: `Edit the region at position (${params.regionX}, ${params.regionY}), size ${params.regionWidth}x${params.regionHeight}. Instruction: ${params.editInstruction}`
-          }
-        ]
-      },
-      config: { imageConfig: { aspectRatio: '1:1' } }
+      aspectRatio: '1:1',
     });
 
-    for (const part of editResponse.candidates?.[0]?.content?.parts || []) {
-      if (part.inlineData) {
-        return {
-          analysis,
-          editedImage: `data:image/png;base64,${part.inlineData.data}`
-        };
-      }
-    }
-
-    return { analysis, editedImage: null };
+    return { analysis, editedImage: editedImage || null };
   } catch (error) {
     console.error('Touch edit error:', error);
     throw error;
