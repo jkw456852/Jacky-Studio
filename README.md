@@ -1,177 +1,132 @@
-# XC-STUDIO (AI Design Workbench)
+# XC-STUDIO: 下一代 AI 辅助设计工作台
 
 <div align="center">
 
-![Version](https://img.shields.io/badge/version-1.0.0-blue.svg)
-![License](https://img.shields.io/badge/license-MIT-green.svg)
-![TypeScript](https://img.shields.io/badge/TypeScript-5.0-blue)
-![React](https://img.shields.io/badge/React-18-61dafb)
+![版本](https://img.shields.io/badge/version-1.1.0-blue.svg)
+![React](https://img.shields.io/badge/React-19-61dafb)
+![Vite](https://img.shields.io/badge/Vite-6.2-646cff)
+![TypeScript](https://img.shields.io/badge/TypeScript-5.8-blue)
+![许可证](https://img.shields.io/badge/license-MIT-green.svg)
 
-一个基于 Google Gemini 模型的下一代 AI 辅助设计工作台，提供无限画布、智能体协作和多媒体生成能力。
+**XC-STUDIO** 是一款专为专业创作者打造的高级无限画布 AI 设计平台。它集成了多智能体编排协作、先进的多模态生成（图像/视频）以及深度的垂直领域工作流，提供无缝、高性能的 Web 设计体验。
 
-[快速开始](#-快速开始) • [功能特性](#-核心功能) • [开发文档](./DEVELOPMENT.md) • [API配置](./API-CONFIGURATION-GUIDE.md)
+[探索功能](#-核心能力) • [智能体系统](#-多智能体协作系统) • [技术架构](#-技术架构) • [快速开始](#-快速快速)
 
 </div>
 
 ---
 
-## 🌟 核心功能
+## 🌟 核心能力
 
-### 1. ♾️ 无限画布 (Infinite Canvas)
+### ♾️ 无限创意画布
+专为无约束设计打造的高性能工作空间。
+- **多媒体编排**: 无缝融合图像、视频、文本和矢量形状。
+- **绝对坐标系统**: 专业级的元素定位与图层管理能力。
+- **智能标记系统**: `Ctrl` + 点击可创建高精度选区标记，用于局部 AI 分析、重绘与重绘优化。
+- **持久化存储**: 基于 **IndexedDB** 的强大项目管理，突破浏览器存储限制，支持大规模创意资产存储。
 
-- **自由创作**: 支持无限缩放和平移，随心所欲摆放元素。
-- **多媒体支持**: 图片、视频、文本、形状（矩形、圆形、箭头等）。
-- **图层管理**: 直观的图层面板，轻松调整元素层级和可见性。
-- **历史记录**: 完整的撤销/重做 (Undo/Redo) 系统。
+### 👔 服装工作室 (垂直领域专业工作流)
+专为时尚与电商领域专家设计的深度集成环境。
+- **身份锁定 (Identity Lock)**: 确保生成的系列组图中，模特的脸部特征与身材比例高度一致。
+- **版型精准 (Garment Precision)**: “产品锚点”系统确保衣服的材质纹理、缝线和结构细节完全忠于原始样衣。
+- **自动化镜头规划**: AI 驱动的分镜计划生成，完美匹配亚马逊、Shopify 等全球电商主图标准。
 
-### 2. 🤖 AI 智能体编排 (Agentic AI)
-
-- **多模态协作**: 集成 Google Gemini 模型（Thinking/Flash 模式）。
-- **角色扮演**: 动态分配 Product Manager, Designer, Coder, Reviewer 等角色进行任务拆解与执行。
-- **实时反馈**: 像与真人对话一样与 AI 协作，支持上下文理解。
-
-### 3. 🎯 智能标记系统 (Smart Marker System)
-
-- **精准标注**: 按住 `Ctrl` + 点击图片即可创建精准选区标记。
-- **双向同步**: 画布标记与聊天输入框中的 Chip 实时同步。
-- **交互增强**:
-  - **Hover 预览**: 鼠标悬停在输入框 Chip 上，显示原图及高亮选区。
-  - **键盘导航**: 支持使用 `←` `→` 键选中 Chip，`Backspace` / `Delete` 删除。
-  - **即时裁剪**: 标记区域自动裁剪并准备发送给 AI 进行局部重绘或分析。
-
-### 4. 🎨 创意工具箱
-
-- **AI 绘图与视频**: 文本生成图片 (Text-to-Image)、图片生成视频 (Image-to-Video)。
-- **图像处理**: 一键去背景 (Remove BG)、4K 无损放大 (Upscale)。
-- **文本编辑**: 智能文本样式调整，支持多种字体和排版。
-
-## 🛠️ 技术栈
-
-- **前端框架**: React, Vite
-- **语言**: TypeScript
-- **样式**: Tailwind CSS
-- **AI 模型**: Google Gemini API (Pro/Flash/Thinking)
-- **API 支持**: Gemini 原生 / 云雾 API / 自定义代理
-- **图标库**: Lucide React
-
-## 🚀 快速开始
-
-1. **安装依赖**
-
-   ```bash
-   npm install
-   ```
-
-2. **配置 API**
-
-   本项目支持三种 API 提供商：
-
-   - **Gemini 原生 API** (Google 官方，需要科学上网)
-   - **云雾 API** ⭐ 推荐 (国内可直接访问)
-   - **自定义代理** (使用自己的代理服务器)
-
-   **方式一：通过设置界面配置** (推荐)
-   
-   1. 启动应用后，点击设置按钮（齿轮图标）
-   2. 选择 API 提供商
-   3. 输入对应的 API Key
-   4. 保存配置即可使用
-
-   **方式二：配置环境变量**
-   
-   在根目录创建 `.env.local` 文件：
-
-   ```env
-   VITE_GEMINI_API_KEY=your_api_key_here
-   GEMINI_API_KEY=your_api_key_here
-   VITE_YUNWU_API_URL=https://yunwu.ai
-   ```
-
-   详细配置说明请参考：[API 配置指南](./API-CONFIGURATION-GUIDE.md)
-
-3. **启动开发服务器**
-   ```bash
-   npm run dev
-   ```
-
-## 🌐 API 配置
-
-### 支持的提供商
-
-| 提供商 | 特点 | 适用场景 | 配置文档 |
-|--------|------|----------|----------|
-| Gemini 原生 | Google 官方，最稳定 | 海外用户 | [获取 API Key](https://aistudio.google.com/) |
-| 云雾 API ⭐ | 国内可访问，无需翻墙 | 国内用户首选 | [访问官网](https://yunwu.ai) |
-| 自定义代理 | 完全自主控制 | 高级用户 | 自行配置 |
-
-### 快速配置
-
-1. 点击应用设置图标
-2. 选择 "云雾 API"（推荐国内用户）
-3. 输入您的 API Key
-4. 保存并开始使用
-
-📖 **完整配置指南**: [API-CONFIGURATION-GUIDE.md](./API-CONFIGURATION-GUIDE.md)
-
-## ⌨️ 快捷键指南
-
-- `Space` + 拖拽: 平移画布
-- `Ctrl` + 滚轮: 缩放画布
-- `Ctrl` + 点击图片: 创建标记区域
-- `Delete` / `Backspace`: 删除选中元素
-- `Ctrl` + `Z`: 撤销
-- `Ctrl` + `Y`: 重做
-
-## 📖 开发文档
-
-想要深入了解项目架构、开发指南和最佳实践？
-
-👉 **查看完整开发文档**: [DEVELOPMENT.md](./DEVELOPMENT.md)
-
-内容包括：
-- 🏗️ 架构概览和技术栈
-- 💾 Zustand 状态管理详解
-- 🤖 智能体系统开发指南
-- 🛠️ 代码规范和性能优化
-- 🧪 测试指南
-- 🐛 故障排查
-
-## 📝 更新日志
-
-### v1.0.0 (2026-02-09)
-
-- ✨ **新增**: 支持多 API 提供商切换（Gemini 原生 / 云雾 API / 自定义）
-- ✨ **新增**: 云雾 API 集成，国内用户可直接访问
-- ✨ **新增**: Zustand 状态管理系统
-- ✨ **新增**: 增强版智能体系统
-- 🔧 **优化**: API 配置界面，支持可视化选择提供商
-- 📖 **文档**: 新增详细的开发文档和配置指南
-
-## 🤝 贡献指南
-
-欢迎贡献代码、报告问题或提出建议！
-
-1. Fork 本仓库
-2. 创建特性分支 (`git checkout -b feature/AmazingFeature`)
-3. 提交更改 (`git commit -m 'Add some AmazingFeature'`)
-4. 推送到分支 (`git push origin feature/AmazingFeature`)
-5. 开启 Pull Request
-
-详细开发指南请查看 [DEVELOPMENT.md](./DEVELOPMENT.md)
-
-## 📄 许可证
-
-本项目采用 MIT 许可证 - 详见 [LICENSE](LICENSE) 文件
-
-## 🙏 致谢
-
-- [Google Gemini](https://ai.google.dev/) - AI 模型支持
-- [React](https://react.dev/) - 前端框架
-- [Zustand](https://github.com/pmndrs/zustand) - 状态管理
-- [Tailwind CSS](https://tailwindcss.com/) - CSS 框架
+### 🎬 高级视频生成
+集成顶级视频模型，支持精确的时长和分辨率控制。
+- **模型支持**: **Grok Video (10s/15s)**, **Sora 2.0 Pro**, **Veo 3.1 Fast/Pro**, 以及 **Kling 1.5**。
+- **上下文感知生成**: 从画布元素一键转换为视频，或直接根据智能体建议的分镜生成。
 
 ---
 
+## 🤖 多智能体协作系统
+
+XC-STUDIO 采用双层路由系统（**本地关键词预匹配 + LLM 语义深度分析**）来精准调用专业 AI 智能体。
+
+| 智能体 | 核心领域 | 主要交付物 |
+| :--- | :--- | :--- |
+| **Vireo** | 品牌识别 | Logo 系统、VI 规范、品牌配色方案。 |
+| **Cameron** | 影视导演 | 高保真故事板、剧本与分镜计划。 |
+| **Campaign** | 营销/电商 | 电商主图、详情页、亚马逊/Shopify 营销套图。 |
+| **Poster** | 视觉沟通 | 高冲击力的海报、社交媒体封面及平面广告。 |
+| **Package** | 工业设计 | 产品包装、开箱视觉、卷轴及标签设计。 |
+| **Motion** | 动态媒体 | 逐帧视频生成控制与视觉特效调优。 |
+
+---
+
+## 🏗️ 技术架构
+
+XC-STUDIO 构建于现代化的反应式架构之上，专为低延迟和高可靠性而优化。
+
+```mermaid
+graph TD
+    A[用户界面 - React 19] --> B[Zustand 状态引擎]
+    B --> C[无限画布上下文]
+    B --> D[多智能体编排器]
+    D --> E[本地路由 - 关键词]
+    D --> F[API 路由 - Gemini 3.1]
+    F --> G[专业化智能体集群]
+    G --> H[技能引擎 Skill Engine]
+    H --> I[高清放大 / 矢量化 / 去背景]
+    H --> J[多模态生成 - 图像/视频]
+```
+
+- **前端核心**: React 19, TypeScript 5.8, Vite 6.
+- **状态管理**: 基于持久化层的 Zustand 分布式状态。
+- **AI 后端**: Google Gemini 3.1 (Flash/Pro/Thinking) + 顶级图像/视频提供商。
+- **基础设施**: 使用 IndexedDB 实现海量资产云端同步感知的本地持久化。
+
+---
+
+## 🚀 快速开始
+
+### 1. 环境准备与安装
+确保您的环境中已安装 Node.js 18+。
+
+```bash
+# 克隆仓库
+git clone https://github.com/xiaoche0907/XC-STUDIO.git
+cd XC-STUDIO
+
+# 安装主项目依赖
+npm install
+
+# 安装视频子模块依赖
+cd XC-VIDEO && npm install && cd ..
+```
+
+### 2. 本地开发
+```bash
+npm run dev
+```
+应用将运行在 `http://localhost:3000`。
+
+### 3. API 配置
+在 UI 侧边栏点击 **设置**（齿轮图标）配置您的 API 提供者：
+- **Gemini 原生**: 通过官方 AI Studio 密钥直连。
+- **云雾 API ⭐**: 推荐中国用户使用，无需特殊网络环境。
+- **自定义代理**: 支持兼容 OpenAI 格式的高级代理协议。
+
+---
+
+## ⌨️ 专业快捷键
+
+- `空格 (Space)` + **拖拽**: 平移工作区
+- `Ctrl` + **滚轮**: 平滑缩放
+- `Ctrl` + **点击**: 创建选区标记 (Marker)
+- `G` / `Shift + G`: 组合 / 取消组合元素
+- `Delete` / `Backspace`: 删除选中元素
+- `Ctrl + Z / Y`: 专业级 撤销/重做
+
+---
+
+## 🤝 贡献与许可证
+
+XC-STUDIO 采用 **MIT 许可证**。我们欢迎来自全球的设计师与 AI 开发者共同完善此项目。
+
+- [提交问题 (Issue)](https://github.com/xiaoche0907/XC-STUDIO/issues)
+- [提交合并请求 (PR)](https://github.com/xiaoche0907/XC-STUDIO/pulls)
+
 <div align="center">
-Made with ❤️ by XC-STUDIO Team
+  <br/>
+  Made with ❤️ by XC-STUDIO Team
 </div>
