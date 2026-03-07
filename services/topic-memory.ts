@@ -40,7 +40,7 @@ type TopicSnapshot = {
       platform: string;
       aspectRatio: string;
       targetLanguage: string;
-      clarity: '2K';
+      clarity: '1K' | '2K' | '4K';
       count: number;
       referenceUrl?: string;
       description?: string;

@@ -13,7 +13,7 @@ const requirementsSchema = z.object({
   description: z.string().min(1),
   targetLanguage: z.string().min(1),
   aspectRatio: z.string().min(1),
-  clarity: z.literal('2K').default('2K'),
+  clarity: z.enum(['1K', '2K', '4K']).default('2K'),
   count: z.number().int().min(1).max(10),
   templateId: z.string().optional(),
   styleTags: z.array(z.string()).optional(),
@@ -277,7 +277,7 @@ export async function clothingStudioWorkflowSkill(params: {
   });
 
   const ratio = parsed.requirements.aspectRatio || '3:4';
-  const clarity: '2K' = '2K';
+  const clarity = parsed.requirements.clarity || '2K';
   const planItems = params.retryFailedItems && params.retryFailedItems.length > 0
     ? params.retryFailedItems
     : await toPlanItems(parsed.requirements as Requirements, parsed.analysis as ClothingAnalysis | null);

@@ -762,6 +762,7 @@ const Workspace: React.FC = () => {
   );
   const [editingTextId, setEditingTextId] = useState<string | null>(null);
   const textEditDraftRef = useRef<Record<string, string>>({});
+  const pendingSelectAllTextIdRef = useRef<string | null>(null);
   const [projectTitle, setProjectTitle] = useState("未命名");
   const [activeTool, setActiveTool] = useState<ToolType>("select");
   const [isPanning, setIsPanning] = useState(false);
@@ -821,6 +822,8 @@ const Workspace: React.FC = () => {
   const [showHistoryPopover, setShowHistoryPopover] = useState(false);
   const [showFontPicker, setShowFontPicker] = useState(false);
   const [showWeightPicker, setShowWeightPicker] = useState(false);
+  const [fontPickerPos, setFontPickerPos] = useState<{ x: number; y: number } | null>(null);
+  const [weightPickerPos, setWeightPickerPos] = useState<{ x: number; y: number } | null>(null);
   const [showModelPicker, setShowModelPicker] = useState(false);
   const [showRatioPicker, setShowRatioPicker] = useState(false);
   const [showResPicker, setShowResPicker] = useState(false);
@@ -1349,6 +1352,7 @@ const Workspace: React.FC = () => {
     clothingActions.setRequirements(requirements);
     clothingActions.setStep("GENERATING");
     clothingActions.setGenerating(true);
+    setClothingWorkflowError(null);
     const ctrl = clothingActions.startAbortSession();
 
     pushWorkflowUiMessage({
@@ -1358,57 +1362,75 @@ const Workspace: React.FC = () => {
       text: "准备开始生成...",
     });
 
-    const result = await executeSkill("clothingStudioWorkflow", {
-      productImages: clothingState.productImages.map((i) => i.url),
-      modelImage: clothingState.modelImage?.url,
-      modelAnchorSheetUrl:
-        clothingState.modelAnchorSheetUrl || clothingState.modelImage?.url,
-      productAnchorUrl:
-        clothingState.productAnchorUrl ||
-        clothingState.productImages[0]?.url ||
-        undefined,
-      analysis: clothingState.analysis,
-      topicId: ensureTopicId(),
-      preferredImageModel: autoModelSelect
-        ? "Nano Banana Pro"
-        : preferredImageModel,
-      requirements,
-      retryFailedItems: retryFailed ? clothingState.failedItems : undefined,
-      signal: ctrl.signal,
-      onProgress: (done: number, total: number, text?: string) => {
-        clothingActions.setProgress({ done, total, text });
-        pushWorkflowUiMessage({
-          type: "clothingStudio.progress",
-          done,
-          total,
-          text,
-        });
-      },
-    });
+    try {
+      const result = await executeSkill("clothingStudioWorkflow", {
+        productImages: clothingState.productImages.map((i) => i.url),
+        modelImage: clothingState.modelImage?.url,
+        modelAnchorSheetUrl:
+          clothingState.modelAnchorSheetUrl || clothingState.modelImage?.url,
+        productAnchorUrl:
+          clothingState.productAnchorUrl ||
+          clothingState.productImages[0]?.url ||
+          undefined,
+        analysis: clothingState.analysis,
+        topicId: ensureTopicId(),
+        preferredImageModel: autoModelSelect
+          ? "Nano Banana Pro"
+          : preferredImageModel,
+        requirements,
+        retryFailedItems: retryFailed ? clothingState.failedItems : undefined,
+        signal: ctrl.signal,
+        onProgress: (done: number, total: number, text?: string) => {
+          clothingActions.setProgress({ done, total, text });
+          pushWorkflowUiMessage({
+            type: "clothingStudio.progress",
+            done,
+            total,
+            text,
+          });
+        },
+      });
 
-    clothingActions.clearAbortSession();
-    clothingActions.setGenerating(false);
-
-    const images = result?.images || result?.ui?.images || [];
-    const failedItems = result?.failedItems || [];
-    clothingActions.setResults(images);
-    clothingActions.setFailedItems(failedItems);
-    clothingActions.setStep("DONE");
-    pushWorkflowUiMessage(
-      { type: "clothingStudio.results", images },
-      "服装棚拍组图已完成",
-    );
-
-    const topicId = getCurrentTopicId();
-    if (topicId) {
-      await Promise.all(
-        images.slice(0, 20).map((img: any) =>
-          saveTopicAsset(topicId, "result", {
-            url: img.url,
-            mime: "image/png",
-          }),
-        ),
+      const images = result?.images || result?.ui?.images || [];
+      const failedItems = result?.failedItems || [];
+      clothingActions.setResults(images);
+      clothingActions.setFailedItems(failedItems);
+      clothingActions.setStep("DONE");
+      pushWorkflowUiMessage(
+        { type: "clothingStudio.results", images },
+        "服装棚拍组图已完成",
       );
+
+      const topicId = getCurrentTopicId();
+      if (topicId) {
+        await Promise.all(
+          images.slice(0, 20).map((img: any) =>
+            saveTopicAsset(topicId, "result", {
+              url: img.url,
+              mime: "image/png",
+            }),
+          ),
+        );
+      }
+    } catch (error: any) {
+      const isAbort =
+        error?.name === "AbortError" ||
+        /abort|aborted|cancel/i.test(String(error?.message || ""));
+      const msg = isAbort
+        ? "已取消本次组图生成"
+        : error?.message || "服装棚拍组图生成失败，请稍后重试";
+      setClothingWorkflowError(msg);
+      clothingActions.setStep("WAIT_REQUIREMENTS");
+      addMessage({
+        id: `workflow-generate-err-${Date.now()}`,
+        role: "model",
+        text: isAbort ? msg : `组图生成失败：${msg}`,
+        timestamp: Date.now(),
+        error: !isAbort,
+      });
+    } finally {
+      clothingActions.clearAbortSession();
+      clothingActions.setGenerating(false);
     }
   };
 
@@ -2978,6 +3000,10 @@ const Workspace: React.FC = () => {
   const fileInputRef = useRef<HTMLInputElement>(null);
   const refImageInputRef = useRef<HTMLInputElement>(null);
   const chatSessionRef = useRef<any>(null);
+  const fontTriggerRef = useRef<HTMLButtonElement>(null);
+  const weightTriggerRef = useRef<HTMLButtonElement>(null);
+  const fontPopoverRef = useRef<HTMLDivElement>(null);
+  const weightPopoverRef = useRef<HTMLDivElement>(null);
 
   const containerRef = useRef<HTMLDivElement>(null);
   const canvasLayerRef = useRef<HTMLDivElement>(null);
@@ -3892,13 +3918,27 @@ ${analysis}
     const handleGlobalClick = (e: MouseEvent) => {
       setContextMenu(null);
       const target = e.target as HTMLElement;
+      const clickedInFontTrigger =
+        !!fontTriggerRef.current && fontTriggerRef.current.contains(target);
+      const clickedInWeightTrigger =
+        !!weightTriggerRef.current && weightTriggerRef.current.contains(target);
+      const clickedInFontPopover =
+        !!fontPopoverRef.current && fontPopoverRef.current.contains(target);
+      const clickedInWeightPopover =
+        !!weightPopoverRef.current && weightPopoverRef.current.contains(target);
       if (
         !target.closest(".history-popover-trigger") &&
         !target.closest(".history-popover-content")
       ) {
         setShowHistoryPopover(false);
       }
-      if (!target.closest(".relative")) {
+      if (
+        !clickedInFontTrigger &&
+        !clickedInWeightTrigger &&
+        !clickedInFontPopover &&
+        !clickedInWeightPopover &&
+        !target.closest(".relative")
+      ) {
         setShowFontPicker(false);
         setShowWeightPicker(false);
         setShowResPicker(false);
@@ -4021,6 +4061,16 @@ ${analysis}
   }, []);
 
   useEffect(() => {
+    if (!showFontPicker) return;
+    const el = selectedElementId
+      ? elements.find((item) => item.id === selectedElementId)
+      : null;
+    if (!el || el.type !== "text") {
+      setShowFontPicker(false);
+    }
+  }, [showFontPicker, selectedElementId, elements]);
+
+  useEffect(() => {
     if (!showWeightPicker) return;
     const el = selectedElementId
       ? elements.find((item) => item.id === selectedElementId)
@@ -4029,6 +4079,26 @@ ${analysis}
       setShowWeightPicker(false);
     }
   }, [showWeightPicker, selectedElementId, elements]);
+
+  useEffect(() => {
+    if (!showFontPicker && !showWeightPicker) return;
+    const syncPopoverPosition = () => {
+      if (showFontPicker && fontTriggerRef.current) {
+        setFontPickerPos(getPopoverPosition(fontTriggerRef.current, 192, 260));
+      }
+      if (showWeightPicker && weightTriggerRef.current) {
+        setWeightPickerPos(getPopoverPosition(weightTriggerRef.current, 128, 210));
+      }
+    };
+
+    syncPopoverPosition();
+    window.addEventListener("resize", syncPopoverPosition);
+    window.addEventListener("scroll", syncPopoverPosition, true);
+    return () => {
+      window.removeEventListener("resize", syncPopoverPosition);
+      window.removeEventListener("scroll", syncPopoverPosition, true);
+    };
+  }, [showFontPicker, showWeightPicker, zoom, pan, selectedElementId]);
 
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
@@ -4215,6 +4285,7 @@ ${analysis}
           setActiveTool("select");
         if (e.key.toLowerCase() === "h" && !e.altKey) setActiveTool("hand");
         if (e.key.toLowerCase() === "m") setActiveTool("mark");
+        if (e.key.toLowerCase() === "t" && !e.altKey) setActiveTool("text");
         if (e.key === "Backspace" || e.key === "Delete")
           deleteSelectedElement();
       }
@@ -4293,31 +4364,69 @@ ${analysis}
     setShowShapeMenu(false);
   };
 
-  const addText = () => {
+  const addText = (opts?: {
+    x?: number;
+    y?: number;
+    enterEdit?: boolean;
+    switchToSelect?: boolean;
+  }) => {
     const containerW = window.innerWidth - (showAssistant ? 480 : 0);
     const containerH = window.innerHeight;
     const centerX = (containerW / 2 - pan.x) / (zoom / 100);
     const centerY = (containerH / 2 - pan.y) / (zoom / 100);
+    const textWidth = 320;
+    const textHeight = 84;
+    const nextX = typeof opts?.x === "number" ? opts.x : centerX - textWidth / 2;
+    const nextY = typeof opts?.y === "number" ? opts.y : centerY - textHeight / 2;
     const newElement: CanvasElement = {
       id: Date.now().toString(),
       type: "text",
       text: "Type something...",
-      x: centerX - 200,
-      y: centerY - 60,
-      width: 400,
-      height: 120,
-      fontSize: 90,
+      x: nextX,
+      y: nextY,
+      width: textWidth,
+      height: textHeight,
+      fontSize: 48,
       fontFamily: "Inter",
       fontWeight: 400,
       fillColor: "#000000",
       strokeColor: "transparent",
       textAlign: "left",
+      lineHeight: 1.2,
+      letterSpacing: 0,
+      textTransform: "none",
       zIndex: elementsRef.current.length + 1,
     };
     const newElements = [...elementsRef.current, newElement];
     setElementsSynced(newElements);
     saveToHistory(newElements, markersRef.current);
     setSelectedElementId(newElement.id);
+    setSelectedElementIds([newElement.id]);
+    if (opts?.enterEdit) {
+      textEditDraftRef.current[newElement.id] = newElement.text || "";
+      pendingSelectAllTextIdRef.current = newElement.id;
+      setEditingTextId(newElement.id);
+    }
+    if (opts?.switchToSelect) {
+      setActiveTool("select");
+    }
+  };
+
+  const addTextAtClientPoint = (
+    clientX: number,
+    clientY: number,
+    opts?: { enterEdit?: boolean; switchToSelect?: boolean },
+  ) => {
+    const rect = containerRef.current?.getBoundingClientRect();
+    if (!rect) return;
+    const canvasX = (clientX - rect.left - pan.x) / (zoom / 100);
+    const canvasY = (clientY - rect.top - pan.y) / (zoom / 100);
+    addText({
+      x: canvasX,
+      y: canvasY,
+      enterEdit: opts?.enterEdit,
+      switchToSelect: opts?.switchToSelect,
+    });
   };
   const addGenImage = () => {
     const containerW = window.innerWidth - (showAssistant ? 480 : 0);
@@ -4896,7 +5005,12 @@ ${analysis}
       // 此处仅保留处理 平移 (Pan) 和 框选 (Marquee) 的初始化
       e.preventDefault();
       (document.activeElement as HTMLElement)?.blur();
-      if (activeTool === "select") {
+      if (activeTool === "text") {
+        addTextAtClientPoint(e.clientX, e.clientY, {
+          enterEdit: true,
+          switchToSelect: true,
+        });
+      } else if (activeTool === "select") {
         setIsMarqueeSelecting(true);
         setMarqueeStart({ x: e.clientX, y: e.clientY });
         setMarqueeEndIfChanged({ x: e.clientX, y: e.clientY });
@@ -4948,7 +5062,16 @@ ${analysis}
         y: newY,
         width: newWidth,
         height: newHeight,
-        fontSize: el.type === "text" ? resizeStart.fontSize * (newWidth / resizeStart.width) : undefined,
+        fontSize:
+          el.type === "text"
+            ? Math.max(
+              8,
+              Math.min(
+                512,
+                resizeStart.fontSize * (newWidth / resizeStart.width),
+              ),
+            )
+            : undefined,
       };
       cancelAnimationFrame(resizeRafIdRef.current);
       resizeRafIdRef.current = requestAnimationFrame(() => {
@@ -4959,7 +5082,13 @@ ${analysis}
           dom.style.width = `${newWidth}px`;
           dom.style.height = `${newHeight}px`;
           if (el.type === "text") {
-            const newFontSize = resizeStart.fontSize * (newWidth / resizeStart.width);
+            const newFontSize = Math.max(
+              8,
+              Math.min(
+                512,
+                resizeStart.fontSize * (newWidth / resizeStart.width),
+              ),
+            );
             const textInner = dom.querySelector(".text-inner-target") || dom;
             if (textInner instanceof HTMLElement) {
               textInner.style.fontSize = `${newFontSize}px`;
@@ -5147,7 +5276,10 @@ ${analysis}
               y: preview.y,
               width: preview.width,
               height: preview.height,
-              fontSize: el.type === "text" && preview.fontSize ? preview.fontSize : el.fontSize,
+              fontSize:
+                el.type === "text" && preview.fontSize
+                  ? Math.max(8, Math.min(512, preview.fontSize))
+                  : el.fontSize,
               genAspectRatio: el.type === "gen-image" ? ar : el.genAspectRatio,
             };
           }
@@ -5294,8 +5426,28 @@ ${analysis}
       }
     }
 
-    // Locked element protection
     const elObj = elementById.get(id);
+    if (activeTool === "text") {
+      e.stopPropagation();
+      e.preventDefault();
+      if (elObj?.isLocked) return;
+      if (elObj?.type === "text") {
+        setSelectedElementId(id);
+        setSelectedElementIds([id]);
+        textEditDraftRef.current[id] = elObj.text || "";
+        pendingSelectAllTextIdRef.current = id;
+        setEditingTextId(id);
+        setActiveTool("select");
+      } else {
+        addTextAtClientPoint(e.clientX, e.clientY, {
+          enterEdit: true,
+          switchToSelect: true,
+        });
+      }
+      return;
+    }
+
+    // Locked element protection
     if (elObj?.isLocked) return;
     e.stopPropagation();
     e.preventDefault();
@@ -5550,6 +5702,52 @@ ${analysis}
     setInputBlocks([...filtered]);
   };
 
+  const getPopoverPosition = (
+    trigger: HTMLElement,
+    panelWidth: number,
+    estimatedHeight: number,
+  ) => {
+    const rect = trigger.getBoundingClientRect();
+    const gap = 8;
+    const viewportPadding = 8;
+    let x = rect.left;
+    let y = rect.bottom + gap;
+
+    if (x + panelWidth > window.innerWidth - viewportPadding) {
+      x = window.innerWidth - viewportPadding - panelWidth;
+    }
+    if (x < viewportPadding) x = viewportPadding;
+
+    if (y + estimatedHeight > window.innerHeight - viewportPadding) {
+      y = rect.top - gap - estimatedHeight;
+    }
+    if (y < viewportPadding) y = viewportPadding;
+
+    return { x: Math.round(x), y: Math.round(y) };
+  };
+
+  const toggleFontPicker = () => {
+    if (showFontPicker) {
+      setShowFontPicker(false);
+      return;
+    }
+    if (!fontTriggerRef.current) return;
+    setShowWeightPicker(false);
+    setFontPickerPos(getPopoverPosition(fontTriggerRef.current, 192, 260));
+    setShowFontPicker(true);
+  };
+
+  const toggleWeightPicker = () => {
+    if (showWeightPicker) {
+      setShowWeightPicker(false);
+      return;
+    }
+    if (!weightTriggerRef.current) return;
+    setShowFontPicker(false);
+    setWeightPickerPos(getPopoverPosition(weightTriggerRef.current, 128, 210));
+    setShowWeightPicker(true);
+  };
+
   const handleToolMenuMouseEnter = () => {
     if (closeToolMenuTimerRef.current)
       clearTimeout(closeToolMenuTimerRef.current);
@@ -5752,7 +5950,12 @@ ${analysis}
         />
 
         {/* 7. Text */}
-        <TooltipButton icon={Type} label="Text (T)" onClick={addText} />
+        <TooltipButton
+          icon={Type}
+          label="Text (T)"
+          onClick={() => setActiveTool("text")}
+          active={activeTool === "text"}
+        />
 
         {/* Separator / Gap */}
         <div className="w-px h-6 bg-gray-200/80 mx-1.5" />
@@ -5874,6 +6077,7 @@ ${analysis}
     const topToolbarTop = el.y - 60 / adaptiveScale;
 
     return (
+      <>
       <div
         id="active-floating-toolbar"
         className={`absolute z-50 ${isDraggingElement ? "" : "animate-in fade-in zoom-in-95 duration-200"} pointer-events-auto origin-bottom-left flex items-center bg-white rounded-full px-4 py-2 shadow-[0_8px_30px_rgba(0,0,0,0.12)] border border-gray-100 gap-3`}
@@ -5898,39 +6102,24 @@ ${analysis}
         <div className="w-px h-4 bg-gray-200 mx-1 shrink-0"></div>
 
         {/* Font Family */}
-        <div className="relative">
+        <div>
           <button
-            onClick={() => setShowFontPicker(!showFontPicker)}
+            ref={fontTriggerRef}
+            onClick={toggleFontPicker}
             className="flex items-center gap-2 px-3 py-1 hover:bg-gray-50 rounded-lg text-sm font-medium min-w-[100px] justify-between transition-colors"
           >
             <span className="truncate max-w-[80px]">{el.fontFamily || "Inter"}</span>
             <ChevronDown size={14} className="text-gray-400" />
           </button>
-          {showFontPicker && (
-            <div className="absolute bottom-full left-0 mb-2 w-48 max-h-60 overflow-y-auto bg-white rounded-xl shadow-xl border border-gray-100 p-1 z-[100] animate-in slide-in-from-bottom-2">
-              {FONTS.map((font) => (
-                <button
-                  key={font}
-                  onClick={() => {
-                    updateSelectedElement({ fontFamily: font });
-                    setShowFontPicker(false);
-                  }}
-                  className={`w-full text-left px-3 py-2 rounded-lg text-sm transition-colors ${el.fontFamily === font ? "bg-blue-50 text-blue-600 font-bold" : "hover:bg-gray-50 text-gray-700"}`}
-                  style={{ fontFamily: font }}
-                >
-                  {font}
-                </button>
-              ))}
-            </div>
-          )}
         </div>
 
         <div className="w-px h-4 bg-gray-200 mx-1 shrink-0"></div>
 
         {/* Font Weight Dropdown */}
-        <div className="relative">
+        <div>
           <button
-            onClick={() => setShowWeightPicker(!showWeightPicker)}
+            ref={weightTriggerRef}
+            onClick={toggleWeightPicker}
             className="flex items-center gap-2 px-2 py-1 hover:bg-gray-50 rounded-lg text-sm font-medium transition-colors"
           >
             <span className="w-16 text-center">
@@ -5938,22 +6127,6 @@ ${analysis}
             </span>
             <ChevronDown size={14} className="text-gray-400" />
           </button>
-          {showWeightPicker && (
-            <div className="absolute bottom-full left-0 mb-2 w-32 bg-white rounded-xl shadow-xl border border-gray-100 p-1 z-[100] animate-in slide-in-from-bottom-2">
-              {[400, 500, 600, 700].map((w) => (
-                <button
-                  key={w}
-                  onClick={() => {
-                    updateSelectedElement({ fontWeight: w });
-                    setShowWeightPicker(false);
-                  }}
-                  className={`w-full text-left px-3 py-2 rounded-lg text-sm transition-colors ${el.fontWeight === w ? "bg-blue-50 text-blue-600 font-bold" : "hover:bg-gray-50 text-gray-700"}`}
-                >
-                  {w === 700 ? "Bold" : w === 600 ? "Semibold" : w === 500 ? "Medium" : "Regular"}
-                </button>
-              ))}
-            </div>
-          )}
         </div>
 
         <div className="w-px h-4 bg-gray-200 mx-1 shrink-0"></div>
@@ -5978,6 +6151,38 @@ ${analysis}
           >
             <Plus size={14} />
           </button>
+        </div>
+
+        <div className="w-px h-4 bg-gray-200 mx-1 shrink-0"></div>
+
+        {/* Line Height */}
+        <div className="flex items-center gap-1.5 px-1.5">
+          <span className="text-[11px] font-medium text-gray-500">LH</span>
+          <input
+            type="number"
+            min={0.8}
+            max={3}
+            step={0.1}
+            value={Number((el.lineHeight || 1.2).toFixed(1))}
+            onChange={(e) => updateSelectedElement({ lineHeight: Math.max(0.8, Math.min(3, Number(e.target.value) || 1.2)) })}
+            className="w-12 bg-transparent border-none text-center text-sm font-semibold focus:outline-none [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none"
+          />
+        </div>
+
+        <div className="w-px h-4 bg-gray-200 mx-1 shrink-0"></div>
+
+        {/* Letter Spacing */}
+        <div className="flex items-center gap-1.5 px-1.5">
+          <span className="text-[11px] font-medium text-gray-500">LS</span>
+          <input
+            type="number"
+            min={-5}
+            max={30}
+            step={0.5}
+            value={Number((el.letterSpacing || 0).toFixed(1))}
+            onChange={(e) => updateSelectedElement({ letterSpacing: Math.max(-5, Math.min(30, Number(e.target.value) || 0)) })}
+            className="w-12 bg-transparent border-none text-center text-sm font-semibold focus:outline-none [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none"
+          />
         </div>
 
         <div className="w-px h-4 bg-gray-200 mx-1 shrink-0"></div>
@@ -6028,6 +6233,60 @@ ${analysis}
           </button>
         </div>
       </div>
+      {showFontPicker &&
+        fontPickerPos &&
+        ReactDOM.createPortal(
+          <div
+            ref={fontPopoverRef}
+            className="fixed w-48 max-h-60 overflow-y-auto bg-white/95 rounded-xl shadow-[0_18px_50px_rgba(0,0,0,0.18)] border border-black/10 p-1 z-[9999] backdrop-blur-sm animate-in fade-in zoom-in-95 duration-150"
+            style={{ left: fontPickerPos.x, top: fontPickerPos.y }}
+            onMouseDown={(e) => e.stopPropagation()}
+          >
+            <div className="flex flex-col gap-1">
+              {FONTS.map((font) => (
+                <button
+                  key={font}
+                  onClick={() => {
+                    updateSelectedElement({ fontFamily: font });
+                    setShowFontPicker(false);
+                  }}
+                  className={`h-9 w-full text-left px-3 rounded-lg text-sm transition-colors ${el.fontFamily === font ? "bg-blue-50 text-blue-600 font-bold" : "hover:bg-gray-50 text-gray-700"}`}
+                  style={{ fontFamily: font }}
+                >
+                  {font}
+                </button>
+              ))}
+            </div>
+          </div>,
+          document.body,
+        )}
+      {showWeightPicker &&
+        weightPickerPos &&
+        ReactDOM.createPortal(
+          <div
+            ref={weightPopoverRef}
+            className="fixed w-32 bg-white/95 rounded-xl shadow-[0_18px_50px_rgba(0,0,0,0.18)] border border-black/10 p-1 z-[9999] backdrop-blur-sm animate-in fade-in zoom-in-95 duration-150"
+            style={{ left: weightPickerPos.x, top: weightPickerPos.y }}
+            onMouseDown={(e) => e.stopPropagation()}
+          >
+            <div className="flex flex-col gap-1">
+              {[400, 500, 600, 700].map((w) => (
+                <button
+                  key={w}
+                  onClick={() => {
+                    updateSelectedElement({ fontWeight: w });
+                    setShowWeightPicker(false);
+                  }}
+                  className={`h-9 w-full text-left px-3 rounded-lg text-sm transition-colors ${el.fontWeight === w ? "bg-blue-50 text-blue-600 font-bold" : "hover:bg-gray-50 text-gray-700"}`}
+                >
+                  {w === 700 ? "Bold" : w === 600 ? "Semibold" : w === 500 ? "Medium" : "Regular"}
+                </button>
+              ))}
+            </div>
+          </div>,
+          document.body,
+        )}
+      </>
     );
   };
 
@@ -8886,15 +9145,23 @@ ${analysis}
                               fontSize: `${el.fontSize}px`,
                               fontWeight: el.fontWeight,
                               fontFamily: el.fontFamily,
-                              lineHeight: 1.2,
+                              lineHeight: el.lineHeight || 1.2,
                               textAlign: (el.textAlign as any) || "center",
                               textDecoration: el.textDecoration || "none",
+                              letterSpacing: `${el.letterSpacing || 0}px`,
+                              textTransform: el.textTransform || "none",
                               padding: 0,
                               margin: 0,
                               minHeight: "1em",
                               minWidth: "120px",
                             }}
                             defaultValue={textEditDraftRef.current[el.id] ?? el.text ?? ""}
+                            onFocus={(e) => {
+                              if (pendingSelectAllTextIdRef.current === el.id) {
+                                e.currentTarget.select();
+                                pendingSelectAllTextIdRef.current = null;
+                              }
+                            }}
                             onChange={(e) => {
                               textEditDraftRef.current[el.id] = e.target.value;
                             }}
@@ -8923,9 +9190,11 @@ ${analysis}
                               fontSize: `${el.fontSize}px`,
                               fontWeight: el.fontWeight,
                               fontFamily: el.fontFamily,
-                              lineHeight: 1.2,
+                              lineHeight: el.lineHeight || 1.2,
                               textAlign: (el.textAlign as any) || "center",
                               textDecoration: el.textDecoration || "none",
+                              letterSpacing: `${el.letterSpacing || 0}px`,
+                              textTransform: el.textTransform || "none",
                               margin: 0,
                               padding: 0,
                             }}
@@ -8934,6 +9203,43 @@ ${analysis}
                           </div>
                         )}
                       </div>
+                    )}
+                    {el.type === "text" && isSelected && editingTextId !== el.id && (
+                      <>
+                        <div
+                          className="absolute top-0 left-0 w-3 h-3 bg-white border-2 border-blue-500 rounded-full -translate-x-1/2 -translate-y-1/2 z-20 cursor-nw-resize hover:scale-125 transition"
+                          onMouseDown={(e) => handleResizeStart(e, "nw", el.id)}
+                        ></div>
+                        <div
+                          className="absolute top-0 right-0 w-3 h-3 bg-white border-2 border-blue-500 rounded-full translate-x-1/2 -translate-y-1/2 z-20 cursor-ne-resize hover:scale-125 transition"
+                          onMouseDown={(e) => handleResizeStart(e, "ne", el.id)}
+                        ></div>
+                        <div
+                          className="absolute bottom-0 left-0 w-3 h-3 bg-white border-2 border-blue-500 rounded-full -translate-x-1/2 translate-y-1/2 z-20 cursor-sw-resize hover:scale-125 transition"
+                          onMouseDown={(e) => handleResizeStart(e, "sw", el.id)}
+                        ></div>
+                        <div
+                          className="absolute bottom-0 right-0 w-3 h-3 bg-white border-2 border-blue-500 rounded-full translate-x-1/2 translate-y-1/2 z-20 cursor-se-resize hover:scale-125 transition"
+                          onMouseDown={(e) => handleResizeStart(e, "se", el.id)}
+                        ></div>
+                        <div
+                          className="absolute top-1/2 left-0 w-1.5 h-6 bg-white border border-blue-500 rounded-full -translate-x-1/2 -translate-y-1/2 z-20 cursor-ew-resize hover:scale-110 transition"
+                          onMouseDown={(e) => handleResizeStart(e, "w", el.id)}
+                        ></div>
+                        <div
+                          className="absolute top-1/2 right-0 w-1.5 h-6 bg-white border border-blue-500 rounded-full translate-x-1/2 -translate-y-1/2 z-20 cursor-ew-resize hover:scale-110 transition"
+                          onMouseDown={(e) => handleResizeStart(e, "e", el.id)}
+                        ></div>
+                        <div
+                          className="absolute top-0 right-0 font-mono text-[10px] font-medium text-gray-500 whitespace-nowrap pointer-events-none select-none z-50"
+                          style={{
+                            transform: `scale(${100 / zoom}) translateY(calc(-100% - 6px))`,
+                            transformOrigin: "top right",
+                          }}
+                        >
+                          {Math.round(el.width)} × {Math.round(el.height)} · {Math.round(el.fontSize || 16)}px
+                        </div>
+                      </>
                     )}
                     {el.type === "shape" && (
                       <svg

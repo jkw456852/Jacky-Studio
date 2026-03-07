@@ -1,8 +1,8 @@
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import {
     MessageSquare, ChevronDown, CirclePlus, Clock, Search, X, Share2,
-    File as FileIcon, Image as ImageIcon, Video, Download, Store, Layout, Globe, FileText, PanelRightClose, Compass
+    File as FileIcon, Image as ImageIcon, Video, Download, Store, Layout, Globe, FileText, PanelRightClose, Compass, Pin
 } from 'lucide-react';
 import { useAgentStore } from '../../../stores/agent.store';
 import { useClothingStudioChatStore } from '../../../stores/clothingStudioChat.store';
@@ -98,6 +98,7 @@ export const AssistantSidebar: React.FC<AssistantSidebarProps> = ({
     onClothingRetryFailed,
 }) => {
     const messages = useAgentStore(s => s.messages);
+    const inputBlocks = useAgentStore(s => s.inputBlocks);
     const { setMessages, clearMessages, setIsAgentMode } = useAgentStore(s => s.actions);
     const webEnabled = useAgentStore(s => s.webEnabled);
     const clothingActions = useClothingStudioChatStore(s => s.actions);
@@ -105,6 +106,60 @@ export const AssistantSidebar: React.FC<AssistantSidebarProps> = ({
     const [showHistoryPopover, setShowHistoryPopover] = useState(false);
     const [historySearch, setHistorySearch] = useState('');
     const [showFileListModal, setShowFileListModal] = useState(false);
+    const [activeQuickSkill, setActiveQuickSkill] = useState<any | null>(null);
+
+    useEffect(() => {
+        const current = conversations.find((c) => c.id === activeConversationId);
+        const skill = (current as any)?.meta?.activeQuickSkill || null;
+        setActiveQuickSkill(skill);
+    }, [activeConversationId, conversations]);
+
+    const setConversationQuickSkill = (conversationId: string, skill: any | null) => {
+        setConversations((prev) => prev.map((c) => {
+            if (c.id !== conversationId) return c;
+            const nextMeta = { ...((c as any).meta || {}), activeQuickSkill: skill || undefined };
+            return { ...c, meta: nextMeta } as any;
+        }));
+    };
+
+    const setActiveQuickSkillSynced = (skill: any | null) => {
+        setActiveQuickSkill(skill);
+        if (activeConversationId) {
+            setConversationQuickSkill(activeConversationId, skill);
+        }
+    };
+
+    const STORYBOARD_SKILL = { id: 'cameron', name: '分镜故事板', iconName: 'Film' };
+
+    const readCurrentInputText = () => inputBlocks
+        .filter((b) => b.type === 'text')
+        .map((b) => b.text || '')
+        .join(' ')
+        .trim();
+
+    const handleSendWithQuickSkill = (
+        overridePrompt?: string,
+        overrideAttachments?: File[],
+        overrideWeb?: boolean,
+        skillData?: any,
+    ) => {
+        const fallbackSkill = creationMode === 'agent' ? activeQuickSkill : undefined;
+        return handleSend(overridePrompt, overrideAttachments, overrideWeb, skillData || fallbackSkill);
+    };
+
+    const handleStoryboardQuickSend = () => {
+        const extra = readCurrentInputText();
+        const prompt = extra
+            ? `请帮我制作产品九宫格分镜图。\n补充要求：${extra}`
+            : '请帮我制作产品九宫格分镜图';
+        void handleSend(prompt, undefined, webEnabled, STORYBOARD_SKILL);
+    };
+
+    const handleStoryboardSetActive = () => {
+        setCreationMode('agent');
+        setIsAgentMode(true);
+        setActiveQuickSkillSynced(STORYBOARD_SKILL);
+    };
 
     const createConversationId = () => `conv-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
     const toMemoryKey = (conversationId: string) => {
@@ -133,7 +188,7 @@ export const AssistantSidebar: React.FC<AssistantSidebarProps> = ({
                 <div className="flex items-center gap-0.5">
                     <button
                         className="h-7 px-2.5 text-xs text-gray-500 hover:text-gray-800 hover:bg-gray-100 flex items-center justify-center rounded-lg transition-all"
-                        onClick={() => { setActiveConversationId(createConversationId()); clearMessages(); setPrompt(''); setCreationMode('agent'); }}
+                        onClick={() => { setActiveConversationId(createConversationId()); clearMessages(); setPrompt(''); setCreationMode('agent'); setActiveQuickSkillSynced(null); }}
                     >
                         <CirclePlus size={15} strokeWidth={1.5} className="mr-1" />
                         新对话
@@ -165,7 +220,7 @@ export const AssistantSidebar: React.FC<AssistantSidebarProps> = ({
 
                                 <button
                                     className="w-full flex items-center justify-center h-8 text-xs mb-3 border border-dashed rounded-md hover:bg-gray-50 transition-colors"
-                                    onClick={() => { setActiveConversationId(createConversationId()); clearMessages(); setShowHistoryPopover(false); }}
+                                    onClick={() => { setActiveConversationId(createConversationId()); clearMessages(); setShowHistoryPopover(false); setActiveQuickSkillSynced(null); }}
                                 >
                                     <CirclePlus size={14} strokeWidth={1.5} className="mr-1" />
                                     新对话
@@ -338,13 +393,22 @@ export const AssistantSidebar: React.FC<AssistantSidebarProps> = ({
                                 <FileText size={15} strokeWidth={1.8} />
                                 <span>营销宣传册</span>
                             </button>
-                            <button
-                                onClick={() => handleSend("请帮我制作产品九宫格分镜图", undefined, webEnabled, { id: 'cameron', name: '分镜故事板', iconName: 'Film' })}
-                                className="inline-flex items-center gap-2 px-4 py-2.5 bg-white border border-gray-200 rounded-full text-sm font-medium text-gray-700 hover:border-gray-400 hover:text-gray-900 hover:shadow-sm transition-all cursor-pointer"
-                            >
-                                <Video size={15} strokeWidth={1.8} />
-                                <span>分镜故事板</span>
-                            </button>
+                            <div className="inline-flex items-center rounded-full border border-gray-200 bg-white overflow-hidden">
+                                <button
+                                    onClick={handleStoryboardQuickSend}
+                                    className="inline-flex items-center gap-2 px-4 py-2.5 text-sm font-medium text-gray-700 hover:text-gray-900 hover:bg-gray-50 transition-all cursor-pointer"
+                                >
+                                    <Video size={15} strokeWidth={1.8} />
+                                    <span>分镜故事板</span>
+                                </button>
+                                <button
+                                    onClick={handleStoryboardSetActive}
+                                    className={`h-full px-2.5 border-l transition-all ${activeQuickSkill?.id === STORYBOARD_SKILL.id ? 'bg-gray-900 text-white border-gray-900' : 'border-gray-200 text-gray-500 hover:text-gray-800 hover:bg-gray-50'}`}
+                                    title="设为当前技能"
+                                >
+                                    <Pin size={13} strokeWidth={2} />
+                                </button>
+                            </div>
                             <button
                                 onClick={() => {
                                     clothingActions.reset();
@@ -421,7 +485,7 @@ export const AssistantSidebar: React.FC<AssistantSidebarProps> = ({
                 <InputArea
                     creationMode={creationMode}
                     setCreationMode={setCreationMode}
-                    handleSend={handleSend}
+                    handleSend={handleSendWithQuickSkill}
                     handleModeSwitch={handleModeSwitch}
                     fileInputRef={fileInputRef}
                     selectedChipId={selectedChipId}
@@ -456,6 +520,8 @@ export const AssistantSidebar: React.FC<AssistantSidebarProps> = ({
                     setShowVideoSettingsDropdown={setShowVideoSettingsDropdown}
                     markers={markers}
                     onSaveMarkerLabel={onSaveMarkerLabel}
+                    activeQuickSkill={activeQuickSkill}
+                    onClearQuickSkill={() => setActiveQuickSkillSynced(null)}
                 />
             </div>
         </motion.div>

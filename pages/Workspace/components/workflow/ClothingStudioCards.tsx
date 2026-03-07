@@ -125,23 +125,23 @@ export const ClothingStudioCards: React.FC<ClothingStudioCardsProps> = ({
   const state = useClothingState();
   const [form, setForm] = useState<Requirements>(state.requirements);
   const [modelForm, setModelForm] = useState<ModelGenOptions>(state.modelOptions);
-  const [showAdvanced, setShowAdvanced] = useState(false);
   const candidateUrls = useMemo(() => state.modelCandidates.map((c) => c.url), [state.modelCandidates]);
   const [hoverUrl, setHoverUrl] = useState<string | null>(null);
 
   // ----------------------------------------------------------------------
   // 自动化：生成完成后自动插入画布 (User Request)
   // ----------------------------------------------------------------------
-  const processedMsgs = useRef<Set<string>>(new Set());
+  const insertedResultUrls = useRef<Set<string>>(new Set());
   
   useEffect(() => {
     if (message.type === 'clothingStudio.results') {
-      const uniqueId = (message as any).id || `results-${state.results.length}`;
-      if (!processedMsgs.current.has(uniqueId)) {
-        const images = message.images?.length ? message.images : state.results;
-        if (images.length > 0) {
-          images.forEach(img => onInsertToCanvas(img.url, img.label));
-          processedMsgs.current.add(uniqueId);
+      const images = message.images?.length ? message.images : state.results;
+      if (images.length > 0) {
+        for (const img of images) {
+          const key = String(img.url || '').trim();
+          if (!key || insertedResultUrls.current.has(key)) continue;
+          onInsertToCanvas(img.url, img.label);
+          insertedResultUrls.current.add(key);
         }
       }
     }
@@ -297,7 +297,24 @@ export const ClothingStudioCards: React.FC<ClothingStudioCardsProps> = ({
             onChange={(e: any) => setForm((s) => ({ ...s, aspectRatio: e.target.value }))} 
             options={['1:1', '3:4', '4:3', '9:16', '16:9']} 
           />
-          <ProSelect label="Res." value={form.clarity} options={['2K', '4K']} onChange={() => {}} />
+          <ProSelect
+            label="Res."
+            value={form.clarity}
+            options={['1K', '2K', '4K']}
+            onChange={(e: any) => setForm((s) => ({ ...s, clarity: e.target.value }))}
+          />
+          <ProSelect
+            label="Language"
+            value={form.targetLanguage}
+            onChange={(e: any) => setForm((s) => ({ ...s, targetLanguage: e.target.value }))}
+            options={LANGUAGE_OPTIONS}
+          />
+          <ProSelect
+            label="Count"
+            value={form.count}
+            onChange={(e: any) => setForm((s) => ({ ...s, count: Math.max(1, Math.min(10, Number(e.target.value) || 1)) }))}
+            options={COUNT_OPTIONS}
+          />
         </div>
 
         <div className="mt-6 space-y-4">
@@ -313,7 +330,26 @@ export const ClothingStudioCards: React.FC<ClothingStudioCardsProps> = ({
             <div className="mb-2 text-[10px] font-bold text-gray-400 uppercase tracking-widest pl-0.5">Shot List</div>
             <div className="flex flex-wrap gap-1.5">
               {[...REQUIREMENT_TAGS.background, ...REQUIREMENT_TAGS.camera, ...REQUIREMENT_TAGS.focus].map(tag => (
-                <ProTag key={tag} active={form.focusTags?.includes(tag)} onClick={() => setForm((s) => ({ ...s, focusTags: s.focusTags?.includes(tag) ? (s.focusTags || []).filter(t => t !== tag) : [...(s.focusTags || []), tag] }))}>{tag}</ProTag>
+                <ProTag
+                  key={tag}
+                  active={
+                    form.backgroundTags?.includes(tag) ||
+                    form.cameraTags?.includes(tag) ||
+                    form.focusTags?.includes(tag)
+                  }
+                  onClick={() => setForm((s) => {
+                    const inBg = REQUIREMENT_TAGS.background.includes(tag as any);
+                    const inCam = REQUIREMENT_TAGS.camera.includes(tag as any);
+                    const key = inBg ? 'backgroundTags' : inCam ? 'cameraTags' : 'focusTags';
+                    const prev = (s[key] || []) as string[];
+                    const next = prev.includes(tag)
+                      ? prev.filter((t) => t !== tag)
+                      : [...prev, tag];
+                    return { ...s, [key]: next } as Requirements;
+                  })}
+                >
+                  {tag}
+                </ProTag>
               ))}
             </div>
           </div>
@@ -343,9 +379,10 @@ export const ClothingStudioCards: React.FC<ClothingStudioCardsProps> = ({
               >
                 ABORT
               </button>
-              <button 
-                onClick={onRetryFailed} 
-                className="text-[10px] font-bold bg-black/20 hover:bg-black/40 px-3 py-1.5 rounded-full backdrop-blur-md transition-all active:scale-95"
+              <button
+                onClick={onRetryFailed}
+                disabled={!state.failedItems.length}
+                className="text-[10px] font-bold bg-black/20 hover:bg-black/40 px-3 py-1.5 rounded-full backdrop-blur-md transition-all active:scale-95 disabled:opacity-40 disabled:cursor-not-allowed"
               >
                 RETRY FAILED
               </button>

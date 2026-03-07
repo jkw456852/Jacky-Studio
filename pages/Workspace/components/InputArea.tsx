@@ -1,4 +1,4 @@
-﻿import React, { useState } from 'react';
+﻿import React, { useEffect, useRef, useState } from 'react';
 import ReactDOM from 'react-dom';
 import { motion, AnimatePresence } from 'framer-motion';
 import {
@@ -115,6 +115,8 @@ interface InputAreaProps {
     setShowVideoSettingsDropdown: (v: boolean) => void;
     markers: any[];
     onSaveMarkerLabel?: (markerId: string, label: string) => void;
+    activeQuickSkill?: { id: string; name: string; iconName?: string } | null;
+    onClearQuickSkill?: () => void;
 }
 
 export const InputArea: React.FC<InputAreaProps> = ({
@@ -134,6 +136,7 @@ export const InputArea: React.FC<InputAreaProps> = ({
     isVideoPanelHovered, setIsVideoPanelHovered,
     showVideoSettingsDropdown, setShowVideoSettingsDropdown,
     markers, onSaveMarkerLabel,
+    activeQuickSkill, onClearQuickSkill,
 }) => {
     const [editingMarkerId, setEditingMarkerId] = useState<string | null>(null);
     const [editingMarkerLabel, setEditingMarkerLabel] = useState('');
@@ -167,6 +170,47 @@ export const InputArea: React.FC<InputAreaProps> = ({
     const imageGenRatio = useAgentStore(s => s.imageGenRatio);
     const imageGenRes = useAgentStore(s => s.imageGenRes);
     const { setImageGenRatio, setImageGenRes } = useAgentStore(s => s.actions);
+    const sendSkill = creationMode === 'agent' ? (activeQuickSkill || undefined) : undefined;
+    const objectUrlMapRef = useRef<Map<File, string>>(new Map());
+
+    const getObjectUrl = (file?: File | null) => {
+        if (!file) return '';
+        const existed = objectUrlMapRef.current.get(file);
+        if (existed) return existed;
+        const next = URL.createObjectURL(file);
+        objectUrlMapRef.current.set(file, next);
+        return next;
+    };
+
+    useEffect(() => {
+        return () => {
+            objectUrlMapRef.current.forEach((url) => URL.revokeObjectURL(url));
+            objectUrlMapRef.current.clear();
+        };
+    }, []);
+
+    useEffect(() => {
+        const activeFiles = new Set<File>();
+        const push = (f?: File | null) => {
+            if (f) activeFiles.add(f);
+        };
+
+        inputBlocks.forEach((b) => {
+            if (b.type === 'file' && b.file) push(b.file);
+        });
+        imageGenUploads.forEach(push);
+        push(videoStartFrame);
+        push(videoEndFrame);
+        videoMultiRefs.forEach(push);
+        pendingAttachments.forEach((p) => push(p.file));
+
+        objectUrlMapRef.current.forEach((url, file) => {
+            if (!activeFiles.has(file)) {
+                URL.revokeObjectURL(url);
+                objectUrlMapRef.current.delete(file);
+            }
+        });
+    }, [inputBlocks, imageGenUploads, videoStartFrame, videoEndFrame, videoMultiRefs, pendingAttachments]);
 
     const selectLatestCanvasChip = () => {
         if (selectedChipId) return;
@@ -333,7 +377,7 @@ export const InputArea: React.FC<InputAreaProps> = ({
 
                             {Array.isArray(imageGenUploads) && imageGenUploads.map((file, idx) => (
                                 <div key={idx} className="relative w-[72px] h-[72px] border border-gray-200 rounded-[14px] overflow-visible shadow-sm shrink-0 bg-white">
-                                    <img src={URL.createObjectURL(file)} className="w-full h-full object-cover rounded-[14px]" />
+                                    <img src={getObjectUrl(file)} className="w-full h-full object-cover rounded-[14px]" />
                                     <button
                                         onClick={(e) => { e.stopPropagation(); setImageGenUploads(imageGenUploads.filter((_, i) => i !== idx)); setIsPickingFromCanvas(false); }}
                                         className="absolute -top-1.5 -right-1.5 w-4 h-4 bg-black/80 hover:bg-black text-white rounded-full flex items-center justify-center z-10 shadow-sm border border-white/20"
@@ -369,7 +413,7 @@ export const InputArea: React.FC<InputAreaProps> = ({
                                     <label className={`w-[72px] h-[72px] border rounded-[14px] flex flex-col items-center justify-center cursor-pointer transition overflow-hidden group/upload ${videoStartFrame ? 'border-gray-200 border-solid shadow-sm' : 'border border-dashed border-gray-200 bg-gray-50/50 hover:border-blue-400 hover:bg-blue-50/30'}`}>
                                         <input type="file" accept="image/*" className="hidden" onChange={e => { if (e.target.files) setVideoStartFrame(e.target.files[0]); }} />
                                         {videoStartFrame ? (
-                                            <img src={URL.createObjectURL(videoStartFrame)} className="w-full h-full object-cover" />
+                                            <img src={getObjectUrl(videoStartFrame)} className="w-full h-full object-cover" />
                                         ) : (
                                             <>
                                                 <Plus size={20} strokeWidth={1.5} className="text-gray-300 group-hover/upload:text-blue-500 transition mb-1" />
@@ -387,7 +431,7 @@ export const InputArea: React.FC<InputAreaProps> = ({
                                     <label className={`w-[72px] h-[72px] border rounded-[14px] flex flex-col items-center justify-center cursor-pointer transition overflow-hidden group/upload ${videoEndFrame ? 'border-gray-200 border-solid shadow-sm' : 'border border-dashed border-gray-200 bg-gray-50/50 hover:border-blue-400 hover:bg-blue-50/30'}`}>
                                         <input type="file" accept="image/*" className="hidden" onChange={e => { if (e.target.files) setVideoEndFrame(e.target.files[0]); }} />
                                         {videoEndFrame ? (
-                                            <img src={URL.createObjectURL(videoEndFrame)} className="w-full h-full object-cover" />
+                                            <img src={getObjectUrl(videoEndFrame)} className="w-full h-full object-cover" />
                                         ) : (
                                             <>
                                                 <Plus size={20} strokeWidth={1.5} className="text-gray-300 group-hover/upload:text-blue-500 transition mb-1" />
@@ -407,7 +451,7 @@ export const InputArea: React.FC<InputAreaProps> = ({
                                 {videoMultiRefs.map((file, idx) => (
                                     <div key={idx} className="relative flex-shrink-0">
                                         <div className="w-14 h-14 border border-gray-200 rounded-xl overflow-hidden shadow-sm">
-                                            <img src={URL.createObjectURL(file)} className="w-full h-full object-cover" />
+                                            <img src={getObjectUrl(file)} className="w-full h-full object-cover" />
                                         </div>
                                         <button onClick={() => setVideoMultiRefs(useAgentStore.getState().videoMultiRefs.filter((_, i) => i !== idx))} className="absolute -top-1.5 -right-1.5 w-4 h-4 bg-gray-600 hover:bg-gray-800 text-white rounded-full flex items-center justify-center z-10 shadow border border-white">
                                             <X size={10} />
@@ -500,7 +544,7 @@ export const InputArea: React.FC<InputAreaProps> = ({
                                         >
                                             <div className="flex items-center -space-x-1.5 flex-shrink-0">
                                                 <div className="w-5 h-5 rounded-full overflow-hidden border border-gray-100 flex-shrink-0 shadow-sm">
-                                                    <img src={URL.createObjectURL(file)} className="w-full h-full object-cover" />
+                                                    <img src={getObjectUrl(file)} className="w-full h-full object-cover" />
                                                 </div>
                                                 <div className="w-3.5 h-3.5 bg-[#3B82F6] rounded-full flex items-center justify-center text-white text-[8px] font-black shadow-sm flex-shrink-0 border border-white z-10">
                                                     {markers.findIndex(m => m.id === markerId) + 1 || '?'}
@@ -547,7 +591,7 @@ export const InputArea: React.FC<InputAreaProps> = ({
                                                                     transformOrigin: `${(markerInfo.x + markerInfo.width / 2) / markerInfo.imageWidth * 100}% ${(markerInfo.y + markerInfo.height / 2) / markerInfo.imageHeight * 100}%`
                                                                 }}
                                                             >
-                                                                <img src={markerInfo.fullImageUrl || URL.createObjectURL(file)} className="w-full h-full object-cover" />
+                                                                <img src={markerInfo.fullImageUrl || getObjectUrl(file)} className="w-full h-full object-cover" />
                                                                 {/* 在图片上覆盖绘制对应的标记点 */}
                                                                 <div
                                                                     className="absolute"
@@ -587,7 +631,7 @@ export const InputArea: React.FC<InputAreaProps> = ({
                                     const imageWidth = Number(fileAny._canvasWidth || fileAny._canvasW || 0);
                                     const imageHeight = Number(fileAny._canvasHeight || fileAny._canvasH || 0);
                                     const hasValidAspect = imageWidth > 0 && imageHeight > 0;
-                                    const chipPreviewUrl = fileAny._chipPreviewUrl || (fileAny._chipPreviewUrl = URL.createObjectURL(file));
+                                    const chipPreviewUrl = fileAny._chipPreviewUrl || (fileAny._chipPreviewUrl = getObjectUrl(file));
                                     return (
                                         <div
                                             key={block.id}
@@ -676,7 +720,11 @@ export const InputArea: React.FC<InputAreaProps> = ({
                                         onFocus={() => { commitPendingAttachments(); setActiveBlockId(block.id); setIsInputFocused(true); }}
                                         onBlur={() => setIsInputFocused(false)}
                                         onKeyDown={(e) => {
-                                            if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); handleSend(); return; }
+                                            if (e.key === 'Enter' && !e.shiftKey) {
+                                                e.preventDefault();
+                                                handleSend(undefined, undefined, undefined, sendSkill);
+                                                return;
+                                            }
 
                                             // 任何普通按键输入都取消选中
                                             if (selectedChipId && !['ArrowLeft', 'ArrowRight', 'Backspace', 'Delete', 'Shift', 'Control', 'Alt', 'Meta'].includes(e.key)) {
@@ -813,7 +861,7 @@ export const InputArea: React.FC<InputAreaProps> = ({
                             >
                                 <div className="w-5 h-5 rounded-full overflow-hidden flex-shrink-0 border border-blue-200 shadow-sm">
                                     {pending.file.type.startsWith('image/')
-                                        ? <img src={URL.createObjectURL(pending.file)} className="w-full h-full object-cover" />
+                                        ? <img src={getObjectUrl(pending.file)} className="w-full h-full object-cover" />
                                         : <FileText size={10} className="text-blue-500" />}
                                 </div>
                                 <span className="text-[11px] text-blue-700 font-bold max-w-[100px] truncate ml-0.5">待确认</span>
@@ -1029,7 +1077,7 @@ export const InputArea: React.FC<InputAreaProps> = ({
                                 </div>
 
                                 <button
-                                    onClick={() => handleSend(undefined, imageGenUploads.length > 0 ? imageGenUploads : [])}
+                                    onClick={() => handleSend(undefined, imageGenUploads.length > 0 ? imageGenUploads : [], undefined, sendSkill)}
                                     disabled={imageGenUploads.length === 0 && inputBlocks.every(b => (b.type === 'text' && !b.text))}
                                     className="h-9 pl-3 pr-4 rounded-full flex items-center gap-2 text-[13px] font-bold transition bg-[#f3f4f6] text-[#6b7280] hover:bg-gray-200 hover:text-gray-700 disabled:opacity-50"
                                 >
@@ -1176,11 +1224,32 @@ export const InputArea: React.FC<InputAreaProps> = ({
                                         </div>
                                     )}
                                 </div>
-                                <button onClick={() => handleSend()} className="w-9 h-9 rounded-full flex items-center justify-center bg-black text-white hover:bg-gray-800 transition shadow-md shrink-0"><ArrowUp size={18} strokeWidth={2.5} /></button>
+                                <button
+                                    onClick={() => handleSend(undefined, undefined, undefined, sendSkill)}
+                                    className="w-9 h-9 rounded-full flex items-center justify-center bg-black text-white hover:bg-gray-800 transition shadow-md shrink-0"
+                                >
+                                    <ArrowUp size={18} strokeWidth={2.5} />
+                                </button>
                             </>
                         )}
                     </div>
                 </div>
+
+                {activeQuickSkill && creationMode === 'agent' && (
+                    <div className="px-3 pb-2">
+                        <div className="inline-flex items-center gap-1.5 rounded-full border border-blue-200 bg-blue-50 text-blue-700 pl-2.5 pr-1.5 py-1 text-[11px] font-semibold">
+                            <Sparkles size={12} strokeWidth={2} />
+                            <span>{activeQuickSkill.name}</span>
+                            <button
+                                onClick={() => onClearQuickSkill?.()}
+                                className="w-4 h-4 rounded-full hover:bg-blue-100 flex items-center justify-center"
+                                title="清除当前技能"
+                            >
+                                <X size={11} />
+                            </button>
+                        </div>
+                    </div>
+                )}
 
                 {/* Hidden file input for selecting files */}
                 <input
@@ -1276,17 +1345,6 @@ export const InputArea: React.FC<InputAreaProps> = ({
                         document.body
                     );
                 })()}
-                <input
-                    ref={fileInputRef}
-                    type="file"
-                    accept="image/*"
-                    multiple
-                    className="hidden"
-                    onChange={(e) => {
-                        if (e.target.files) handlePickedFiles(Array.from(e.target.files));
-                        if (fileInputRef.current) fileInputRef.current.value = '';
-                    }}
-                />
             </div>
         </div>
     );

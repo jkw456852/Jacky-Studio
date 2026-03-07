@@ -35,7 +35,7 @@ export type Requirements = {
   description: string;
   targetLanguage: string;
   aspectRatio: string;
-  clarity: '2K';
+  clarity: '1K' | '2K' | '4K';
   count: number;
   templateId?: string;
   styleTags?: string[];
