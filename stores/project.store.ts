@@ -4,9 +4,62 @@
  */
 
 import { create } from 'zustand';
-import { devtools, persist } from 'zustand/middleware';
+import { createJSONStorage, devtools, persist } from 'zustand/middleware';
 import { immer } from 'zustand/middleware/immer';
 import type { BrandInfo, DesignSessionState, DesignTaskMode } from '../types/common';
+import { safeLocalStorageStateStorage } from '../utils/safe-storage';
+
+const MAX_PERSIST_LIST = 20;
+const MAX_PERSIST_TEXT = 500;
+
+const toTrimmedStringArray = (input: unknown): string[] => {
+  if (!Array.isArray(input)) return [];
+  return input
+    .filter((item): item is string => typeof item === 'string')
+    .map((item) => item.trim())
+    .filter(Boolean)
+    .slice(0, MAX_PERSIST_LIST)
+    .map((item) => item.slice(0, MAX_PERSIST_TEXT));
+};
+
+const toTrimmedText = (value: unknown): string | undefined => {
+  if (typeof value !== 'string') return undefined;
+  const trimmed = value.trim();
+  if (!trimmed) return undefined;
+  return trimmed.slice(0, MAX_PERSIST_TEXT);
+};
+
+const toTrimmedWebPages = (value: unknown): Array<{ title: string; url: string }> => {
+  if (!Array.isArray(value)) return [];
+  const pages: Array<{ title: string; url: string }> = [];
+  for (const item of value) {
+    if (!item || typeof item !== 'object') continue;
+    const title = toTrimmedText((item as { title?: unknown }).title);
+    const url = toTrimmedText((item as { url?: unknown }).url);
+    if (!title || !url) continue;
+    pages.push({ title, url });
+    if (pages.length >= MAX_PERSIST_LIST) break;
+  }
+  return pages;
+};
+
+const compactDesignSessionForPersist = (session: DesignSessionState): DesignSessionState => ({
+  taskMode: session.taskMode,
+  brand: {
+    name: toTrimmedText(session.brand?.name),
+    colors: toTrimmedStringArray(session.brand?.colors),
+    fonts: toTrimmedStringArray(session.brand?.fonts),
+    style: toTrimmedText(session.brand?.style),
+  },
+  styleHints: toTrimmedStringArray(session.styleHints),
+  subjectAnchors: toTrimmedStringArray(session.subjectAnchors),
+  constraints: toTrimmedStringArray(session.constraints),
+  forbiddenChanges: toTrimmedStringArray(session.forbiddenChanges),
+  approvedAssetIds: toTrimmedStringArray(session.approvedAssetIds),
+  referenceSummary: toTrimmedText(session.referenceSummary),
+  researchSummary: toTrimmedText(session.researchSummary),
+  referenceWebPages: toTrimmedWebPages(session.referenceWebPages),
+});
 
 interface ProjectSettings {
   autoSave: boolean;
@@ -212,12 +265,13 @@ export const useProjectStore = create<ProjectState>()(
     })),
     {
       name: 'xc-studio-project',
+      storage: createJSONStorage(() => safeLocalStorageStateStorage),
       partialize: (state) => ({
         id: state.id,
         title: state.title,
         description: state.description,
         brandInfo: state.brandInfo,
-        designSession: state.designSession,
+        designSession: compactDesignSessionForPersist(state.designSession),
         settings: state.settings,
         createdAt: state.createdAt,
         updatedAt: state.updatedAt

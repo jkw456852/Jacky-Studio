@@ -145,6 +145,7 @@ import { exportSkill } from "../services/skills/export.skill";
 import { executeSkill } from "../services/skills";
 import { useClothingStudioChatStore, useClothingState } from "../stores/clothingStudioChat.store";
 import { uploadImage } from "../utils/uploader";
+import { safeLocalStorageSetItem } from "../utils/safe-storage";
 import { useImageHostStore } from "../stores/imageHost.store";
 import {
   extractWebPage,
@@ -1742,7 +1743,7 @@ const Workspace: React.FC = () => {
         PREFERRED_IMAGE_MODEL_TO_STORAGE_ID[preferredImageModel] ||
         preferredImageModel,
       ];
-    localStorage.setItem(
+    safeLocalStorageSetItem(
       "setting_image_models",
       JSON.stringify(selectedImageModels),
     );

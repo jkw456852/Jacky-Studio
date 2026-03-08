@@ -1,4 +1,5 @@
 import { useImageHostStore } from '../stores/imageHost.store';
+import { safeLocalStorageSetItem } from './safe-storage';
 
 const DATA_URL_BASE64_PREFIX = /^data:image\/[a-zA-Z0-9.+-]+;base64,/;
 const IMGBB_ROUND_ROBIN_KEY = 'image_host_poll_index_imgbb';
@@ -22,7 +23,7 @@ function getStartIndex(storageKey: string, total: number): number {
 
 function setNextIndex(storageKey: string, nextIndex: number, total: number): void {
   if (total <= 0) return;
-  localStorage.setItem(storageKey, String((nextIndex + total) % total));
+  safeLocalStorageSetItem(storageKey, String((nextIndex + total) % total));
 }
 
 async function parseJsonSafely(response: Response): Promise<any | null> {

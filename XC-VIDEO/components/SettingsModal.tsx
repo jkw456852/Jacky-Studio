@@ -1,6 +1,7 @@
 
 import React, { useState, useEffect } from 'react';
 import { X, Save, Key, ExternalLink, Eye, EyeOff } from 'lucide-react';
+import { safeLocalStorageSetItem } from '../../utils/safe-storage';
 
 interface SettingsModalProps {
   isOpen: boolean;
@@ -26,9 +27,9 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose })
   }, [isOpen]);
 
   const handleSave = () => {
-    localStorage.setItem('pollo_api_key', polloKey.trim());
-    localStorage.setItem('yunwu_api_key', yunwuKey.trim());
-    localStorage.setItem('yunwu_group', yunwuGroup.trim());
+    safeLocalStorageSetItem('pollo_api_key', polloKey.trim());
+    safeLocalStorageSetItem('yunwu_api_key', yunwuKey.trim());
+    safeLocalStorageSetItem('yunwu_group', yunwuGroup.trim());
     setIsSaved(true);
     setTimeout(() => setIsSaved(false), 2000);
     setTimeout(onClose, 800);

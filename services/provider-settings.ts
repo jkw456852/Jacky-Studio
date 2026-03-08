@@ -1,4 +1,5 @@
 import { fetchAvailableModels } from './gemini';
+import { safeLocalStorageSetItem } from '../utils/safe-storage';
 
 export type ModelCategory = 'script' | 'image' | 'video';
 export type ModelBrand =
@@ -162,7 +163,7 @@ export const loadProviderSettings = (): LoadedProviderSettings => {
   const selectedVideoModels = normalizeVideoModels(
     safeJsonArray(localStorage.getItem('setting_video_models'), [DEFAULT_VIDEO_MODEL])
   );
-  localStorage.setItem('setting_video_models', JSON.stringify(selectedVideoModels));
+  safeLocalStorageSetItem('setting_video_models', JSON.stringify(selectedVideoModels));
 
   return {
     providers,
@@ -180,19 +181,19 @@ export const loadProviderSettings = (): LoadedProviderSettings => {
 };
 
 export const saveProviderSettings = (settings: LoadedProviderSettings): void => {
-  localStorage.setItem('api_providers', JSON.stringify(settings.providers));
-  localStorage.setItem('api_provider', settings.activeProviderId);
-  localStorage.setItem('replicate_api_key', settings.replicateKey.trim());
-  localStorage.setItem('kling_api_key', settings.klingKey.trim());
+  safeLocalStorageSetItem('api_providers', JSON.stringify(settings.providers));
+  safeLocalStorageSetItem('api_provider', settings.activeProviderId);
+  safeLocalStorageSetItem('replicate_api_key', settings.replicateKey.trim());
+  safeLocalStorageSetItem('kling_api_key', settings.klingKey.trim());
 
-  localStorage.setItem('setting_script_models', JSON.stringify(settings.selectedScriptModels));
-  localStorage.setItem('setting_image_models', JSON.stringify(settings.selectedImageModels));
-  localStorage.setItem('setting_video_models', JSON.stringify(normalizeVideoModels(settings.selectedVideoModels)));
+  safeLocalStorageSetItem('setting_script_models', JSON.stringify(settings.selectedScriptModels));
+  safeLocalStorageSetItem('setting_image_models', JSON.stringify(settings.selectedImageModels));
+  safeLocalStorageSetItem('setting_video_models', JSON.stringify(normalizeVideoModels(settings.selectedVideoModels)));
 
-  localStorage.setItem('setting_visual_continuity', settings.visualContinuity ? 'true' : 'false');
-  localStorage.setItem('setting_system_moderation', settings.systemModeration ? 'true' : 'false');
-  localStorage.setItem('setting_auto_save', settings.autoSave ? 'true' : 'false');
-  localStorage.setItem('setting_concurrent_count', settings.concurrentCount.toString());
+  safeLocalStorageSetItem('setting_visual_continuity', settings.visualContinuity ? 'true' : 'false');
+  safeLocalStorageSetItem('setting_system_moderation', settings.systemModeration ? 'true' : 'false');
+  safeLocalStorageSetItem('setting_auto_save', settings.autoSave ? 'true' : 'false');
+  safeLocalStorageSetItem('setting_concurrent_count', settings.concurrentCount.toString());
 };
 
 export const classifyModel = (modelId: string): Pick<ModelInfo, 'brand' | 'category'> => {

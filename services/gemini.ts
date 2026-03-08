@@ -2,6 +2,7 @@
 import { GoogleGenAI, Chat, GenerateContentResponse, Part, Content, Type } from "@google/genai";
 import { ProviderError } from '../utils/provider-error';
 import { fetchWithResilience } from './http/api-client';
+import { safeLocalStorageSetItem } from '../utils/safe-storage';
 
 // Helper to get API configurations
 export const getProviderConfig = () => {
@@ -69,7 +70,7 @@ export const getApiKey = (all: boolean = false) => {
             let currentIndex = parseInt(localStorage.getItem(storageKey) || '0', 10);
             if (currentIndex >= keys.length) currentIndex = 0;
             const selectedKey = keys[currentIndex];
-            localStorage.setItem(storageKey, ((currentIndex + 1) % keys.length).toString());
+            safeLocalStorageSetItem(storageKey, ((currentIndex + 1) % keys.length).toString());
             return selectedKey;
         }
     }
@@ -569,14 +570,14 @@ const getNormalizedSelectedVideoModels = (): string[] => {
 
     if (deduped.length === 0) {
         const fallback = [VEO_FAST_MODEL];
-        localStorage.setItem(key, JSON.stringify(fallback));
+        safeLocalStorageSetItem(key, JSON.stringify(fallback));
         return fallback;
     }
 
     const originalSerialized = JSON.stringify(source);
     const normalizedSerialized = JSON.stringify(deduped);
     if (originalSerialized !== normalizedSerialized) {
-        localStorage.setItem(key, normalizedSerialized);
+        safeLocalStorageSetItem(key, normalizedSerialized);
         console.log('[generateVideo] Migrated legacy video model ids to canonical ids');
     }
 
@@ -1654,7 +1655,7 @@ export const generateVideo = async (config: VideoGenerationConfig): Promise<stri
             let currentIdx = parseInt(localStorage.getItem(storageKeyIdx) || '0', 10);
             if (currentIdx >= candidates.length) currentIdx = 0;
             targetModelId = candidates[currentIdx];
-            localStorage.setItem(storageKeyIdx, ((currentIdx + 1) % candidates.length).toString());
+            safeLocalStorageSetItem(storageKeyIdx, ((currentIdx + 1) % candidates.length).toString());
         }
 
         const modelId = normalizeVideoModelId(targetModelId || VEO_FAST_MODEL);

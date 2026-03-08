@@ -1,5 +1,6 @@
 import { create } from 'zustand';
-import { persist } from 'zustand/middleware';
+import { createJSONStorage, persist } from 'zustand/middleware';
+import { safeLocalStorageStateStorage } from '../utils/safe-storage';
 
 export type ImageHostProvider = 'none' | 'imgbb' | 'custom'; // cspell:disable-line
 
@@ -51,6 +52,7 @@ export const useImageHostStore = create<ImageHostState>()(
     }),
     {
       name: 'image-host-storage',
+      storage: createJSONStorage(() => safeLocalStorageStateStorage),
       partialize: (state) => ({ // cspell:disable-line
         selectedProvider: state.selectedProvider,
         imgbbKey: state.imgbbKey, // cspell:disable-line
