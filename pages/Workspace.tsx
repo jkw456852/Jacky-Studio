@@ -17,6 +17,7 @@ import {
   Share2,
   Maximize2,
   X,
+  AlertCircle,
   RotateCw,
   ArrowUp,
   Paperclip,
@@ -1243,13 +1244,7 @@ const Workspace: React.FC = () => {
     async (candidateUrl: string, label: string) => {
       const validation = await validateAgainstApprovedAnchor(candidateUrl);
       if (!validation.pass) {
-        addMessage({
-          id: `consistency-warn-${Date.now()}`,
-          role: "model",
-          text: `${label}与当前已采用版本存在偏差：${validation.reasons.join("；")}${validation.suggestedFix ? `。建议：${validation.suggestedFix}` : ""}`,
-          timestamp: Date.now(),
-          error: true,
-        });
+        console.info(`[ConsistencyCheck] ${label} drift detected: ${validation.reasons.join("；")}${validation.suggestedFix ? `。建议：${validation.suggestedFix}` : ""}`);
       }
       return validation;
     },
@@ -1267,12 +1262,7 @@ const Workspace: React.FC = () => {
         return initialUrl;
       }
 
-      addMessage({
-        id: `consistency-retry-${Date.now()}`,
-        role: "model",
-        text: `${label}正在根据一致性质检建议自动修正一次：${validation.suggestedFix}`,
-        timestamp: Date.now(),
-      });
+      console.log(`[ConsistencyFix] ${label} auto-correcting: ${validation.suggestedFix}`);
 
       const retriedUrl = await rerun(validation.suggestedFix);
       if (!retriedUrl) {
@@ -3872,9 +3862,31 @@ const Workspace: React.FC = () => {
     let changed = false;
     const nextElements = baseElements.map((e) => {
       if (e.id !== elementId) return e;
-      if (e.isGenerating === isGenerating) return e;
+      const updates: Partial<CanvasElement> = {};
+      if (e.isGenerating !== isGenerating) {
+        updates.isGenerating = isGenerating;
+        changed = true;
+      }
+      // If we are starting to generate, clear the previous error
+      if (isGenerating && e.genError) {
+        updates.genError = undefined;
+        changed = true;
+      }
+      return changed ? { ...e, ...updates } : e;
+    });
+    if (!changed) return;
+    elementsRef.current = nextElements;
+    setElements(nextElements);
+  };
+
+  const setElementError = (elementId: string, error?: string) => {
+    const baseElements = elementsRef.current;
+    let changed = false;
+    const nextElements = baseElements.map((e) => {
+      if (e.id !== elementId) return e;
+      if (e.genError === error) return e;
       changed = true;
-      return { ...e, isGenerating };
+      return { ...e, genError: error };
     });
     if (!changed) return;
     elementsRef.current = nextElements;
@@ -5102,28 +5114,37 @@ ${analysis}
         consistencyContext: getDesignConsistencyContext(),
       });
       if (resultUrl) {
-        const finalUrl = await retryWithConsistencyFix(
-          "重新生成结果",
-          resultUrl,
-          async (fixPrompt?: string) =>
-            imageGenSkill({
-              prompt: fixPrompt
-                ? `${el.genPrompt}\n\nConsistency fix: ${fixPrompt}`
-                : el.genPrompt,
-              model,
-              aspectRatio: currentAspectRatio,
-              imageSize: el.genResolution,
-              referenceImages:
-                el.genRefImages || (el.genRefImage ? [el.genRefImage] : []),
-              consistencyContext: getDesignConsistencyContext(),
-            }),
-        );
+        let finalUrl = resultUrl;
+        try {
+          finalUrl = await retryWithConsistencyFix(
+            "重新生成结果",
+            resultUrl,
+            async (fixPrompt?: string) =>
+              imageGenSkill({
+                prompt: fixPrompt
+                  ? `${el.genPrompt}\n\nConsistency fix: ${fixPrompt}`
+                  : el.genPrompt,
+                model,
+                aspectRatio: currentAspectRatio,
+                imageSize: el.genResolution,
+                referenceImages:
+                  el.genRefImages || (el.genRefImage ? [el.genRefImage] : []),
+                consistencyContext: getDesignConsistencyContext(),
+              }),
+          );
+        } catch (consistencyError: any) {
+          console.warn(
+            "[Consistency Check] Skipped due to error (possibly rate limit 429):",
+            consistencyError,
+          );
+          // Fallback to resultUrl
+        }
         await applyGeneratedImageToElement(elementId, finalUrl, true);
-      } else {
-        setElementGeneratingState(elementId, false);
       }
-    } catch (e) {
+    } catch (e: any) {
       console.error(e);
+      setElementError(elementId, e?.message || "生成失败，请稍后重试");
+    } finally {
       setElementGeneratingState(elementId, false);
     }
   };
@@ -5263,25 +5284,12 @@ ${analysis}
         );
         setElementsSynced(update2);
         saveToHistory(update2, markersRef.current);
-      } else {
-        setElementGeneratingState(elementId, false);
-        addMessage({
-          id: Date.now().toString(),
-          role: "model",
-          text: "视频生成未返回结果，请检查模型配置或稍后重试。",
-          timestamp: Date.now(),
-        });
       }
     } catch (e: any) {
-      console.error(e);
+      console.error("[handleGenVideo] Video generation failed:", e);
+      setElementError(elementId, e?.message || "视频生成失败，请重试");
+    } finally {
       setElementGeneratingState(elementId, false);
-      const errMsg = e?.message || "未知错误";
-      addMessage({
-        id: Date.now().toString(),
-        role: "model",
-        text: `视频生成失败：${errMsg}`,
-        timestamp: Date.now(),
-      });
     }
   };
 
@@ -10326,7 +10334,22 @@ ${analysis}
                               </>
                             )}
                             <div className="flex-1 flex items-center justify-center relative group-hover:bg-blue-50/50 transition-colors">
-                              {el.isGenerating ? (
+                              {el.genError && !el.isGenerating ? (
+                                <div
+                                  className="flex flex-col items-center gap-2 p-4 text-center"
+                                  style={{ transform: `scale(${100 / zoom})` }}
+                                >
+                                  <AlertCircle size={40} className="text-red-500" />
+                                  <div className="flex flex-col gap-0.5 mt-1">
+                                    <span className="text-sm font-bold text-red-600 line-clamp-2 max-w-[120px]">
+                                      {el.genError.includes("timeout") || el.genError.includes("超时") ? "生成超时" : "模型异常"}
+                                    </span>
+                                    <span className="text-[10px] text-red-400 font-medium whitespace-nowrap opacity-80">
+                                      点击操作重试
+                                    </span>
+                                  </div>
+                                </div>
+                              ) : el.isGenerating ? (
                                 <div
                                   className="flex flex-col items-center gap-4"
                                   style={{ transform: `scale(${100 / zoom})` }}
@@ -10495,7 +10518,22 @@ ${analysis}
                               </>
                             )}
                             <div className="flex-1 flex items-center justify-center relative group-hover:bg-blue-50/50 transition-colors">
-                              {el.isGenerating ? (
+                              {el.genError && !el.isGenerating ? (
+                                <div
+                                  className="flex flex-col items-center gap-2 p-4 text-center"
+                                  style={{ transform: `scale(${100 / zoom})` }}
+                                >
+                                  <AlertCircle size={40} className="text-red-500" />
+                                  <div className="flex flex-col gap-0.5 mt-1">
+                                    <span className="text-sm font-bold text-red-600 line-clamp-2 max-w-[120px]">
+                                      {el.genError.includes("timeout") || el.genError.includes("超时") ? "视频创建超时" : "视频生成失败"}
+                                    </span>
+                                    <span className="text-[10px] text-red-400 font-medium whitespace-nowrap opacity-80">
+                                      请重试
+                                    </span>
+                                  </div>
+                                </div>
+                              ) : el.isGenerating ? (
                                 <div
                                   className="flex flex-col items-center gap-4"
                                   style={{ transform: `scale(${100 / zoom})` }}

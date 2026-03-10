@@ -678,6 +678,19 @@ const generateVideoOpenAICompatible = async (
     return null;
 };
 
+// --- Timeout Helper ---
+const withTimeout = <T>(promise: Promise<T>, timeoutMs: number, errorMessage: string = '操作超时'): Promise<T> => {
+    let timeoutId: any;
+    const timeoutPromise = new Promise<never>((_, reject) => {
+        timeoutId = setTimeout(() => {
+            reject(new Error(errorMessage));
+        }, timeoutMs);
+    });
+    return Promise.race([promise, timeoutPromise]).finally(() => {
+        if (timeoutId) clearTimeout(timeoutId);
+    });
+};
+
 // Helper for retry logic
 const retryWithBackoff = async <T>(
     fn: () => Promise<T>,
@@ -1072,6 +1085,65 @@ export const analyzeProductSwapScene = async (imageBase64: string): Promise<stri
     }
 };
 
+const buildImageGenerateUrl = (
+    baseUrl: string,
+    modelId: string,
+    apiKey: string
+): string => {
+    const cleanBase = normalizeUrl(baseUrl);
+    const baseWithoutVersion = cleanBase.replace(/\/v1(?:beta)?$/i, '');
+    const path = `${baseWithoutVersion}/v1beta/models/${modelId}:generateContent`;
+    return `${path}?key=${encodeURIComponent(apiKey)}`;
+};
+
+const generateImageREST = async (
+    baseUrl: string,
+    apiKey: string,
+    modelId: string,
+    parts: any[],
+    imageConfig: any
+): Promise<string | null> => {
+    const url = buildImageGenerateUrl(baseUrl, modelId, apiKey);
+    // Google API expects contents: [{ parts }] and generationConfig
+    const body = {
+        contents: [{ parts }],
+        generationConfig: {
+            imageConfig
+        }
+    };
+    
+    console.log(`[generateImageREST] POST ${url.replace(apiKey, '***')} with model ${modelId}`);
+    
+    const res = await fetchWithResilience(url, {
+        method: 'POST',
+        headers: {
+            'Content-Type': 'application/json'
+        },
+        body: JSON.stringify(body)
+    }, { 
+        operation: 'generateImage.rest', 
+        retries: 0,
+        timeoutMs: 300000 // 5 minutes for high-res images
+    });
+
+    if (!res.ok) {
+        const errText = await res.text();
+        const err: any = new Error(`generateImage REST ${res.status}: ${errText}`);
+        err.status = res.status;
+        throw err;
+    }
+
+    const data = await res.json();
+    if (data.candidates?.[0]?.content?.parts) {
+        for (const part of data.candidates[0].content.parts) {
+            if (part.inlineData) {
+                return `data:image/png;base64,${part.inlineData.data}`;
+            }
+        }
+    }
+    return null;
+};
+
 export interface ImageGenerationConfig {
     prompt: string;
     model: 'Nano Banana Pro' | 'NanoBanana2' | 'Seedream5.0' | 'GPT Image 1.5' | 'Flux.2 Max';
@@ -1260,7 +1332,7 @@ export const editImage = async (config: ImageEditConfig): Promise<string | null>
     const model = (config.model || IMAGE_PRO_MODEL).trim() || IMAGE_PRO_MODEL;
     const aspectRatio = config.aspectRatio || '1:1';
 
-    console.info('[imgedit] request', {
+    console.info('[image-edit] request', {
         model,
         hasMask: !!maskDataUrl,
         refCount: refs.length,
@@ -1465,7 +1537,7 @@ export const generateImage = async (config: ImageGenerationConfig): Promise<stri
     parts.push({ text: finalPrompt });
 
     if (hasReferences) {
-        console.info('[imggen] reference control', {
+        console.info('[image-gen] reference control', {
             model: targetModelId,
             refs: references.length,
             priority,
@@ -1479,7 +1551,7 @@ export const generateImage = async (config: ImageGenerationConfig): Promise<stri
         aspectRatio: validAspectRatio,
     };
 
-    if (config.model === 'Nano Banana Pro' && config.imageSize) {
+    if ((config.model === 'Nano Banana Pro' || config.model === 'NanoBanana2') && config.imageSize) {
         imageConfig.imageSize = config.imageSize;
     }
 
@@ -1487,27 +1559,50 @@ export const generateImage = async (config: ImageGenerationConfig): Promise<stri
 
     for (const modelToUse of modelsToTry) {
         try {
-            console.log(`[generateImage] Trying model: ${modelToUse} at ${getApiUrl()}`);
-            const response = await retryWithBackoff<GenerateContentResponse>(() => getClient().models.generateContent({
-                model: modelToUse,
-                contents: { parts },
-                config: {
-                    // responseModalities removed for better compatibility with 1.5/Imagen models via proxies
-                    imageConfig
-                }
-            }));
-
-            if (response.candidates?.[0]?.content?.parts) {
-                for (const part of response.candidates[0].content.parts) {
-                    if (part.inlineData) {
-                        console.log(`[generateImage] Success with model: ${modelToUse}`);
-                        return `data:image/png;base64,${part.inlineData.data}`;
+            console.log(`[generateImage] Trying model: ${modelToUse} at ${getApiUrl()} (Proxy=${isProxy})`);
+            
+            const runGen = async () => {
+                if (isProxy) {
+                    // For proxies, SDK often breaks paths with /v1/beta/ causing ERR_CONNECTION_CLOSED
+                    // Manual REST call forces correct /v1beta/ path compatibility
+                    const apiKey = requireApiKey('generateImageREST');
+                    const baseUrl = getApiUrl() || 'https://generativelanguage.googleapis.com';
+                    return generateImageREST(baseUrl, apiKey, modelToUse, parts, imageConfig);
+                } else {
+                    const response = await getClient().models.generateContent({
+                        model: modelToUse,
+                        contents: { parts },
+                        config: {
+                            imageConfig
+                        }
+                    });
+                    
+                    if (response.candidates?.[0]?.content?.parts) {
+                        for (const part of response.candidates[0].content.parts) {
+                            if (part.inlineData) {
+                                return `data:image/png;base64,${part.inlineData.data}`;
+                            }
+                        }
                     }
+                    return null;
                 }
+            };
+
+            const result = await retryWithBackoff<string | null>(() => 
+                withTimeout(
+                    runGen(),
+                    300000, // 5 minutes total perception timeout
+                    `模型 ${modelToUse} 生成超时 (300s)`
+                )
+            );
+
+            if (result) {
+                console.log(`[generateImage] Success with model: ${modelToUse}`);
+                return result;
             }
 
-            // If we're here, no image data was found in the response
-            console.warn(`[generateImage] No image data in response from ${modelToUse}. Candidate:`, JSON.stringify(response.candidates?.[0]).slice(0, 500));
+            // If we're here, no image data was found in the result
+            console.warn(`[generateImage] No image data returned for model ${modelToUse}.`);
         } catch (error: any) {
             lastError = error;
             console.warn(`[generateImage] Model ${modelToUse} failed:`, error.message || error);
@@ -1648,7 +1743,15 @@ export const generateVideo = async (config: VideoGenerationConfig): Promise<stri
                     const headers = buildVideoHeaders(plan.authMode, apiKey);
                     console.log(`[generateVideo] POST [${plan.version}/${plan.authMode}] ${generateUrl.replace(apiKey, '***')}`);
 
-                    const r = await fetchWithResilience(generateUrl, { method: 'POST', headers, body: JSON.stringify(body) }, { operation: 'generateVideo.generateVideosSubmit', retries: 0 });
+                    const r = await fetchWithResilience(generateUrl, { 
+                    method: 'POST', 
+                    headers, 
+                    body: JSON.stringify(body) 
+                }, { 
+                    operation: 'generateVideo.generateVideosSubmit', 
+                    retries: 0,
+                    timeoutMs: 300000 // 5 minutes for video generation
+                });
                     if (r.ok) {
                         generateContext = plan;
                         return r.json();

@@ -82,6 +82,7 @@ export interface CanvasElement {
 
   isGenerating?: boolean;
   generatingType?: 'upscale' | 'vector' | 'remove-bg' | 'gen-image' | 'gen-video' | 'product-swap' | 'text-edit' | 'fast-edit' | 'eraser';
+  genError?: string;
 
   x: number;
   y: number;
