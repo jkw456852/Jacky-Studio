@@ -177,7 +177,26 @@ export function useAgentOrchestrator(options: UseAgentOrchestratorOptions) {
 
           try {
             const uploadResults = await Promise.allSettled(
-              attachments.map((file) => uploadImage(file))
+              attachments.map(async (file) => {
+                if ((file as any).markerInfo && (file as any).markerInfo.fullImageUrl) {
+                  const fullUrl = (file as any).markerInfo.fullImageUrl;
+                  // 若原图已经是公网 HTTP 链接，则跳过上传，直接返回该公网链接
+                  if (/^https?:\/\//i.test(fullUrl) && !fullUrl.includes('localhost') && !fullUrl.includes('127.0.0.1')) {
+                    return fullUrl;
+                  }
+                  
+                  // 对于本地/Blob URL，提取并上传完整图片
+                  try {
+                    const res = await fetch(fullUrl);
+                    const blob = await res.blob();
+                    const fullFile = new File([blob], file.name || 'full.png', { type: blob.type });
+                    return uploadImage(fullFile);
+                  } catch (e) {
+                    console.warn('[useAgentOrchestrator] Failed to fetch full image for upload, falling back to crop', e);
+                  }
+                }
+                return uploadImage(file);
+              })
             );
             const failedUploads = uploadResults.filter(
               (result): result is PromiseRejectedResult => result.status === 'rejected'

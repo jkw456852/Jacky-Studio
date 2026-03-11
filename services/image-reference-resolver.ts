@@ -26,31 +26,56 @@ const blobToDataUrl = async (blob: Blob): Promise<string> => {
 };
 
 const fetchReferenceViaServer = async (imageUrl: string): Promise<string | null> => {
+  console.log('[reference-resolver] Using CORS fallback strategies for:', imageUrl);
+  
+  // Strategy 1: Bypass fetch() OPTIONS preflight via Image + Canvas
   try {
-    const response = await fetch('/api/fetch-image', {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify({ imageUrl }),
+    const canvasDataUrl = await new Promise<string>((resolve, reject) => {
+      const img = new Image();
+      img.crossOrigin = 'anonymous'; // Important for preventing tainted canvas
+      img.onload = () => {
+        try {
+          const canvas = document.createElement('canvas');
+          canvas.width = img.naturalWidth || img.width;
+          canvas.height = img.naturalHeight || img.height;
+          const ctx = canvas.getContext('2d');
+          if (!ctx) throw new Error('No 2d context available');
+          ctx.drawImage(img, 0, 0);
+          resolve(canvas.toDataURL('image/jpeg', 0.95));
+        } catch (e) {
+          reject(e);
+        }
+      };
+      img.onerror = () => reject(new Error('Image load failed'));
+      // Add cache buster to force clean CORS response
+      img.src = `${imageUrl}${imageUrl.includes('?') ? '&' : '?'}corsbuster=${Date.now()}`;
     });
-
-    const payload = await response.json().catch(() => null);
-    if (!response.ok) {
-      const err: any = new Error(payload?.error || 'fetch_image_failed');
-      err.status = response.status;
-      throw err;
-    }
-
-    if (typeof payload?.dataUrl === 'string' && /^data:image\//.test(payload.dataUrl)) {
-      return payload.dataUrl;
-    }
-
-    return null;
-  } catch (error) {
-    console.warn('[reference-resolver] server-side image fetch failed:', error);
-    return null;
+    console.log('[reference-resolver] Canvas strategy success!');
+    return canvasDataUrl;
+  } catch (err) {
+    console.warn('[reference-resolver] Canvas bypass strategy failed:', err);
   }
+
+  // Strategy 2: Proxy APIs
+  const proxies = [
+    `https://api.allorigins.win/raw?url=${encodeURIComponent(imageUrl)}`,
+    `https://corsproxy.io/?${encodeURIComponent(imageUrl)}`
+  ];
+
+  for (const proxyUrl of proxies) {
+    try {
+      console.log('[reference-resolver] Trying Proxy:', proxyUrl);
+      const response = await fetch(proxyUrl);
+      if (response.ok) {
+        const blob = await response.blob();
+        return await blobToDataUrl(blob);
+      }
+    } catch (e) {
+      console.warn('[reference-resolver] Proxy strategy failed for', proxyUrl, e);
+    }
+  }
+
+  return null;
 };
 
 export const normalizeReferenceToDataUrl = async (input: string): Promise<string | null> => {

@@ -1151,9 +1151,10 @@ export interface ImageGenerationConfig {
     imageSize?: '1K' | '2K' | '4K';
     referenceImage?: string; // base64 (legacy)
     referenceImages?: string[]; // Multiple base64 images
+    maskImage?: string; // Binary mask for inpainting
     referenceStrength?: number;
     referencePriority?: 'first' | 'all';
-    referenceMode?: 'style' | 'product';
+    referenceMode?: 'style' | 'product' | 'portrait';
     consistencyContext?: {
         approvedAssetIds?: string[];
         subjectAnchors?: string[];
@@ -1183,7 +1184,7 @@ const buildConstrainedPrompt = (
     userPrompt: string,
     opts: {
         strength: number;
-        mode: 'style' | 'product';
+        mode: 'style' | 'product' | 'portrait';
         referenceCount?: number;
         priority?: 'first' | 'all';
         forbiddenChanges?: string[];
@@ -1195,17 +1196,26 @@ const buildConstrainedPrompt = (
     const multiReference = referenceCount > 1;
     const constraints = opts.mode === 'product'
         ? `
-[Consistency Requirements]
-- Keep product silhouette, cut, structure, color family, material texture, and major details consistent with references.
-- Do not add/remove logos, stitching lines, trims, or hardware when they are visible.
-- Preserve relative logo placement and key detailing when visible in references.
-- Allowed changes: background, ambience, props, and composition only.
+[Consistency Iron-Rules]
+- ABSOLUTELY LOCK the product's silhouette, structure, materials, and fine details.
+- DO NOT drift or add extra elements (stitching, logos, textures) not present in the reference.
+- ZERO TOLERANCE for background or lighting changes unless explicitly requested.
+- PIXEL-LEVEL CONSISTENCY: All non-edited regions MUST be a bit-for-bit duplicate of the reference.
 `
-        : `
-[Style Requirements]
-- Keep visual style, color language, and composition tendency aligned with references.
-- Preserve the overall mood and design direction across outputs.
-`;
+        : opts.mode === 'portrait'
+            ? `
+[Portrait Identity Iron-Rules]
+- ABSOLUTELY LOCK the person's identity: facial structure, eye shape, nose, mouth, skin tone, and age.
+- NO MORPHING: The person in the output must be the EXACT SAME individual as the reference.
+- SELECTIVE MODIFICATION: ONLY change the specific attribute requested (e.g., hair, clothes).
+- BACKGROUND LOCK: Keep the original background, lighting, and camera perspective unchanged.
+`
+            : `
+[Universal Consistency Iron-Rules]
+- PRESERVE all visual elements from the reference.
+- ONLY modify what the user explicitly mentioned.
+- KEEP background, lighting, and global composition 100% matched with the reference.
+` ;
 
     const referenceInstructions = multiReference
         ? `
@@ -1525,6 +1535,24 @@ export const generateImage = async (config: ImageGenerationConfig): Promise<stri
         }
     }
 
+    if (config.maskImage) {
+        const maskDataUrl = await normalizeReferenceToDataUrl(config.maskImage);
+        if (maskDataUrl) {
+            const matches = maskDataUrl.match(/^data:(.+);base64,(.+)$/);
+            if (matches) {
+                parts.push({
+                    inlineData: {
+                        mimeType: matches[1],
+                        data: matches[2]
+                    }
+                });
+            }
+        }
+    }
+
+    const hasMask = !!config.maskImage;
+    const maskRule = hasMask ? `\n\n[Mask Rule]\n- The LAST image provided is a binary mask.\n- White area means editable region.\n- Black area means locked region and must stay unchanged.\n- Seamlessly blend edited area with surrounding pixels.` : '';
+
     const consistencyContext = config.consistencyContext || {};
     const finalPrompt = hasReferences || consistencyContext?.forbiddenChanges?.length || consistencyContext?.referenceSummary
         ? buildConstrainedPrompt(config.prompt, {
@@ -1536,7 +1564,7 @@ export const generateImage = async (config: ImageGenerationConfig): Promise<stri
             approvedSummary: consistencyContext?.referenceSummary,
         })
         : config.prompt;
-    parts.push({ text: finalPrompt });
+    parts.push({ text: finalPrompt + maskRule });
 
     if (hasReferences) {
         console.info('[image-gen] reference control', {

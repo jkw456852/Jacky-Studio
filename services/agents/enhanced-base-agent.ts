@@ -17,6 +17,7 @@ import { buildEcommerceProposals } from "./shared/ecommerce-variants";
 import { useAgentStore } from "../../stores/agent.store";
 import { collectReferenceCandidates } from "./utils/reference-images";
 import { sanitizeObject, sanitizeStringBase64 } from "./utils/payload-sanitizer";
+import { createMaskDataUrl } from "./utils/mask-generator";
 
 // 带指数退避的重试工具（用于 analyzeAndPlan 等内部调用）
 const retryAsync = async <T>(
@@ -1602,16 +1603,22 @@ ${productSection}${quantitySection}${multiImageSection}${forcedToolSection}${mul
         call.skillName === "generateVideo"
       ) {
         if (call.skillName === "generateImage") {
+          const portraitKeywords = ["发型", "发色", "头发", "脸", "面部", "人像", "证件照", "模特", "五官", "wolf cut", "hair", "face", "portrait"];
+          const isPortraitRequest = portraitKeywords.some(kw => (call.params.prompt || "").toLowerCase().includes(kw));
+
+          // 无论是否是人像，都显著提高默认一致性强度 (从 0.75 -> 0.85)
           if (typeof call.params.referenceStrength !== "number") {
-            call.params.referenceStrength = 0.75;
+            call.params.referenceStrength = 0.85;
           }
-          if (!call.params.referencePriority) {
-            call.params.referencePriority = task.input.context.designSession?.subjectAnchors?.length && task.input.context.designSession.subjectAnchors.length > 1
-              ? "all"
-              : "first";
-          }
-          if (!call.params.referenceMode) {
-            call.params.referenceMode = "product";
+
+          if (isPortraitRequest) {
+            if (!call.params.referenceMode) {
+              call.params.referenceMode = "portrait";
+            }
+          } else {
+            if (!call.params.referenceMode) {
+              call.params.referenceMode = "product";
+            }
           }
           if (!call.params.consistencyContext) {
             call.params.consistencyContext = {
@@ -1620,6 +1627,9 @@ ${productSection}${quantitySection}${multiImageSection}${forcedToolSection}${mul
               referenceSummary: task.input.context.designSession?.referenceSummary,
               forbiddenChanges: task.input.context.designSession?.forbiddenChanges || [],
             };
+          }
+          if (!call.params.imageSize) {
+            call.params.imageSize = "2K";
           }
         }
 
@@ -1729,16 +1739,41 @@ ${productSection}${quantitySection}${multiImageSection}${forcedToolSection}${mul
               reader.readAsDataURL(file);
             });
             call.params[paramKey] = base64;
+          }
+        }
 
-            if (call.skillName === "smartEdit" && (file as any).markerInfo) {
-              const info = (file as any).markerInfo;
-              const ratio = info.width / info.height;
-              let aspect = "1:1";
-              if (ratio > 1.5) aspect = "16:9";
-              else if (ratio < 0.7) aspect = "9:16";
-              else if (ratio > 1.2) aspect = "4:3";
-              else if (ratio < 0.8) aspect = "3:4";
-              call.params.aspectRatio = aspect;
+        // Shared logic for both hosted and base64 attachments: Inject Mask & Aspect Ratio
+        const availableAttachments = task.input.attachments || [];
+        if (availableAttachments[index]) {
+          const file = availableAttachments[index];
+          if ((call.skillName === "smartEdit" || call.skillName === "generateImage") && (file as any).markerInfo) {
+            const info = (file as any).markerInfo;
+            
+            // 强制原图：如果未选用图床 url 并且存在全图，我们必须覆盖 paramKey 为 fullImageUrl
+            if (!preferHostedUrls && info.fullImageUrl) {
+              call.params[paramKey] = info.fullImageUrl;
+            }
+            
+            // 1. 设置宽高比
+            const ratio = info.width / info.height;
+            let aspect = "1:1";
+            if (ratio > 1.5) aspect = "16:9";
+            else if (ratio < 0.7) aspect = "9:16";
+            else if (ratio > 1.2) aspect = "4:3";
+            else if (ratio < 0.8) aspect = "3:4";
+            call.params.aspectRatio = aspect;
+
+            // 2. 核心修复：生成遮罩图片注入 maskImage
+            try {
+              const maskBase64 = await createMaskDataUrl(info);
+              if (maskBase64) {
+                call.params.maskImage = maskBase64;
+                if (call.skillName === "generateImage") {
+                  call.params.referenceMode = "portrait";
+                }
+              }
+            } catch (maskErr) {
+              console.warn(`[${this.agentInfo.id}] Failed to generate mask for ${call.skillName}:`, maskErr);
             }
           }
         }

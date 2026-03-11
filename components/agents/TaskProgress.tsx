@@ -30,7 +30,7 @@ export const TaskProgress: React.FC<{ task: AgentTask }> = ({ task }) => {
           
           {/* 核心灰色占位 - 极简 */}
           <div className="h-28 flex items-center justify-center relative">
-              <div className="flex items-center gap-2 px-4 py-2 bg-white/40 backdrop-blur-sm rounded-full shadow-sm">
+              <div className="flex items-center gap-2 px-4 py-2 bg-white/60 backdrop-blur-sm rounded-full ring-1 ring-gray-200">
                   <Loader2 size={12} className="text-blue-500 animate-spin" strokeWidth={3} />
                   <span className="text-[11px] font-bold text-gray-600">正在生成...</span>
               </div>

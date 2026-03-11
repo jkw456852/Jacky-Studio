@@ -319,7 +319,7 @@ export const AgentMessage: React.FC<AgentMessageProps> = ({
                 {imageCards.length > 0 && (
                     <div className="px-1 mt-1">
                         {imageCards.length === 1 ? (
-                            <div className="relative rounded-xl overflow-hidden border border-gray-100 shadow-sm bg-gray-50">
+                            <div className="relative rounded-xl overflow-hidden border border-gray-100 bg-gray-100/70">
                                 <img 
                                     src={imageCards[0].url} 
                                     alt="Generated"
@@ -352,7 +352,7 @@ export const AgentMessage: React.FC<AgentMessageProps> = ({
                 {/* 5.5 生成中效果 */}
                 {agentData?.isGenerating && imageCards.length === 0 && (
                     <div className="px-1 mt-1">
-                        <div className="relative aspect-square rounded-xl overflow-hidden border border-gray-100 shadow-sm bg-gray-50/80 flex flex-col items-center justify-center gap-3">
+                        <div className="relative aspect-square rounded-xl overflow-hidden bg-gray-100/70 border border-gray-100 flex flex-col items-center justify-center gap-3">
                             <Loader2 size={24} className="text-gray-400 animate-spin" strokeWidth={2.5} />
                             <span className="text-[12px] font-medium text-gray-500 tracking-wider">正在使用 <span className="uppercase text-gray-600 font-bold">{agentData.model || 'AI'}</span> 生成中...</span>
                         </div>
