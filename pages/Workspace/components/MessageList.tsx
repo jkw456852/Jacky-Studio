@@ -48,30 +48,22 @@ export const MessageList: React.FC<MessageListProps> = ({
                     className={`flex ${msg.role === 'user' ? 'justify-end' : 'justify-start'}`}
                 >
                     {msg.role === 'user' ? (
-                        msg.skillData ? (
-                            <div className="w-full max-w-[95%] xl:max-w-[90%] rounded-3xl rounded-br-md border border-gray-200 bg-white px-4 py-3 text-[13px] text-gray-800 shadow-sm flex flex-col gap-2 overflow-hidden">
-                                <div className="flex items-center gap-2">
-                                    <span className="font-semibold text-gray-900">{msg.skillData.name}</span>
+                        <div className="w-full max-w-[95%] xl:max-w-[90%] flex flex-col items-end gap-1.5">
+                            {msg.skillData && (
+                                <div className="flex items-center gap-1.5 px-2.5 py-1 bg-gray-200/60 rounded-full text-[11px] font-medium text-gray-500 mb-0.5">
+                                    <Sparkles size={10} className="text-gray-400" />
+                                    <span>来自：{msg.skillData.name}</span>
                                 </div>
+                            )}
+                            <div className="w-full rounded-2xl bg-gray-100 px-4 py-3 flex flex-col gap-2 overflow-hidden">
                                 <MessageAttachments 
                                     attachments={msg.attachments} 
                                    attachmentMetadata={msg.attachmentMetadata} 
                                    onPreview={onPreview} 
                                 />
-                                <div className="text-[13px] text-gray-700 leading-relaxed whitespace-pre-wrap break-words" title={msg.text}>
-                                    {msg.text}
-                                </div>
-                            </div>
-                        ) : (
-                            <div className="w-full max-w-[95%] xl:max-w-[90%] rounded-2xl bg-gray-100 px-4 py-3 flex flex-col gap-2 overflow-hidden">
-                                <MessageAttachments 
-                                    attachments={msg.attachments} 
-                                   attachmentMetadata={msg.attachmentMetadata}
-                                   onPreview={onPreview} 
-                                />
                                 <div className="text-[14px] text-gray-800 leading-relaxed whitespace-pre-wrap break-words">{msg.text}</div>
                             </div>
-                        )
+                        </div>
                     ) : msg.error && !msg.agentData ? (
                         <div className="max-w-[90%] rounded-2xl border border-red-200 bg-red-50 px-3 py-2 text-[13px] text-red-700 whitespace-pre-wrap break-words">
                             {msg.text}

@@ -11,19 +11,19 @@ export const AGENT_ROUTE_RULES: RouteRule[] = [
   {
     keywords: ['logo', 'vi', '品牌', '标志', '商标', 'brand', '视觉识别', '品牌手册', '色彩系统'],
     agent: 'vireo',
-    priority: 1,
+    priority: 2,
     label: '品牌/VI/Logo',
   },
   {
-    keywords: ['故事板', '分镜', '九宫格', '分镜图', 'storyboard', '脚本', '剧本', '镜头', 'shot list', '场景设计'],
+    keywords: ['故事板', '分镜', '九宫格', '分镜图', 'storyboard', '脚本', '剧本', '镜头', 'shot list', '场景设计', '体验', '氛围'],
     agent: 'cameron',
-    priority: 2,
+    priority: 1,
     label: '故事板/分镜',
   },
   {
     keywords: ['包装', 'package', 'packaging', '礼盒', '瓶身', '标签', '盒子', '瓶子', '罐子', 'unboxing'],
     agent: 'package',
-    priority: 3,
+    priority: 10,
     label: '包装设计',
   },
   {

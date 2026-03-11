@@ -188,6 +188,10 @@ export abstract class EnhancedBaseAgent {
     message: string,
     metadata?: Record<string, any>,
   ): boolean {
+    // 两步交互 skill 的第一步不强制生图，让 AI 先分析并输出 suggestions
+    const skillData = metadata?.skillData as { config?: { twoStep?: boolean } } | undefined;
+    if (skillData?.config?.twoStep) return false;
+
     // 上游可显式强制
     if (
       metadata?.forceToolCall === true ||

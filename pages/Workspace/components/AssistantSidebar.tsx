@@ -368,28 +368,28 @@ export const AssistantSidebar: React.FC<AssistantSidebarProps> = ({
 
                         <div className="flex flex-wrap gap-2.5">
                             <button
-                                onClick={() => handleSend("请帮我生成一套亚马逊产品Listing图，包含：白底主图、信息图（卖点标注）、场景图（生活方式）、细节特写图、尺寸对比图。每张图使用1:1比例，2000x2000px，专业电商摄影风格。请根据画布上的产品来生成。", undefined, webEnabled, { id: 'amazon-listing', name: '亚马逊产品套图', iconName: 'Store' })}
+                                onClick={() => handleSend("请帮我设计一套亚马逊产品Listing图", undefined, webEnabled, { id: 'amazon-listing', name: '亚马逊产品套图', iconName: 'Store', config: { twoStep: true } })}
                                 className="inline-flex items-center gap-2 px-4 py-2.5 bg-white border border-gray-200 rounded-full text-sm font-medium text-gray-700 hover:border-gray-400 hover:text-gray-900 hover:shadow-sm transition-all cursor-pointer"
                             >
                                 <Store size={15} strokeWidth={1.8} />
                                 <span>亚马逊产品套图</span>
                             </button>
                             <button
-                                onClick={() => handleSend("请帮我设计一套品牌Logo视觉系统，包含：主Logo设计（纯白背景，居中构图）、品牌色彩应用展示、Logo在不同场景的应用效果（名片、信封、网站）。使用1:1比例，PNG透明格式，现代简约风格。", undefined, webEnabled, { id: 'logo-design', name: 'Logo 与品牌', iconName: 'Layout' })}
+                                onClick={() => handleSend("请帮我设计一套品牌Logo视觉系统", undefined, webEnabled, { id: 'logo-design', name: 'Logo 与品牌', iconName: 'Layout', config: { twoStep: true } })}
                                 className="inline-flex items-center gap-2 px-4 py-2.5 bg-white border border-gray-200 rounded-full text-sm font-medium text-gray-700 hover:border-gray-400 hover:text-gray-900 hover:shadow-sm transition-all cursor-pointer"
                             >
                                 <Layout size={15} strokeWidth={1.8} />
                                 <span>Logo 与品牌</span>
                             </button>
                             <button
-                                onClick={() => handleSend("请帮我生成一套社交媒体视觉素材，包含：Instagram方形帖子（1:1）、Story/Reel竖版封面（9:16）、横版Banner（16:9）。风格统一，色调一致，适合品牌社交媒体运营。请根据画布上的内容来设计。", undefined, webEnabled, { id: 'social-media', name: '社交媒体', iconName: 'Globe' })}
+                                onClick={() => handleSend("请帮我设计一套社交媒体视觉素材", undefined, webEnabled, { id: 'social-media', name: '社交媒体', iconName: 'Globe', config: { twoStep: true } })}
                                 className="inline-flex items-center gap-2 px-4 py-2.5 bg-white border border-gray-200 rounded-full text-sm font-medium text-gray-700 hover:border-gray-400 hover:text-gray-900 hover:shadow-sm transition-all cursor-pointer"
                             >
                                 <Globe size={15} strokeWidth={1.8} />
                                 <span>社交媒体</span>
                             </button>
                             <button
-                                onClick={() => handleSend("请帮我设计一套营销宣传册页面，包含：封面（产品Key Visual，高端商业摄影风格）、产品特性页（信息图表风格）、场景应用页（生活方式摄影）、品牌故事页。使用3:4竖版比例，专业出版印刷质量。", undefined, webEnabled, { id: 'brochure', name: '营销宣传册', iconName: 'FileText' })}
+                                onClick={() => handleSend("请帮我设计一套营销宣传册", undefined, webEnabled, { id: 'brochure', name: '营销宣传册', iconName: 'FileText', config: { twoStep: true } })}
                                 className="inline-flex items-center gap-2 px-4 py-2.5 bg-white border border-gray-200 rounded-full text-sm font-medium text-gray-700 hover:border-gray-400 hover:text-gray-900 hover:shadow-sm transition-all cursor-pointer"
                             >
                                 <FileText size={15} strokeWidth={1.8} />
@@ -407,14 +407,15 @@ export const AssistantSidebar: React.FC<AssistantSidebarProps> = ({
                                     clothingActions.reset();
                                     clothingActions.setStep('WAIT_PRODUCT');
                                     handleSend(
-                                        '启动服装棚拍组图工作流',
+                                        '请帮我进行服装棚拍组图设计',
                                         undefined,
                                         webEnabled,
                                         {
-                                            id: 'clothing-studio-workflow',
+                                            id: 'campaign',
                                             name: '服装棚拍组图',
                                             iconName: 'Shirt',
                                             config: {
+                                                twoStep: true,
                                                 defaults: {
                                                     aspectRatio: '3:4',
                                                     count: 1,

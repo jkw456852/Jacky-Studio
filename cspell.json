@@ -61,7 +61,23 @@
     "pollo",
     "Kore",
     "Puck",
-    "aplus"
+    "aplus",
+    "Virality",
+    "virality",
+    "Softbox",
+    "softbox",
+    "Vaporwave",
+    "vaporwave",
+    "Behance",
+    "behance",
+    "Timelapse",
+    "timelapse",
+    "Dribbble",
+    "dribbble",
+    "Tmall",
+    "tmall",
+    "Lookbook",
+    "lookbook"
   ],
   "ignorePaths": ["node_modules", "dist", "public"]
 }
