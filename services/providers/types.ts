@@ -7,6 +7,7 @@ export interface ImageGenerationRequest {
   referenceStrength?: number;
   referencePriority?: 'first' | 'all';
   referenceMode?: 'style' | 'product';
+  maskImage?: string;
 }
 
 export interface VideoGenerationRequest {

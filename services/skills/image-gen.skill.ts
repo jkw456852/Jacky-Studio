@@ -36,6 +36,7 @@ export async function imageGenSkill(params: ImageGenSkillParams): Promise<string
       referenceStrength: params.referenceStrength,
       referencePriority: params.referencePriority,
       referenceMode: params.referenceMode,
+      maskImage: params.maskImage,
     },
     params.model
   );

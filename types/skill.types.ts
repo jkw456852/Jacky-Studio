@@ -24,6 +24,7 @@ export interface ImageGenSkillParams {
     referenceSummary?: string;
     forbiddenChanges?: string[];
   };
+  maskImage?: string;
 }
 
 export interface VideoGenSkillParams {

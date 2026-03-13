@@ -70,6 +70,10 @@ export const replicateImageProvider: ImageProvider = {
       height: dims.height,
     };
 
+    if (request.maskImage) {
+      input.mask = request.maskImage;
+    }
+
     if (model === 'Flux Schnell') {
       input.num_outputs = 1;
       input.go_fast = true;

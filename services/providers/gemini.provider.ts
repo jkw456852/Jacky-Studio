@@ -27,6 +27,7 @@ export const geminiImageProvider: ImageProvider = {
       referenceStrength: request.referenceStrength,
       referencePriority: request.referencePriority,
       referenceMode: request.referenceMode,
+      maskImage: request.maskImage,
     });
   }
 };
