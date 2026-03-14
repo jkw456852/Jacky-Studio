@@ -912,7 +912,7 @@ export const InputArea: React.FC<InputAreaProps> = ({
                 {/* Bottom Toolbar */}
                 <div className="px-3 py-1.5 flex items-center justify-between relative border-t border-gray-100/80">
                     <div className="flex items-center gap-1">
-                        {creationMode === 'agent' && (
+                        {(creationMode === 'agent' || creationMode === 'chat') && (
                             <button onClick={() => fileInputRef.current?.click()} className="w-8 h-8 rounded-full flex items-center justify-center text-gray-400 hover:text-gray-600 hover:bg-gray-100 transition">
                                 <Paperclip size={17} strokeWidth={1.8} />
                             </button>
@@ -1129,7 +1129,7 @@ export const InputArea: React.FC<InputAreaProps> = ({
                             </>
                         )}
 
-                        {creationMode === 'agent' && (
+                        {(creationMode === 'agent' || creationMode === 'chat') && (
                             <>
                                 <div className="h-8 bg-gray-100 rounded-full flex items-center p-1 gap-1">
                                     <button onClick={() => handleModeSwitch('thinking')} className={`w-6 h-6 flex items-center justify-center rounded-full ${modelMode === 'thinking' ? 'bg-white shadow-sm' : 'text-gray-400'}`}><Lightbulb size={14} /></button>
@@ -1266,14 +1266,16 @@ export const InputArea: React.FC<InputAreaProps> = ({
                                         </div>
                                     )}
                                 </div>
-                                <button
-                                    onClick={() => handleSend(undefined, undefined, undefined, sendSkill)}
-                                    className="w-9 h-9 rounded-full flex items-center justify-center bg-black text-white hover:bg-gray-800 transition shadow-md shrink-0"
-                                >
-                                    <ArrowUp size={18} strokeWidth={2.5} />
-                                </button>
                             </>
                         )}
+
+                        {/* Send button always available (agent/chat/image/video) */}
+                        <button
+                            onClick={() => handleSend(undefined, undefined, undefined, sendSkill)}
+                            className="w-9 h-9 rounded-full flex items-center justify-center bg-black text-white hover:bg-gray-800 transition shadow-md shrink-0"
+                        >
+                            <ArrowUp size={18} strokeWidth={2.5} />
+                        </button>
                     </div>
                 </div>
 
@@ -1297,7 +1299,7 @@ export const InputArea: React.FC<InputAreaProps> = ({
                 <input
                     ref={fileInputRef}
                     type="file"
-                    accept="image/*"
+                    accept="image/*,video/*,.pdf,.doc,.docx,.md,.txt"
                     multiple
                     className="hidden"
                     onChange={(e) => {
