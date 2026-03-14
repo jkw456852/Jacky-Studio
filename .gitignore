@@ -12,6 +12,12 @@ dist
 dist-ssr
 *.local
 
+# XC-VIDEO build outputs copied into public/
+public/xc-video/assets/
+public/xc-video/*.js
+public/xc-video/*.css
+public/xc-video/*.map
+
 # Environment variables
 .env
 .env.local
@@ -27,3 +33,7 @@ dist-ssr
 *.njsproj
 *.sln
 *.sw?
+.vercel
+
+# Windows/command redirection accidents
+nul
