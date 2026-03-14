@@ -133,6 +133,12 @@ export const AssistantSidebar: React.FC<AssistantSidebarProps> = ({
 
     const STORYBOARD_SKILL = { id: 'cameron', name: '分镜故事板', iconName: 'Film' };
 
+    const buildQuickSkillPrompt = (base: string) => {
+        const extra = readCurrentInputText();
+        if (!extra) return base;
+        return `${base}\n补充要求：${extra}`;
+    };
+
     const readCurrentInputText = () => inputBlocks
         .filter((b) => b.type === 'text')
         .map((b) => b.text || '')
@@ -150,10 +156,7 @@ export const AssistantSidebar: React.FC<AssistantSidebarProps> = ({
     };
 
     const handleStoryboardQuickSend = () => {
-        const extra = readCurrentInputText();
-        const prompt = extra
-            ? `请基于参考图开始分镜故事板创作。补充要求：${extra}`
-            : '请基于参考图开始分镜故事板创作';
+        const prompt = buildQuickSkillPrompt('请基于参考图开始分镜故事板创作');
         void handleSend(prompt, undefined, webEnabled, STORYBOARD_SKILL);
     };
 
@@ -368,28 +371,28 @@ export const AssistantSidebar: React.FC<AssistantSidebarProps> = ({
 
                         <div className="flex flex-wrap gap-2.5">
                             <button
-                                onClick={() => handleSend("请帮我设计一套亚马逊产品Listing图", undefined, webEnabled, { id: 'amazon-listing', name: '亚马逊产品套图', iconName: 'Store', config: { twoStep: true } })}
+                                onClick={() => handleSend(buildQuickSkillPrompt('请帮我设计一套亚马逊产品Listing图'), undefined, webEnabled, { id: 'amazon-listing', name: '亚马逊产品套图', iconName: 'Store', config: { twoStep: true } })}
                                 className="inline-flex items-center gap-2 px-4 py-2.5 bg-white border border-gray-200 rounded-full text-sm font-medium text-gray-700 hover:border-gray-400 hover:text-gray-900 hover:shadow-sm transition-all cursor-pointer"
                             >
                                 <Store size={15} strokeWidth={1.8} />
                                 <span>亚马逊产品套图</span>
                             </button>
                             <button
-                                onClick={() => handleSend("请帮我设计一套品牌Logo视觉系统", undefined, webEnabled, { id: 'logo-design', name: 'Logo 与品牌', iconName: 'Layout', config: { twoStep: true } })}
+                                onClick={() => handleSend(buildQuickSkillPrompt('请帮我设计一套品牌Logo视觉系统'), undefined, webEnabled, { id: 'logo-design', name: 'Logo 与品牌', iconName: 'Layout', config: { twoStep: true } })}
                                 className="inline-flex items-center gap-2 px-4 py-2.5 bg-white border border-gray-200 rounded-full text-sm font-medium text-gray-700 hover:border-gray-400 hover:text-gray-900 hover:shadow-sm transition-all cursor-pointer"
                             >
                                 <Layout size={15} strokeWidth={1.8} />
                                 <span>Logo 与品牌</span>
                             </button>
                             <button
-                                onClick={() => handleSend("请帮我设计一套社交媒体视觉素材", undefined, webEnabled, { id: 'social-media', name: '社交媒体', iconName: 'Globe', config: { twoStep: true } })}
+                                onClick={() => handleSend(buildQuickSkillPrompt('请帮我设计一套社交媒体视觉素材'), undefined, webEnabled, { id: 'social-media', name: '社交媒体', iconName: 'Globe', config: { twoStep: true } })}
                                 className="inline-flex items-center gap-2 px-4 py-2.5 bg-white border border-gray-200 rounded-full text-sm font-medium text-gray-700 hover:border-gray-400 hover:text-gray-900 hover:shadow-sm transition-all cursor-pointer"
                             >
                                 <Globe size={15} strokeWidth={1.8} />
                                 <span>社交媒体</span>
                             </button>
                             <button
-                                onClick={() => handleSend("请帮我设计一套营销宣传册", undefined, webEnabled, { id: 'brochure', name: '营销宣传册', iconName: 'FileText', config: { twoStep: true } })}
+                                onClick={() => handleSend(buildQuickSkillPrompt('请帮我设计一套营销宣传册'), undefined, webEnabled, { id: 'brochure', name: '营销宣传册', iconName: 'FileText', config: { twoStep: true } })}
                                 className="inline-flex items-center gap-2 px-4 py-2.5 bg-white border border-gray-200 rounded-full text-sm font-medium text-gray-700 hover:border-gray-400 hover:text-gray-900 hover:shadow-sm transition-all cursor-pointer"
                             >
                                 <FileText size={15} strokeWidth={1.8} />
@@ -407,7 +410,7 @@ export const AssistantSidebar: React.FC<AssistantSidebarProps> = ({
                                     clothingActions.reset();
                                     clothingActions.setStep('WAIT_PRODUCT');
                                     handleSend(
-                                        undefined,
+                                        buildQuickSkillPrompt('请帮我进行服装棚拍组图设计'),
                                         undefined,
                                         webEnabled,
                                         {
