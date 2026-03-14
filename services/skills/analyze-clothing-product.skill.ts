@@ -19,6 +19,12 @@ const outputSchema = z.object({
       shoes: z.array(z.string()).default([]),
     })
     .default({ accessories: [], bottoms: [], bags: [], shoes: [] }),
+  targetModelProfile: z.object({
+    personality: z.string().describe('模特气质，如：优雅、街头、干练、甜美'),
+    ethnicity: z.string().describe('推荐人种，如：欧美、东亚、拉丁'),
+    ageRange: z.string().describe('推荐年龄段'),
+    physicalDescription: z.string().describe('具体外貌描述：发色、发型、妆造风格'),
+  }).default({ personality: '专业模特', ethnicity: '欧美', ageRange: '20-30', physicalDescription: '标准棚拍妆造' }),
   recommendedPoses: z.array(z.string()).default([]),
   shotListHints: z.array(z.string()).default([]),
   productAnchorIndex: z.number().int().min(0).max(5).default(0),

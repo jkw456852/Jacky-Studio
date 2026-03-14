@@ -78,7 +78,9 @@
     "tmall",
     "Lookbook",
     "lookbook",
-    "inpainting"
+    "inpainting",
+    "taobao",
+    "oversmooth"
   ],
   "ignorePaths": ["node_modules", "dist", "public"]
 }

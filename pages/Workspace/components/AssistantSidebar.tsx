@@ -1,7 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import {
-    MessageSquare, ChevronDown, CirclePlus, Clock, Search, X, Share2,
+    MessageSquare, ChevronDown, CirclePlus, Clock, Search, X, Share2, Eraser,
     File as FileIcon, Image as ImageIcon, Video, Download, Store, Layout, Globe, FileText, PanelRightClose, Compass, Pin, Sparkles
 } from 'lucide-react';
 import { useAgentStore } from '../../../stores/agent.store';
@@ -152,8 +152,8 @@ export const AssistantSidebar: React.FC<AssistantSidebarProps> = ({
     const handleStoryboardQuickSend = () => {
         const extra = readCurrentInputText();
         const prompt = extra
-            ? `请帮我制作产品九宫格分镜图。\n补充要求：${extra}`
-            : '请帮我制作产品九宫格分镜图';
+            ? `请基于参考图开始分镜故事板创作。补充要求：${extra}`
+            : '请基于参考图开始分镜故事板创作';
         void handleSend(prompt, undefined, webEnabled, STORYBOARD_SKILL);
     };
 
@@ -407,11 +407,11 @@ export const AssistantSidebar: React.FC<AssistantSidebarProps> = ({
                                     clothingActions.reset();
                                     clothingActions.setStep('WAIT_PRODUCT');
                                     handleSend(
-                                        '请帮我进行服装棚拍组图设计',
+                                        undefined,
                                         undefined,
                                         webEnabled,
                                         {
-                                            id: 'campaign',
+                                            id: 'clothing-studio-workflow',
                                             name: '服装棚拍组图',
                                             iconName: 'Shirt',
                                             config: {

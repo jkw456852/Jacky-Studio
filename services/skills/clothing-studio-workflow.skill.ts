@@ -171,6 +171,16 @@ ${JSON.stringify(shotCandidates)}
   return Array.from({ length: count }).map((_, idx) => toFallbackItem(idx));
 };
 
+function buildModelProfileHints(profile?: any): string {
+  if (!profile) return 'Professional fashion model.';
+  return `MODEL PROFILE:
+- Personality: ${profile.personality || 'Professional'}
+- Ethnicity: ${profile.ethnicity || 'Caucasian'}
+- Age: ${profile.ageRange || '20-30'}
+- Appearance: ${profile.physicalDescription || 'Standard catalog makeup/hair'}
+(Ensure model identity matches reference[0] while following this style profile)`;
+}
+
 function buildMaterialHints(materialGuess?: string[]): string {
   if (!materialGuess || materialGuess.length === 0) {
     return 'Show realistic fabric texture with proper weight and drape.';
@@ -287,6 +297,7 @@ export async function clothingStudioWorkflowSkill(params: {
   
   const analysis = parsed.analysis;
   const materialHints = buildMaterialHints(analysis?.materialGuess);
+  const modelProfileHints = buildModelProfileHints(analysis?.targetModelProfile);
   const forbiddenChanges = buildForbiddenChanges(analysis?.forbiddenChanges);
   const anchorDescription = analysis?.anchorDescription || 'Maintain garment construction details';
 
@@ -310,7 +321,8 @@ Use reference[1] as the ONLY PRODUCT anchor (garment facts only).
 CRITICAL: Do NOT copy the lighting, image quality, compression artifacts, styling, or aesthetics of reference[1].
 Reference[1] is ONLY for garment construction and product details.
 
-IDENTITY LOCK (must match reference[0]):
+IDENTITY LOCK & PROFILE (must match reference[0]):
+${modelProfileHints}
 - Same face shape, eyes, nose, lips, hairstyle, hairline, skin tone, and body proportions.
 - Natural human skin texture (pores, subtle imperfections). No plastic skin, no beauty filter, no "AI glow".
 - No sunglasses, no jewelry, no hat, no bag, no extra accessories (unless explicitly requested in SHOT_SPEC).
