@@ -2670,6 +2670,125 @@ const Workspace: React.FC = () => {
       return urls;
     };
 
+    if (skillData?.id === "clothing-studio-quick") {
+      // One-click: no workflow cards. Use agent pipeline to call the skill directly.
+      // Requirements:
+      // - user provides product image(s)
+      // - user describes desired model; we auto-generate a model anchor sheet
+      // - output: 3 images by default, same model face, strict product consistency
+      const effectiveConversationId = ensureConversationId();
+      const effectiveTopicId = buildMemoryKey(effectiveConversationId);
+
+      const attachmentPreviews = attachments.map((f) => URL.createObjectURL(f));
+      const attachmentMetadata = attachments.map((f) => ({
+        markerId: (f as any).markerId,
+        markerName: (f as any).markerName,
+        markerInfo: (f as any).markerInfo,
+      }));
+
+      const userMsg: ChatMessage = {
+        id: Date.now().toString(),
+        role: "user",
+        text,
+        attachments: attachmentPreviews,
+        attachmentMetadata,
+        timestamp: Date.now(),
+        skillData,
+      };
+      addMessage(userMsg);
+
+      setIsTyping(true);
+      setInputBlocks([{ id: "init", type: "text", text: "" }]);
+      document.querySelectorAll('[id^="input-block-"]').forEach((el) => {
+        (el as HTMLElement).textContent = "";
+      });
+
+      try {
+        if (attachments.length === 0) {
+          addMessage({
+            id: `clothing-quick-warn-${Date.now()}`,
+            role: "model",
+            text: "请先上传 1 张服装产品图（作为产品一致性锚点）。",
+            timestamp: Date.now(),
+            error: true,
+          });
+          return;
+        }
+
+        const hostProvider = useImageHostStore.getState().selectedProvider;
+        if (hostProvider === "none") {
+          throw new Error("请先在设置中启用图床（如 ImgBB），再上传产品图");
+        }
+
+        // Upload all provided images as product pool.
+        const uploadedUrls: string[] = [];
+        for (const file of attachments) {
+          const url = await uploadImage(file);
+          uploadedUrls.push(url);
+        }
+
+        const countMatch = text.match(/(\d+)\s*[张幅]|(?:count|imgs?|images?)\s*[:=]\s*(\d+)/i);
+        const requestedCount = countMatch ? Number(countMatch[1] || countMatch[2]) : undefined;
+
+        const platform = /亚马逊|amazon/i.test(text)
+          ? "amazon"
+          : /天猫|tmall/i.test(text)
+            ? "tmall"
+            : /淘宝|taobao/i.test(text)
+              ? "taobao"
+              : undefined;
+
+        const bgMatch = text.match(/背景\s*[:：]\s*([^\n]+)/);
+        const background = bgMatch ? String(bgMatch[1] || '').trim() : undefined;
+
+        const result = await executeSkill("clothingStudioQuick", {
+          productImages: uploadedUrls.slice(0, 6),
+          brief: text,
+          platform,
+          background,
+          count: requestedCount,
+          aspectRatio: (skillData as any)?.config?.defaults?.aspectRatio || "3:4",
+          clarity: "2K",
+          preferredImageModel: (skillData as any)?.config?.defaults?.model || "nanobanana2",
+          sessionModelAnchorSheetUrl: undefined,
+          regenerateModel: true,
+          topicId: effectiveTopicId,
+        });
+
+        const imageUrls = Array.isArray(result?.images)
+          ? result.images.map((i: any) => i?.url).filter(Boolean)
+          : [];
+
+        addMessage({
+          id: `clothing-quick-result-${Date.now()}`,
+          role: "model",
+          text:
+            imageUrls.length > 0
+              ? `已生成 ${imageUrls.length} 张棚拍组图（同一模特脸 + 产品一致性已校验）。`
+              : `生成失败：未通过一致性质检，请尝试更清晰的产品图或更具体的模特描述。`,
+          timestamp: Date.now(),
+          error: imageUrls.length === 0,
+          agentData: {
+            title: "服装棚拍组图",
+            model: String((skillData as any)?.config?.defaults?.model || "nanobanana2"),
+            imageUrls,
+            isGenerating: false,
+          },
+        });
+      } catch (err: any) {
+        addMessage({
+          id: `clothing-quick-err-${Date.now()}`,
+          role: "model",
+          text: `组图生成失败：${err?.message || "未知错误"}`,
+          timestamp: Date.now(),
+          error: true,
+        });
+      } finally {
+        setIsTyping(false);
+      }
+      return;
+    }
+
     if (skillData?.id === "clothing-studio-workflow") {
       try {
         setIsTyping(true);

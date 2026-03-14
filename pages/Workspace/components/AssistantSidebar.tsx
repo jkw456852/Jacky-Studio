@@ -407,22 +407,20 @@ export const AssistantSidebar: React.FC<AssistantSidebarProps> = ({
                             </button>
                             <button
                                 onClick={() => {
-                                    clothingActions.reset();
-                                    clothingActions.setStep('WAIT_PRODUCT');
                                     handleSend(
                                         buildQuickSkillPrompt('请帮我进行服装棚拍组图设计'),
                                         undefined,
                                         webEnabled,
                                         {
-                                            id: 'clothing-studio-workflow',
+                                            id: 'clothing-studio-quick',
                                             name: '服装棚拍组图',
                                             iconName: 'Shirt',
                                             config: {
                                                 twoStep: true,
                                                 defaults: {
                                                     aspectRatio: '3:4',
-                                                    count: 1,
-                                                    model: 'gemini-3-pro-image-preview',
+                                                    count: 3,
+                                                    model: 'nanobanana2',
                                                 },
                                             },
                                         }
