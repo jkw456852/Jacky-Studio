@@ -7,6 +7,7 @@ import { posterAgent } from './agents/poster.agent';
 import { packageAgent } from './agents/package.agent';
 import { motionAgent } from './agents/motion.agent';
 import { campaignAgent } from './agents/campaign.agent';
+import { clothingAgent } from './agents/clothing.agent';
 import { promptOptimizerAgent } from './agents/prompt-optimizer.agent';
 
 export const AGENT_REGISTRY: Record<AgentType, EnhancedBaseAgent> = {
@@ -16,7 +17,10 @@ export const AGENT_REGISTRY: Record<AgentType, EnhancedBaseAgent> = {
   poster: posterAgent,
   package: packageAgent,
   motion: motionAgent,
+  // campaign remains default; specialized clothing flow is selected via routing
   campaign: campaignAgent,
+  // NOTE: ClothingAgent is a specialized prompt bound to 'campaign' AgentType in this codebase.
+  // It is used via explicit pin or router keyword logic.
   'prompt-optimizer': promptOptimizerAgent,
 };
 

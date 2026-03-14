@@ -42,9 +42,12 @@ export function localPreRoute(message: string): AgentType | null {
   const hasVideoKeyword = /视频|video|动画|animation|片头|转场/.test(lower);
   const hasStoryboardKeyword = /分镜|故事板|九宫格|storyboard|镜头|shot list/.test(lower);
   const hasEcommerceKeyword = /电商|亚马逊|amazon|listing|副图|主图|详情图|shopify|淘宝|天猫/.test(lower);
+  const hasClothingKeyword = /服装|衣服|上衣|裤子|裙|棚拍|模特/.test(lower);
 
   if (hasVideoKeyword && hasStoryboardKeyword) return 'cameron';
   if (hasVideoKeyword && hasEcommerceKeyword) return 'campaign';
+  // Clothing studio: route to campaign agent (specialized prompt may be pinned)
+  if (hasEcommerceKeyword && hasClothingKeyword) return 'campaign';
 
   let bestMatch: { agent: AgentType; priority: number; matchCount: number } | null = null;
 

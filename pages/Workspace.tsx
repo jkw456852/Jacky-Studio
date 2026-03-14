@@ -2873,6 +2873,7 @@ const Workspace: React.FC = () => {
       return urls;
     };
 
+    // Legacy clothing workflow entry (deprecated)
     if (skillData?.id === "clothing-studio-workflow") {
       try {
         setIsTyping(true);
