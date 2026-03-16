@@ -269,59 +269,65 @@ export const fetchAvailableModels = async (provider: string, keys: string[], bas
     const rootUrl = normalizeUrl(baseUrl || '');
     const allModels = new Set<string>();
 
-    // 1. Special Handling: MemeFast Pricing API (Public list, high accuracy)
+    // 1. Parallelize All Fetch Operations
+    const fetchTasks: Promise<void>[] = [];
+
+    // Task A: MemeFast Pricing API (Public list, high accuracy)
     const isMemeFast = rootUrl.includes('memefast.top'); /* cspell:disable-line */
     if (isMemeFast) {
-        try {
-            const pricingUrl = `${rootUrl}/api/pricing_new`;
-            console.log(`[fetchAvailableModels] [MemeFast] Fetching pricing metadata: ${pricingUrl}`);
-            const res = await fetchWithResilience(pricingUrl, {}, { operation: 'fetchAvailableModels.memeFastPricing', retries: 1 });
-            if (res.ok) {
-                const json = await res.json();
-                const data = json.data || [];
-                if (Array.isArray(data)) {
-                    data.forEach(m => {
-                        if (m.model_name) allModels.add(m.model_name);
-                    });
+        fetchTasks.push((async () => {
+            try {
+                const pricingUrl = `${rootUrl}/api/pricing_new`;
+                console.log(`[fetchAvailableModels] [MemeFast] Fetching pricing metadata: ${pricingUrl}`);
+                const res = await fetchWithResilience(pricingUrl, {}, { operation: 'fetchAvailableModels.memeFastPricing', retries: 1, timeoutMs: 10000 });
+                if (res.ok) {
+                    const json = await res.json();
+                    const data = json.data || [];
+                    if (Array.isArray(data)) {
+                        data.forEach(m => {
+                            if (m.model_name) allModels.add(m.model_name);
+                        });
+                        console.log(`[fetchAvailableModels] [MemeFast] Found ${data.length} models via pricing API.`);
+                    }
                 }
+            } catch (e) {
+                console.warn(`[fetchAvailableModels] [MemeFast] Pricing fetch failed`, e);
             }
-        } catch (e) {
-            console.warn(`[fetchAvailableModels] [MemeFast] Pricing fetch failed, falling back to /v1/models`, e);
-        }
+        })());
     }
 
-    // 2. Standard Logic: Iterate through all keys to find all accessible models
+    // Task B: Standard Model List from each key
     const modelsPath = /\/v\d+(beta)?$/.test(rootUrl) ? `${rootUrl}/models` : `${rootUrl}/v1/models`;
     const getGoogleUrl = (k: string) => `${rootUrl}/v1/models?key=${encodeURIComponent(k)}`;
 
-    for (let i = 0; i < keys.length; i++) {
-        const key = keys[i].trim();
-        if (!key) continue;
+    const checkKey = async (key: string, index: number) => {
+        const trimmedKey = key.trim();
+        if (!trimmedKey) return;
 
-        try {
-            const plans = isGoogle
-                ? [{
-                    url: getGoogleUrl(key),
-                    headers: {}
-                }]
-                : [
-                    {
-                        url: modelsPath,
-                        headers: {
-                            'Authorization': `Bearer ${key}`,
-                            'Content-Type': 'application/json'
-                        }
-                    },
-                    {
-                        url: `${modelsPath}?key=${encodeURIComponent(key)}`,
-                        headers: { 'Content-Type': 'application/json' }
+        const plans = isGoogle
+            ? [{ url: getGoogleUrl(trimmedKey), headers: {} }]
+            : [
+                {
+                    url: modelsPath,
+                    headers: {
+                        'Authorization': `Bearer ${trimmedKey}`,
+                        'Content-Type': 'application/json'
                     }
-                ];
+                },
+                {
+                    url: `${modelsPath}?key=${encodeURIComponent(trimmedKey)}`,
+                    headers: { 'Content-Type': 'application/json' }
+                }
+            ];
 
-            let keySucceeded = false;
-            for (const plan of plans) {
-                console.log(`[fetchAvailableModels] [${provider}] Key #${i + 1} checking: ${plan.url}`);
-                const res = await fetchWithResilience(plan.url, { headers: plan.headers }, { operation: 'fetchAvailableModels.modelList', retries: 0 });
+        for (const plan of plans) {
+            try {
+                console.log(`[fetchAvailableModels] [${provider}] Key #${index + 1} checking: ${plan.url}`);
+                const res = await fetchWithResilience(plan.url, { headers: plan.headers }, { 
+                    operation: 'fetchAvailableModels.modelList', 
+                    retries: 0, 
+                    timeoutMs: 15000 // 15s timeout for model list
+                });
 
                 if (res.ok) {
                     const data = await res.json();
@@ -330,24 +336,24 @@ export const fetchAvailableModels = async (provider: string, keys: string[], bas
                         const id = typeof m === 'string' ? m : (m.id || m.name || m.model);
                         if (id) allModels.add(id);
                     });
-                    console.log(`[fetchAvailableModels] [${provider}] Key #${i + 1} found ${list.length} items.`);
-                    keySucceeded = true;
-                    break;
+                    console.log(`[fetchAvailableModels] [${provider}] Key #${index + 1} succeeded.`);
+                    return; // Key success, no need for alternate plan
                 }
-
-                console.warn(`[fetchAvailableModels] [${provider}] Key #${i + 1} returned ${res.status} for ${plan.url}`);
-                if (!shouldTryAlternateAuth(res.status)) {
-                    break;
-                }
+                console.warn(`[fetchAvailableModels] [${provider}] Key #${index + 1} failed status: ${res.status}`);
+                if (!shouldTryAlternateAuth(res.status)) break;
+            } catch (error) {
+                console.error(`[fetchAvailableModels] [${provider}] Key #${index + 1} error:`, error);
+                break;
             }
-
-            if (!keySucceeded) {
-                console.warn(`[fetchAvailableModels] [${provider}] Key #${i + 1} no model list available.`);
-            }
-        } catch (error) {
-            console.error(`[fetchAvailableModels] [${provider}] Key #${i + 1} failed:`, error);
         }
-    }
+    };
+
+    keys.forEach((key, i) => {
+        fetchTasks.push(checkKey(key, i));
+    });
+
+    // Wait for all tasks to complete or timeout
+    await Promise.allSettled(fetchTasks);
 
     const cleaned = Array.from(allModels).filter(Boolean);
     console.log(`[fetchAvailableModels] [${provider}] Total unique models found: ${cleaned.length}`);
@@ -637,8 +643,11 @@ const generateVideoOpenAICompatible = async (
                 `/v1/tasks/${taskId}`,
             ];
 
+            let dynamicDelay = 2000; // Start with 2s poll for faster feedback
             for (let i = 0; i < 60; i++) {
-                await new Promise(resolve => setTimeout(resolve, 5000));
+                await new Promise(resolve => setTimeout(resolve, dynamicDelay));
+                // Gradually increase delay but keep it snappy (max 5s)
+                dynamicDelay = Math.min(5000, Math.floor(dynamicDelay * 1.5));
 
                 for (const pollPath of pollPaths) {
                     try {
