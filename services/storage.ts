@@ -1,4 +1,5 @@
 import { Project } from '../types';
+import { compactProjectForPersist } from '../pages/Workspace/controllers/workspacePersistence';
 
 export const DB_NAME = 'XcStudioDB';
 export const STORE_NAME = 'projects';
@@ -67,6 +68,8 @@ export const openWorkspaceDB = (): Promise<IDBDatabase> => {
 
 const openDB = openWorkspaceDB;
 
+export type ProjectSummary = Pick<Project, 'id' | 'title' | 'updatedAt' | 'thumbnail'>;
+
 export const getProjects = async (): Promise<Project[]> => {
   try {
     const db = await openDB();
@@ -84,6 +87,44 @@ export const getProjects = async (): Promise<Project[]> => {
     });
   } catch (error) {
     console.error('Failed to load projects', error);
+    return [];
+  }
+};
+
+export const getProjectSummaries = async (): Promise<ProjectSummary[]> => {
+  try {
+    const db = await openDB();
+    return new Promise((resolve, reject) => {
+      const transaction = db.transaction(STORE_NAME, 'readonly');
+      const store = transaction.objectStore(STORE_NAME);
+      const request = store.openCursor();
+      const summaries: ProjectSummary[] = [];
+
+      request.onsuccess = () => {
+        const cursor = request.result;
+        if (!cursor) {
+          summaries.sort(
+            (a, b) =>
+              new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime(),
+          );
+          resolve(summaries);
+          return;
+        }
+
+        const value = cursor.value as Project;
+        summaries.push({
+          id: value.id,
+          title: value.title,
+          updatedAt: value.updatedAt,
+          thumbnail: value.thumbnail,
+        });
+        cursor.continue();
+      };
+
+      request.onerror = () => reject(request.error);
+    });
+  } catch (error) {
+    console.error('Failed to load project summaries', error);
     return [];
   }
 };
@@ -107,10 +148,11 @@ export const getProject = async (id: string): Promise<Project | undefined> => {
 export const saveProject = async (project: Project): Promise<void> => {
   try {
     const db = await openDB();
+    const compactProject = compactProjectForPersist(project);
     return new Promise((resolve, reject) => {
       const transaction = db.transaction(STORE_NAME, 'readwrite');
       const store = transaction.objectStore(STORE_NAME);
-      const request = store.put(project);
+      const request = store.put(compactProject);
       request.onsuccess = () => resolve();
       request.onerror = () => reject(request.error);
     });

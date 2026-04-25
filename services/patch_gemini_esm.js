@@ -1,6 +1,7 @@
 import fs from 'fs';
-const path = 'c:\\Users\\xiaoc\\Desktop\\XC-STUDIO\\services\\gemini.ts';
-let content = fs.readFileSync(path, 'utf8');
+import path from 'path';
+const targetPath = path.join(process.cwd(), 'services', 'gemini.ts');
+let content = fs.readFileSync(targetPath, 'utf8');
 
 const newCode = `// 统一模型获取助手
 export const getBestModelId = (type: 'text' | 'image' | 'video' = 'text'): string => {
@@ -54,7 +55,7 @@ if (content.includes('export const getClient')) {
     if (endIdx !== -1) {
         const originalBlock = content.substring(startIdx, endIdx);
         content = content.replace(originalBlock, newCode);
-        fs.writeFileSync(path, content, 'utf8');
+        fs.writeFileSync(targetPath, content, 'utf8');
         console.log('Patch applied successfully!');
     }
 }

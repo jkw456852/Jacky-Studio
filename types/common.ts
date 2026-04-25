@@ -1,6 +1,17 @@
 
 export type ImageModel = string;
 export type VideoModel = string;
+export type CnDetailPromptVersion = 'original' | 'new';
+export type CnDetailTextMode = 'auto' | 'withText' | 'noText';
+export type CnDetailRatioMode = 'adaptive' | 'fixed';
+
+export type CnDetailRetryPolicy = {
+  maxRetriesPerShot?: number;
+  tiers?: Array<{
+    maxRetries?: number;
+    densityScale?: number;
+  }>;
+};
 
 export type DesignTaskMode =
   | 'generate'
@@ -25,6 +36,8 @@ export interface DesignSessionState {
   brand: BrandInfo;
   styleHints: string[];
   subjectAnchors: string[];
+  subjectAnchorMode?: 'auto' | 'manual';
+  consistencyCheckEnabled?: boolean;
   referenceSummary?: string;
   constraints: string[];
   forbiddenChanges: string[];
@@ -34,6 +47,9 @@ export interface DesignSessionState {
 }
 
 export type ShapeType = 'square' | 'circle' | 'triangle' | 'star' | 'bubble' | 'arrow-left' | 'arrow-right';
+export type WorkspaceNodeInteractionMode = 'classic' | 'branch';
+export type WorkspaceNodeLinkKind = 'generation' | 'branch';
+export type WorkspaceTreeNodeKind = 'image' | 'prompt';
 
 export interface CanvasElement {
   id: string;
@@ -64,13 +80,24 @@ export interface CanvasElement {
   // Gen Image/Video specific
   genPrompt?: string;
   genModel?: ImageModel | VideoModel;
+  genProviderId?: string | null;
   genAspectRatio?: string;
   genResolution?: '1K' | '2K' | '4K';
+  genImageCount?: 1 | 2 | 3 | 4;
   detectedTexts?: { original: string, edited?: string }[];
 
   // Image Gen Reference
   genRefImage?: string;
   genRefImages?: string[];
+  genRefPreviewImage?: string;
+  genRefPreviewImages?: string[];
+  nodeInteractionMode?: WorkspaceNodeInteractionMode;
+  nodeParentId?: string;
+  nodeParentIds?: string[];
+  nodeLinkKind?: WorkspaceNodeLinkKind;
+  treeNodeKind?: WorkspaceTreeNodeKind;
+  treeNodeTone?: string;
+  treeChildrenCollapsed?: boolean;
 
   // Video Gen Specifics
   genStartFrame?: string;
@@ -182,7 +209,17 @@ export interface ChatMessage {
     id: string;
     name: string;
     iconName: string;
-    config?: Record<string, any>;
+    config?: (Record<string, any> & {
+      defaults?: Record<string, any> & {
+        promptVersion?: CnDetailPromptVersion;
+        textMode?: CnDetailTextMode;
+        ratioMode?: CnDetailRatioMode;
+        fixedAspectRatio?: string;
+        qualityThreshold?: number;
+        replacementBudget?: number;
+        retryPolicy?: CnDetailRetryPolicy;
+      };
+    });
   };
 }
 
@@ -193,11 +230,36 @@ export interface Template {
   image: string;
 }
 
+export interface WorkspaceMarkerInfo {
+  fullImageUrl?: string;
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+  imageWidth: number;
+  imageHeight: number;
+}
+
+export type WorkspaceInputFile = File & {
+  markerId?: string;
+  markerName?: string;
+  markerInfo?: WorkspaceMarkerInfo;
+  lastAiAnalysis?: string;
+  _canvasAutoInsert?: boolean;
+  _canvasElId?: string;
+  _canvasWidth?: number;
+  _canvasHeight?: number;
+  _canvasW?: number;
+  _canvasH?: number;
+  _chipPreviewUrl?: string;
+  _attachmentId?: string;
+};
+
 export interface InputBlock {
   id: string;
   type: 'text' | 'file';
   text?: string;
-  file?: File;
+  file?: WorkspaceInputFile;
 }
 
 // Agent System Types

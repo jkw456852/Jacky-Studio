@@ -10,10 +10,23 @@ import { runXcAiOneclick, formatXcaiOneclickResult } from './xcai-oneclick.skill
 import { generateModelSkill } from './generate-model.skill';
 import { analyzeClothingProductSkill } from './analyze-clothing-product.skill';
 import { clothingStudioSkill } from './clothing-studio.skill';
+import { clothingStudioWorkflowSkill } from './clothing-studio-workflow.skill';
 import { analyzeListingProductSkill } from './analyze-listing-product.skill';
 import { amazonListingSkill } from './amazon-listing.skill';
+import { cnDetailPageSkill } from './cn-detail-page.skill';
+import {
+  ecomAutofillSupplementsSkill,
+  ecomAutofillImageAnalysesSkill,
+  ecomAutofillPlansSkill,
+  ecomAnalyzeImagesSkill,
+  ecomAnalyzeProductSkill,
+  ecomGeneratePlansSkill,
+  ecomReviewGeneratedResultSkill,
+  ecomRewritePromptSkill,
+  ecomSupplementQuestionsSkill,
+} from './ecom-oneclick-workflow.skill';
 
-export { imageGenSkill, videoGenSkill, textExtractSkill, regionAnalyzeSkill, copyGenSkill, smartEditSkill, exportSkill, touchEditSkill, runXcAiOneclick, generateModelSkill, analyzeClothingProductSkill, clothingStudioSkill, analyzeListingProductSkill, amazonListingSkill };
+export { imageGenSkill, videoGenSkill, textExtractSkill, regionAnalyzeSkill, copyGenSkill, smartEditSkill, exportSkill, touchEditSkill, runXcAiOneclick, generateModelSkill, analyzeClothingProductSkill, clothingStudioSkill, clothingStudioWorkflowSkill, analyzeListingProductSkill, amazonListingSkill, cnDetailPageSkill, ecomAnalyzeProductSkill, ecomSupplementQuestionsSkill, ecomAutofillSupplementsSkill, ecomAutofillImageAnalysesSkill, ecomAutofillPlansSkill, ecomAnalyzeImagesSkill, ecomGeneratePlansSkill, ecomRewritePromptSkill, ecomReviewGeneratedResultSkill };
 
 export const AVAILABLE_SKILLS = {
   generateImage: imageGenSkill,
@@ -28,8 +41,19 @@ export const AVAILABLE_SKILLS = {
   generateModel: generateModelSkill,
   analyzeClothingProduct: analyzeClothingProductSkill,
   clothingStudio: clothingStudioSkill,
+  clothingStudioWorkflow: clothingStudioWorkflowSkill,
   analyzeListingProduct: analyzeListingProductSkill,
   amazonListing: amazonListingSkill,
+  cnDetailPage: cnDetailPageSkill,
+  ecomAnalyzeProduct: ecomAnalyzeProductSkill,
+  ecomSupplementQuestions: ecomSupplementQuestionsSkill,
+  ecomAutofillSupplements: ecomAutofillSupplementsSkill,
+  ecomAutofillImageAnalyses: ecomAutofillImageAnalysesSkill,
+  ecomAutofillPlans: ecomAutofillPlansSkill,
+  ecomAnalyzeImages: ecomAnalyzeImagesSkill,
+  ecomGeneratePlans: ecomGeneratePlansSkill,
+  ecomRewritePrompt: ecomRewritePromptSkill,
+  ecomReviewGeneratedResult: ecomReviewGeneratedResultSkill,
 };
 
 export async function executeSkill(skillName: string, params: any): Promise<any> {

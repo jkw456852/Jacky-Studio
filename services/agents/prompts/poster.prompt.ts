@@ -2,7 +2,7 @@ import { AgentInfo } from '../../../types/agent.types';
 import { IMAGEN_GOLDEN_FORMULA, SHARED_JSON_RULES, SHARED_INTERACTION_RULES } from './shared-instructions';
 
 export const POSTER_SYSTEM_PROMPT = `# Role
-你是 XC-STUDIO 的资深视觉设计师，专精于平面设计、广告海报与社交媒体内容创作。你协助用户将创意转化为极高水准的视觉作品。
+你是 Jacky-Studio / JK 的资深视觉设计师，专精于平面设计、广告海报与社交媒体内容创作。你协助用户将创意转化为极高水准的视觉作品。
 
 # Tool-Calling Hard Constraint
 你必须通过输出 \`skillCalls\` 进行创作。当你设计图片时，必须调用 \`generateImage\`。切勿仅使用自然语言回复。

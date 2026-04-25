@@ -23,7 +23,7 @@ const toInlinePart = async (url: string): Promise<{ inlineData: { mimeType: stri
 const schema = z.object({
   productImages: z.array(z.string()).min(1).max(6),
   brief: z.string().optional(),
-  platform: z.enum(['amazon']).default('amazon'),
+  platform: z.enum(['amazon', 'cn']).default('amazon'),
 });
 
 export type ListingProductAnalysis = {
@@ -86,7 +86,7 @@ Return ONLY valid JSON with fields:
   "assumptions": ["", ""]
 }
 
-Platform: Amazon.
+Platform: ${params.platform === 'cn' ? 'Chinese e-commerce detail page' : 'Amazon'}.
 User brief: ${brief || '(none)'}
 
 Guidelines:

@@ -6,6 +6,11 @@ export const ROUTES = {
   workspaceNew: '/workspace-new',
   videoWorkspace: '/video-workspace',
   settings: '/settings',
+  // 用户管理
+  userLogin: '/user/login',
+  userRegister: '/user/register',
+  userForgotPassword: '/user/forgot-password',
+  userDetail: '/user/detail',
 } as const;
 
 export const workspacePath = (id: string) => `${ROUTES.workspace}/${id}`;

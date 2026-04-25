@@ -44,7 +44,7 @@ const toTrimmedWebPages = (value: unknown): Array<{ title: string; url: string }
 };
 
 const compactDesignSessionForPersist = (session: DesignSessionState): DesignSessionState => ({
-  taskMode: session.taskMode,
+  taskMode: 'generate',
   brand: {
     name: toTrimmedText(session.brand?.name),
     colors: toTrimmedStringArray(session.brand?.colors),
@@ -52,13 +52,16 @@ const compactDesignSessionForPersist = (session: DesignSessionState): DesignSess
     style: toTrimmedText(session.brand?.style),
   },
   styleHints: toTrimmedStringArray(session.styleHints),
-  subjectAnchors: toTrimmedStringArray(session.subjectAnchors),
+  subjectAnchorMode: session.subjectAnchorMode === 'manual' ? 'manual' : 'auto',
+  consistencyCheckEnabled: session.consistencyCheckEnabled !== false,
+  // 以下字段属于会话级运行时上下文，不跨会话持久化
+  subjectAnchors: [],
+  approvedAssetIds: [],
+  referenceSummary: undefined,
+  researchSummary: undefined,
+  referenceWebPages: [],
   constraints: toTrimmedStringArray(session.constraints),
   forbiddenChanges: toTrimmedStringArray(session.forbiddenChanges),
-  approvedAssetIds: toTrimmedStringArray(session.approvedAssetIds),
-  referenceSummary: toTrimmedText(session.referenceSummary),
-  researchSummary: toTrimmedText(session.researchSummary),
-  referenceWebPages: toTrimmedWebPages(session.referenceWebPages),
 });
 
 interface ProjectSettings {
@@ -148,6 +151,8 @@ const initialState: Omit<ProjectState, 'actions'> = {
     },
     styleHints: [],
     subjectAnchors: [],
+    subjectAnchorMode: 'auto',
+    consistencyCheckEnabled: true,
     referenceSummary: '',
     constraints: [],
     forbiddenChanges: [],
@@ -181,7 +186,23 @@ export const useProjectStore = create<ProjectState>()(
       ...initialState,
       
       actions: {
-        setProjectId: (id) => set({ id, updatedAt: Date.now() }),
+        setProjectId: (id) => set((state) => {
+          const isNewProject = state.id !== id;
+          if (isNewProject) {
+            // 切换到新项目时，清除上个项目遗留的图片引用，避免一致性检测污染
+            state.designSession.approvedAssetIds = [];
+            state.designSession.subjectAnchors = [];
+            state.designSession.subjectAnchorMode = 'auto';
+            state.designSession.referenceSummary = '';
+            state.designSession.researchSummary = '';
+            state.designSession.referenceWebPages = [];
+            state.designSession.styleHints = [];
+            state.designSession.constraints = [];
+            state.designSession.forbiddenChanges = [];
+          }
+          state.id = id;
+          state.updatedAt = Date.now();
+        }),
         
         setTitle: (title) => set({ title, updatedAt: Date.now() }),
         
@@ -210,11 +231,30 @@ export const useProjectStore = create<ProjectState>()(
               ...state.brandInfo,
               ...(updates.brand || {}),
             },
-            styleHints: updates.styleHints || state.designSession.styleHints,
-            subjectAnchors: updates.subjectAnchors || state.designSession.subjectAnchors,
-            constraints: updates.constraints || state.designSession.constraints,
-            forbiddenChanges: updates.forbiddenChanges || state.designSession.forbiddenChanges,
-            approvedAssetIds: updates.approvedAssetIds || state.designSession.approvedAssetIds,
+            styleHints:
+              updates.styleHints !== undefined
+                ? updates.styleHints
+                : state.designSession.styleHints,
+            subjectAnchorMode:
+              updates.subjectAnchorMode !== undefined
+                ? updates.subjectAnchorMode
+                : state.designSession.subjectAnchorMode,
+            subjectAnchors:
+              updates.subjectAnchors !== undefined
+                ? updates.subjectAnchors
+                : state.designSession.subjectAnchors,
+            constraints:
+              updates.constraints !== undefined
+                ? updates.constraints
+                : state.designSession.constraints,
+            forbiddenChanges:
+              updates.forbiddenChanges !== undefined
+                ? updates.forbiddenChanges
+                : state.designSession.forbiddenChanges,
+            approvedAssetIds:
+              updates.approvedAssetIds !== undefined
+                ? updates.approvedAssetIds
+                : state.designSession.approvedAssetIds,
           };
           state.updatedAt = Date.now();
         }),
@@ -253,11 +293,17 @@ export const useProjectStore = create<ProjectState>()(
           state.designSession = {
             ...initialState.designSession,
             ...state.designSession,
+            taskMode: 'generate',
             brand: {
               ...initialState.designSession.brand,
               ...state.brandInfo,
               ...(state.designSession?.brand || {}),
             },
+            subjectAnchors: [],
+            approvedAssetIds: [],
+            referenceSummary: '',
+            researchSummary: '',
+            referenceWebPages: [],
           };
           state.updatedAt = Date.now();
         })

@@ -9,7 +9,6 @@ import { COCO_SYSTEM_PROMPT } from './prompts/coco.prompt';
 import { errorHandler, ErrorType } from '../../utils/error-handler';
 import { getApiKey, getBestModelId, generateJsonResponse } from '../gemini';
 import { localPreRoute } from './local-router';
-import { sanitizeObject } from './utils/payload-sanitizer';
 import { z } from 'zod';
 
 
@@ -186,21 +185,32 @@ export async function routeToAgent(
 
         console.log('[EnhancedOrchestrator] Routing message:', message.substring(0, 50));
 
-        // 构建提示词
+        // 构建路由 prompt 用的历史文本
+        // 三层清洁防止 Token 爆炸：
+        //   1. 剥离 base64 data URL（图片、音频等）→ [图片]占位符
+        //   2. 剥离普通 https:// URL（可能含超长 token）→ [URL]
+        //   3. 单条 message 截断到 300 字符
+        //   4. 只取最近 3 条（路由只需要了解即时上下文）
+        const sanitizeForRouting = (text: string): string => {
+            return String(text || '')
+                .replace(/data:[a-z0-9+\-]+\/[a-z0-9+\-]+;base64,[A-Za-z0-9+/=]+/gi, '[图片]')
+                .replace(/https?:\/\/[^\s"']{60,}/g, '[URL]') // 超长 URL 截断
+                .substring(0, 300);
+        };
+
         const historyText = context.conversationHistory
-            .slice(-5)
-            .map(m => `${m.role}: ${m.text}`)
+            .slice(-3)
+            .map(m => `${m.role}: ${sanitizeForRouting(m.text)}`)
             .join('\n');
 
-        // [XC-STUDIO] 修复 413 负载过大：清洗品牌信息和会话上下文中的 Base64 数据
-        const cleanBrandInfo = sanitizeObject(context.brandInfo || {}, 512);
-        const cleanDesignSession = sanitizeObject(context.designSession || {}, 512);
+        // designSession 只保留 taskMode，避免把参考图列表注入 prompt
+        const compactSession = { taskMode: context.designSession?.taskMode };
 
         const prompt = `${COCO_SYSTEM_PROMPT}
 
 Current Project: ${context.projectTitle}
-Brand Info: ${JSON.stringify(cleanBrandInfo)}
-Design Session: ${JSON.stringify(cleanDesignSession)}
+Brand Info: ${JSON.stringify(context.brandInfo || {})}
+Design Session: ${JSON.stringify(compactSession)}
 Conversation History:
 ${historyText}
 

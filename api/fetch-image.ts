@@ -93,7 +93,7 @@ export default async function handler(req: any, res: any) {
     const response = await fetch(imageUrl, {
       headers: {
         "User-Agent":
-          "Mozilla/5.0 (compatible; XC-Studio-ImageFetcher/1.0; +https://xc-studio.vercel.app)",
+          "Mozilla/5.0 (compatible; Jacky-Studio-ImageFetcher/1.0; +https://jacky-studio.vercel.app)",
       },
       signal: controller.signal,
     }).finally(() => clearTimeout(timeout));

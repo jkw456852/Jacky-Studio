@@ -67,7 +67,9 @@ interface CanvasState {
   };
 }
 
-const initialState = {
+type CanvasStoreSnapshot = Omit<CanvasState, 'actions'>;
+
+const initialState: CanvasStoreSnapshot = {
   zoom: 50,
   pan: { x: 0, y: 0 },
   elements: [],
@@ -83,19 +85,23 @@ const initialState = {
 };
 
 /** Shared logic for groupElements and mergeElements */
-function createGroupInState(state: any, ids: string[], collapsed: boolean): string {
-  const targets = state.elements.filter((el: any) => ids.includes(el.id));
+function createGroupInState(
+  state: CanvasStoreSnapshot,
+  ids: string[],
+  collapsed: boolean,
+): string {
+  const targets = state.elements.filter((el) => ids.includes(el.id));
   if (targets.length < 2) return '';
-  const minX = Math.min(...targets.map((el: any) => el.x));
-  const minY = Math.min(...targets.map((el: any) => el.y));
-  const maxX = Math.max(...targets.map((el: any) => el.x + el.width));
-  const maxY = Math.max(...targets.map((el: any) => el.y + el.height));
-  const maxZ = Math.max(...targets.map((el: any) => el.zIndex));
+  const minX = Math.min(...targets.map((el) => el.x));
+  const minY = Math.min(...targets.map((el) => el.y));
+  const maxX = Math.max(...targets.map((el) => el.x + el.width));
+  const maxY = Math.max(...targets.map((el) => el.y + el.height));
+  const maxZ = Math.max(...targets.map((el) => el.zIndex));
   const newGroupId = `group-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
   const originalChildData: Record<string, { x: number; y: number; width: number; height: number; zIndex: number }> = {};
   for (const t of targets) {
     originalChildData[t.id] = { x: t.x, y: t.y, width: t.width, height: t.height, zIndex: t.zIndex };
-    const el = state.elements.find((e: any) => e.id === t.id);
+    const el = state.elements.find((e) => e.id === t.id);
     if (el) el.groupId = newGroupId;
   }
   state.elements.push({

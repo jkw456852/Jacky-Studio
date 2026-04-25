@@ -1,13 +1,29 @@
+export type PromptLanguagePolicy = 'original-zh' | 'translate-en';
+
+export interface ImageTextPolicy {
+  enforceChinese?: boolean;
+  requiredCopy?: string;
+}
+
 export interface ImageGenerationRequest {
   prompt: string;
+  providerId?: string | null;
   aspectRatio: string;
   imageSize?: '1K' | '2K' | '4K';
   referenceImage?: string; // base64
   referenceImages?: string[];
+  maskImage?: string;
   referenceStrength?: number;
   referencePriority?: 'first' | 'all';
   referenceMode?: 'style' | 'product';
-  maskImage?: string;
+  promptLanguagePolicy?: PromptLanguagePolicy;
+  textPolicy?: ImageTextPolicy;
+  consistencyContext?: {
+    approvedAssetIds?: string[];
+    subjectAnchors?: string[];
+    referenceSummary?: string;
+    forbiddenChanges?: string[];
+  };
 }
 
 export interface VideoGenerationRequest {

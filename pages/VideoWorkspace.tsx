@@ -1,7 +1,7 @@
 import React from 'react';
 import { useNavigate } from 'react-router-dom';
 import { Home } from 'lucide-react';
-import { VideoApp } from 'xcaistudio';
+import { VideoApp } from 'jackystudio';
 import { ROUTES } from '../utils/routes';
 
 const VideoWorkspace: React.FC = () => {

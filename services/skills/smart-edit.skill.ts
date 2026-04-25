@@ -7,6 +7,42 @@ export interface SmartEditParams {
   parameters?: Record<string, any>;
 }
 
+const resolveSmartEditModelId = (model: string | undefined): string | undefined => {
+  const normalized = String(model || '').trim();
+  if (!normalized) return undefined;
+
+  if (normalized === 'Nano Banana Pro' || normalized === 'gemini-3-pro-image-preview') {
+    return 'gemini-3-pro-image-preview';
+  }
+  if (
+    normalized === 'NanoBanana2' ||
+    normalized === 'Nano Banana 2' ||
+    normalized === 'gemini-3.1-flash-image-preview' ||
+    normalized === 'nanobanana2'
+  ) {
+    return 'gemini-3.1-flash-image-preview';
+  }
+  if (
+    normalized === 'Seedream5.0' ||
+    normalized === 'Seedream 5.0' ||
+    normalized === 'Seedream 4' ||
+    normalized === 'doubao-seedream-5-0-260128'
+  ) {
+    return 'doubao-seedream-5-0-260128';
+  }
+  if (normalized === 'GPT Image 2' || normalized === 'gpt-image-2') {
+    return 'gpt-image-2';
+  }
+  if (normalized === 'GPT Image 1.5' || normalized === 'gpt-image-1.5-all') {
+    return 'gpt-image-1.5-all';
+  }
+  if (normalized === 'Flux.2 Max' || normalized === 'flux-pro-max') {
+    return 'flux-pro-max';
+  }
+
+  return normalized;
+};
+
 export async function smartEditSkill(params: SmartEditParams): Promise<string | null> {
   const editPrompts: Record<string, string> = {
     'background-remove': 'Remove the background from this image, keep only the main subject with transparent background',
@@ -41,7 +77,10 @@ export async function smartEditSkill(params: SmartEditParams): Promise<string | 
 
     let result: string | null = null;
 
-    const editModel = params.parameters?.editModel || 'gemini-3-pro-image-preview';
+    const editModel =
+      params.parameters?.editModel ||
+      resolveSmartEditModelId(params.parameters?.model) ||
+      'gemini-3-pro-image-preview';
     const shouldUseEditPath =
       !!params.maskImage ||
       params.editType === 'object-remove' ||
@@ -56,6 +95,8 @@ export async function smartEditSkill(params: SmartEditParams): Promise<string | 
         prompt: `${params.parameters?.preservePrompt || 'Preserve identity, layout, lighting, materials, and all untouched areas.'} ${finalPrompt}`.trim(),
         model: editModel,
         aspectRatio: params.parameters?.aspectRatio || '1:1',
+        imageSize: params.parameters?.imageSize,
+        providerId: params.parameters?.providerId,
         referenceImages: params.parameters?.referenceImages,
       });
     }
@@ -69,6 +110,7 @@ export async function smartEditSkill(params: SmartEditParams): Promise<string | 
         model: generationModel,
         aspectRatio: requestedAspectRatio,
         imageSize: requestedImageSize || (params.editType === 'upscale' ? (params.parameters?.factor >= 4 ? '4K' : '2K') : '1K'),
+        providerId: params.parameters?.providerId,
         referenceImage: params.sourceUrl
       });
     }

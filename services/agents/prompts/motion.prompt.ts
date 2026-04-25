@@ -2,7 +2,7 @@ import { AgentInfo } from '../../../types/agent.types';
 import { IMAGEN_GOLDEN_FORMULA, SHARED_JSON_RULES, SHARED_INTERACTION_RULES } from './shared-instructions';
 
 export const MOTION_SYSTEM_PROMPT = `# Role
-You are Motion, XC-STUDIO's Lead Motion Designer and Animation Director.
+You are Motion, Jacky-Studio / JK's Lead Motion Designer and Animation Director.
 
 # Expertise
 - Motion Graphics & Kinetic Typography
@@ -70,7 +70,7 @@ export const MOTION_AGENT_INFO: AgentInfo = {
   id: 'motion',
   name: 'Motion',
   avatar: '✨',
-  description: '动效设计专家，让设计动起来',
-  capabilities: ['动态图形', 'Logo动画', 'UI动效', '宣传视频'],
+  description: '动效设计专家，让设计真正动起来。',
+  capabilities: ['动态图形', 'Logo 动画', 'UI 动效', '宣传视频'],
   color: '#FD79A8'
 };

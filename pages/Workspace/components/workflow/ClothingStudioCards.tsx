@@ -1,5 +1,6 @@
 import React, { useMemo, useState, useRef, useEffect } from 'react';
 import { Download, PlusCircle, Shirt, UserRound, Sparkles, Play, XCircle, RefreshCw, Eye, MousePointer2 } from 'lucide-react';
+import type { LucideIcon } from 'lucide-react';
 import { motion, AnimatePresence, useScroll, useSpring } from 'framer-motion';
 import type { WorkflowUiMessage, Requirements, ModelGenOptions } from '../../../../types/workflow.types';
 import { useClothingState, useClothingStudioChatStore } from '../../../../stores/clothingStudioChat.store';
@@ -22,7 +23,24 @@ const ProCard = ({ children, className = "" }: { children: React.ReactNode; clas
   );
 };
 
-const ProSelect = ({ label, value, onChange, options, className = "" }: any) => (
+type SelectOption =
+  | string
+  | number
+  | {
+      label: string;
+      value?: string | number;
+      id?: string;
+    };
+
+type ProSelectProps = {
+  label?: string;
+  value: string | number;
+  onChange: (event: React.ChangeEvent<HTMLSelectElement>) => void;
+  options: readonly SelectOption[];
+  className?: string;
+};
+
+const ProSelect = ({ label, value, onChange, options, className = "" }: ProSelectProps) => (
   <div className={`flex flex-col gap-1.5 ${className}`}>
     {label && <label className="text-[10px] font-bold text-gray-400 uppercase tracking-widest pl-0.5">{label}</label>}
     <div className="relative group">
@@ -31,8 +49,13 @@ const ProSelect = ({ label, value, onChange, options, className = "" }: any) => 
         onChange={onChange}
         className="w-full appearance-none rounded-xl border border-gray-100 bg-gray-50/50 px-3 py-2 text-xs font-medium text-gray-700 outline-none transition-all hover:border-blue-200 focus:border-blue-500 focus:ring-2 focus:ring-blue-500/10"
       >
-        {options.map((opt: any) => (
-          <option key={opt.value || opt} value={opt.value || opt}>{opt.label || opt}</option>
+        {options.map((opt) => (
+          <option
+            key={typeof opt === 'object' ? String(opt.value ?? opt.id ?? opt.label) : String(opt)}
+            value={typeof opt === 'object' ? (opt.value ?? opt.id ?? opt.label) : opt}
+          >
+            {typeof opt === 'object' ? opt.label : opt}
+          </option>
         ))}
       </select>
       <div className="pointer-events-none absolute right-3 top-1/2 -translate-y-1/2 text-gray-400 group-hover:text-blue-500 transition-colors">
@@ -44,7 +67,15 @@ const ProSelect = ({ label, value, onChange, options, className = "" }: any) => 
   </div>
 );
 
-const ProButton = ({ onClick, children, variant = "primary", className = "", icon: Icon }: any) => {
+type ProButtonProps = {
+  onClick?: () => void;
+  children: React.ReactNode;
+  variant?: 'primary' | 'secondary';
+  className?: string;
+  icon?: LucideIcon;
+};
+
+const ProButton = ({ onClick, children, variant = "primary", className = "", icon: Icon }: ProButtonProps) => {
   const isPrimary = variant === "primary";
   return (
     <motion.button
@@ -65,7 +96,13 @@ const ProButton = ({ onClick, children, variant = "primary", className = "", ico
   );
 };
 
-const ProTag = ({ active, onClick, children }: any) => (
+type ProTagProps = {
+  active?: boolean;
+  onClick?: () => void;
+  children: React.ReactNode;
+};
+
+const ProTag = ({ active, onClick, children }: ProTagProps) => (
   <motion.button
     whileHover={{ y: -1 }}
     whileTap={{ scale: 0.95 }}
@@ -215,14 +252,14 @@ export const ClothingStudioCards: React.FC<ClothingStudioCardsProps> = ({
       <ProCard>
         <div className="flex items-center gap-2 text-sm font-bold text-gray-900 mb-4"><Sparkles size={16} className="text-blue-500" /> 模特实验室</div>
         <div className="grid grid-cols-2 gap-3">
-          <ProSelect label="Gender" value={modelForm.gender || '不限'} onChange={(e: any) => setModelForm((s) => ({ ...s, gender: e.target.value }))} options={['不限', '女性', '男性']} />
-          <ProSelect label="Age" value={modelForm.ageRange || '18-25岁'} onChange={(e: any) => setModelForm((s) => ({ ...s, ageRange: e.target.value }))} options={['不限', '0-6岁', '7-12岁', '13-17岁', '18-25岁', '26-35岁', '36-50岁', '50岁+']} />
-          <ProSelect label="Ethnicity" value={modelForm.skinTone || '亚洲人'} onChange={(e: any) => setModelForm((s) => ({ ...s, skinTone: e.target.value }))} options={['不限', '白人', '亚洲人', '黑人', '拉丁裔']} />
+          <ProSelect label="Gender" value={modelForm.gender || '不限'} onChange={(e: React.ChangeEvent<HTMLSelectElement>) => setModelForm((s) => ({ ...s, gender: e.target.value }))} options={['不限', '女性', '男性']} />
+          <ProSelect label="Age" value={modelForm.ageRange || '18-25岁'} onChange={(e: React.ChangeEvent<HTMLSelectElement>) => setModelForm((s) => ({ ...s, ageRange: e.target.value }))} options={['不限', '0-6岁', '7-12岁', '13-17岁', '18-25岁', '26-35岁', '36-50岁', '50岁+']} />
+          <ProSelect label="Ethnicity" value={modelForm.skinTone || '亚洲人'} onChange={(e: React.ChangeEvent<HTMLSelectElement>) => setModelForm((s) => ({ ...s, skinTone: e.target.value }))} options={['不限', '白人', '亚洲人', '黑人', '拉丁裔']} />
           <div className="flex flex-col gap-1.5">
             <label className="text-[10px] font-bold text-gray-400 uppercase tracking-widest pl-0.5">Quantity</label>
             <input className="rounded-xl border border-gray-100 bg-gray-50/50 px-3 py-2 text-xs font-medium outline-none focus:border-blue-500" type="number" min={1} max={4} value={modelForm.count || 1} onChange={(e) => setModelForm((s) => ({ ...s, count: Math.max(1, Math.min(4, Number(e.target.value) || 1)) }))} />
           </div>
-          <ProSelect label="Pose" className="col-span-2" value={modelForm.pose || '站立正面'} onChange={(e: any) => setModelForm((s) => ({ ...s, pose: e.target.value }))} options={['站立正面', '站立45°侧身', '走路抓拍', '坐姿']} />
+          <ProSelect label="Pose" className="col-span-2" value={modelForm.pose || '站立正面'} onChange={(e: React.ChangeEvent<HTMLSelectElement>) => setModelForm((s) => ({ ...s, pose: e.target.value }))} options={['站立正面', '站立45°侧身', '走路抓拍', '坐姿']} />
         </div>
         <textarea className="mt-3 w-full rounded-xl border border-gray-100 bg-gray-50/50 px-3 py-2 text-xs outline-none focus:border-blue-500 transition-all" rows={2} placeholder="更多个性化描述... (如：发色、场景)" value={modelForm.extra || ''} onChange={(e) => setModelForm((s) => ({ ...s, extra: e.target.value }))} />
         <ProButton onClick={() => onGenerateModel(modelForm)} icon={Play} className="mt-4 w-full">生成模特序列</ProButton>
@@ -286,33 +323,33 @@ export const ClothingStudioCards: React.FC<ClothingStudioCardsProps> = ({
         )}
 
         <div className="grid grid-cols-2 gap-3">
-          <ProSelect label="Platform" value={form.platform} onChange={(e: any) => setForm((s) => ({ ...s, platform: e.target.value }))} options={PLATFORM_OPTIONS} />
-          <ProSelect label="Preset" value={form.templateId || 'ecom_clean'} onChange={(e: any) => {
+          <ProSelect label="Platform" value={form.platform} onChange={(e: React.ChangeEvent<HTMLSelectElement>) => setForm((s) => ({ ...s, platform: e.target.value }))} options={PLATFORM_OPTIONS} />
+          <ProSelect label="Preset" value={form.templateId || 'ecom_clean'} onChange={(e: React.ChangeEvent<HTMLSelectElement>) => {
             const tpl = REQUIREMENT_TEMPLATES.find(t => t.id === e.target.value);
             setForm((s) => ({ ...s, templateId: e.target.value, description: tpl?.text || s.description }));
           }} options={REQUIREMENT_TEMPLATES} />
           <ProSelect 
             label="Ratio" 
             value={form.aspectRatio} 
-            onChange={(e: any) => setForm((s) => ({ ...s, aspectRatio: e.target.value }))} 
+            onChange={(e: React.ChangeEvent<HTMLSelectElement>) => setForm((s) => ({ ...s, aspectRatio: e.target.value }))} 
             options={['1:1', '3:4', '4:3', '9:16', '16:9']} 
           />
           <ProSelect
             label="Res."
             value={form.clarity}
             options={['1K', '2K', '4K']}
-            onChange={(e: any) => setForm((s) => ({ ...s, clarity: e.target.value }))}
+            onChange={(e: React.ChangeEvent<HTMLSelectElement>) => setForm((s) => ({ ...s, clarity: e.target.value as Requirements['clarity'] }))}
           />
           <ProSelect
             label="Language"
             value={form.targetLanguage}
-            onChange={(e: any) => setForm((s) => ({ ...s, targetLanguage: e.target.value }))}
+            onChange={(e: React.ChangeEvent<HTMLSelectElement>) => setForm((s) => ({ ...s, targetLanguage: e.target.value }))}
             options={LANGUAGE_OPTIONS}
           />
           <ProSelect
             label="Count"
             value={form.count}
-            onChange={(e: any) => setForm((s) => ({ ...s, count: Math.max(1, Math.min(10, Number(e.target.value) || 1)) }))}
+            onChange={(e: React.ChangeEvent<HTMLSelectElement>) => setForm((s) => ({ ...s, count: Math.max(1, Math.min(10, Number(e.target.value) || 1)) }))}
             options={COUNT_OPTIONS}
           />
         </div>
@@ -338,8 +375,8 @@ export const ClothingStudioCards: React.FC<ClothingStudioCardsProps> = ({
                     form.focusTags?.includes(tag)
                   }
                   onClick={() => setForm((s) => {
-                    const inBg = REQUIREMENT_TAGS.background.includes(tag as any);
-                    const inCam = REQUIREMENT_TAGS.camera.includes(tag as any);
+                    const inBg = REQUIREMENT_TAGS.background.some((option) => option === tag);
+                    const inCam = REQUIREMENT_TAGS.camera.some((option) => option === tag);
                     const key = inBg ? 'backgroundTags' : inCam ? 'cameraTags' : 'focusTags';
                     const prev = (s[key] || []) as string[];
                     const next = prev.includes(tag)

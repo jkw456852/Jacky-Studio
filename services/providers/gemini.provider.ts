@@ -6,7 +6,7 @@ export const geminiImageProvider: ImageProvider = {
   name: 'Gemini',
   models: [
     'Nano Banana Pro', 'NanoBanana2', 'Seedream5.0',
-    'GPT Image 1.5', 'Flux.2 Max', 'Flux.2 Pro', 'Gemini Imagen 4', 'Midjourney',
+    'GPT Image 2', 'gpt-image-2', 'GPT Image 1.5', 'gpt-image-1.5-all', 'Flux.2 Max', 'Flux.2 Pro', 'Gemini Imagen 4', 'Midjourney',
     'midjourney', 'dall-e-3', 'flux-pro', 'flux-schnell', 'gemini-1.5-pro',
     'Seedream 4.5', 'Nano Banana', 'Seedream 4'
   ],
@@ -20,14 +20,18 @@ export const geminiImageProvider: ImageProvider = {
     return generateImage({
       prompt: request.prompt,
       model: model as any,
+      providerId: request.providerId,
       aspectRatio: request.aspectRatio,
       imageSize: request.imageSize,
       referenceImage: request.referenceImage,
       referenceImages: request.referenceImages,
+      maskImage: request.maskImage,
       referenceStrength: request.referenceStrength,
       referencePriority: request.referencePriority,
       referenceMode: request.referenceMode,
-      maskImage: request.maskImage,
+      promptLanguagePolicy: request.promptLanguagePolicy,
+      textPolicy: request.textPolicy,
+      consistencyContext: request.consistencyContext,
     });
   }
 };

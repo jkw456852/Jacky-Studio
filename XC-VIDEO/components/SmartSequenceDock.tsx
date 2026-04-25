@@ -203,7 +203,7 @@ export const SmartSequenceDock: React.FC<SmartSequenceDockProps> = ({ isOpen, on
                 {resultVideoUrl && (
                     <a 
                         href={resultVideoUrl}
-                        download={`xcaistudio_seq_${Date.now()}.mp4`}
+                        download={`jackystudio_seq_${Date.now()}.mp4`}
                         onClick={(e) => e.stopPropagation()}
                         className="p-2 bg-black/60 backdrop-blur-md rounded-lg text-white/70 hover:text-white border border-white/10 hover:scale-105 transition-all"
                         title="下载视频"

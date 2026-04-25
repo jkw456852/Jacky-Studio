@@ -1,10 +1,10 @@
-import React, { useState, useEffect, useMemo } from 'react';
+﻿import React, { useState, useEffect, useMemo } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { useNavigate } from 'react-router-dom';
 import { 
   Key, X, Check, Eye, EyeOff, Loader2, Link as LinkIcon, 
-  Shield, Sliders, HardDrive, Info, Globe, Banana, Zap, 
-  Bot, Search, RefreshCw, ChevronDown, ChevronUp, 
+  Shield, Sliders, Info, Globe, Banana, Zap, 
+  Bot, Search, RefreshCw, ChevronDown, ChevronUp, GripVertical,
   FileText, Image as ImageIcon, Video, Plus, Box, ArrowLeft 
 } from 'lucide-react';
 import { SettingsCard } from '../components/Settings/SettingsCard';
@@ -14,20 +14,25 @@ import Sidebar from '../components/Sidebar';
 import {
     ApiProviderConfig,
     ModelInfo,
+    buildMappedModelStorageEntry,
+    getModelDisplayLabel,
     getDefaultProviders,
     loadProviderSettings,
+    normalizeMappedModelId,
+    parseMappedModelStorageEntry,
+    refreshAllProviderModels,
     saveProviderSettings,
-    refreshProviderModels,
 } from '../services/provider-settings';
 
 type ApiProvider = 'gemini' | 'yunwu' | 'plato' | 'custom';
-type SettingsTab = 'api' | 'mapping' | 'hosting' | 'advanced' | 'storage' | 'about';
+type MappingCategory = 'script' | 'image' | 'video';
+type SettingsTab = 'api' | 'mapping' | 'hosting' | 'advanced' | 'about';
 const AUTO_IMAGE_OPTION_ID = 'Auto';
 
 const DEFAULT_MODEL_WHITELIST = [
     // 图片模型
     'gemini-3.1-flash-image-preview', 'gemini-3-pro-image-preview', 'gemini-2.5-flash-image',
-    'doubao-seedream-5-0-260128', 'gpt-image-1.5-all', 'flux-pro-max',
+    'doubao-seedream-5-0-260128', 'gpt-image-2', 'gpt-image-1.5-all', 'flux-pro-max',
     // 语言模型
     'gemini-3.1-pro-preview', 'gemini-3-pro-preview', 'gemini-3-flash-preview',
     'gemini-3-pro-preview-11-2025', 'gemini-3-pro-preview-thinking',
@@ -117,6 +122,10 @@ const SettingsPage: React.FC = () => {
     const [selectedScriptModels, setSelectedScriptModels] = useState<string[]>([]);
     const [selectedImageModels, setSelectedImageModels] = useState<string[]>([]);
     const [selectedVideoModels, setSelectedVideoModels] = useState<string[]>([]);
+    const [manualScriptModel, setManualScriptModel] = useState('');
+    const [manualImageModel, setManualImageModel] = useState('');
+    const [manualVideoModel, setManualVideoModel] = useState('');
+    const [manualProviderId, setManualProviderId] = useState('yunwu');
     const [showImgBBKeys, setShowImgBBKeys] = useState(false);
     const [showCustomHostKeys, setShowCustomHostKeys] = useState(false);
 
@@ -131,11 +140,25 @@ const SettingsPage: React.FC = () => {
 
     // Editing state
     const [editingProvider, setEditingProvider] = useState<ApiProviderConfig | null>(null);
+    const [draggingSelectedModel, setDraggingSelectedModel] = useState<string | null>(null);
+    const [dragOverSelectedModel, setDragOverSelectedModel] = useState<{
+        entry: string;
+        position: 'before' | 'after';
+    } | null>(null);
 
     const normalizeImageSelection = (models: string[]): string[] => {
         if (!Array.isArray(models) || models.length === 0) return [AUTO_IMAGE_OPTION_ID];
-        if (models.includes(AUTO_IMAGE_OPTION_ID)) return [AUTO_IMAGE_OPTION_ID];
-        return [models[0]];
+        const withoutAuto = models.filter((entry) => entry !== AUTO_IMAGE_OPTION_ID);
+        if (withoutAuto.length === 0) return [AUTO_IMAGE_OPTION_ID];
+        return Array.from(new Set(withoutAuto));
+    };
+
+    const moveItem = <T,>(items: T[], fromIndex: number, toIndex: number): T[] => {
+        if (fromIndex === toIndex) return items;
+        const next = [...items];
+        const [moved] = next.splice(fromIndex, 1);
+        next.splice(toIndex, 0, moved);
+        return next;
     };
 
     // Image Host Store (Reactive Hook)
@@ -150,6 +173,7 @@ const SettingsPage: React.FC = () => {
         setSelectedScriptModels(loaded.selectedScriptModels);
         setSelectedImageModels(normalizeImageSelection(loaded.selectedImageModels));
         setSelectedVideoModels(loaded.selectedVideoModels);
+        setManualProviderId(loaded.activeProviderId || 'yunwu');
         setVisualContinuity(loaded.visualContinuity);
         setSystemModeration(loaded.systemModeration);
         setAutoSave(loaded.autoSave);
@@ -158,37 +182,49 @@ const SettingsPage: React.FC = () => {
         setSaveStatus('idle');
     }, []);
 
-    const activeProvider = providers.find(p => p.id === activeProviderId) || providers[0];
-
+    const categoryMeta: Array<{
+        id: MappingCategory;
+        label: string;
+        hint: string;
+        multi: boolean;
+    }> = [
+        { id: 'script', label: '文本与推理模型', hint: '用于补全、分析、问答与多模态理解。', multi: true },
+        { id: 'image', label: '图片生成模型', hint: '用于电商生图、改图和工作流出图。', multi: true },
+        { id: 'video', label: '视频生成模型', hint: '用于视频工作流和动画生成。', multi: true },
+    ];
     useEffect(() => {
-        if (activeProviderId) {
-            handleRefreshModels(activeProviderId);
+        if (activeTab === 'mapping') {
+            void handleRefreshModels();
         }
-    }, [activeProviderId]);
+    }, [activeTab, providers]);
 
-    const handleRefreshModels = async (providerId: string) => {
+    const handleRefreshModels = async () => {
         setIsLoadingModels(true);
-        const formattedModels = await refreshProviderModels(providerId, providers);
+        try {
+            const formattedModels = await refreshAllProviderModels(providers);
+            setAvailableModels(formattedModels);
 
-        setAvailableModels(formattedModels);
+            const autoSelect = (
+                cat: MappingCategory,
+                currentSelected: string[],
+                setCurrent: React.Dispatch<React.SetStateAction<string[]>>,
+            ) => {
+                if (cat === 'image' || currentSelected.length > 0) return;
+                const newMatches = formattedModels
+                    .filter((m) => m.category === cat && DEFAULT_MODEL_WHITELIST.includes(m.id))
+                    .map((m) => buildMappedModelStorageEntry(m.providerId || activeProviderId, m.id))
+                    .filter(Boolean);
 
-        // 自动勾选逻辑：如果模型在白名单中，且目前未被手动勾选，则自动勾选
-        const autoSelect = (cat: 'script' | 'image' | 'video', currentSelected: string[], setCurrent: React.Dispatch<React.SetStateAction<string[]>>) => {
-            if (cat === 'image') return;
-            const newMatches = formattedModels
-                .filter(m => m.category === cat && DEFAULT_MODEL_WHITELIST.includes(m.id) && !currentSelected.includes(m.id))
-                .map(m => m.id);
-            
-            if (newMatches.length > 0) {
-                setCurrent(prev => [...new Set([...prev, ...newMatches])]);
-            }
-        };
+                if (newMatches.length > 0) {
+                    setCurrent(Array.from(new Set(newMatches)));
+                }
+            };
 
-        autoSelect('script', selectedScriptModels, setSelectedScriptModels);
-        autoSelect('image', selectedImageModels, setSelectedImageModels);
-        autoSelect('video', selectedVideoModels, setSelectedVideoModels);
-
-        setIsLoadingModels(false);
+            autoSelect('script', selectedScriptModels, setSelectedScriptModels);
+            autoSelect('video', selectedVideoModels, setSelectedVideoModels);
+        } finally {
+            setIsLoadingModels(false);
+        }
     };
 
     const handleSave = () => {
@@ -215,13 +251,128 @@ const SettingsPage: React.FC = () => {
     };
 
     const deleteProvider = (id: string) => {
-        if (!window.confirm('确定要删除此节点吗？')) return;
-        setProviders(prev => prev.filter(p => p.id !== id));
+        if (!window.confirm('确定要删除这个供应商吗？')) return;
+        setProviders((prev) => prev.filter((p) => p.id !== id));
         if (activeProviderId === id) setActiveProviderId('');
     };
 
+    const getSelectedModels = (category: MappingCategory): string[] => {
+        if (category === 'script') return selectedScriptModels;
+        if (category === 'image') return selectedImageModels;
+        return selectedVideoModels;
+    };
+
+    const getModelEntryMeta = (category: MappingCategory, entry: string) => {
+        if (category === 'image' && entry === AUTO_IMAGE_OPTION_ID) {
+            return {
+                raw: entry,
+                modelId: AUTO_IMAGE_OPTION_ID,
+                providerId: null,
+                providerName: '自动',
+                displayLabel: 'Auto',
+            };
+        }
+
+        const parsed = parseMappedModelStorageEntry(category, entry);
+        const provider = providers.find((item) => item.id === parsed.providerId);
+        return {
+            raw: entry,
+            modelId: parsed.modelId || entry,
+            providerId: parsed.providerId,
+            providerName: provider?.name || parsed.providerId || '默认供应商',
+            displayLabel: getModelDisplayLabel(parsed.modelId || entry),
+        };
+    };
+
+    const isModelSelected = (category: MappingCategory, model: ModelInfo): boolean => {
+        const expected = buildMappedModelStorageEntry(model.providerId || activeProviderId, model.id);
+        return getSelectedModels(category).some((entry) => {
+            if (entry === expected) return true;
+            const parsed = parseMappedModelStorageEntry(category, entry);
+            return parsed.modelId === normalizeMappedModelId(category, model.id) && (parsed.providerId || '') === (model.providerId || '');
+        });
+    };
+
+    const toggleModel = (category: MappingCategory, model: string | ModelInfo, providerId?: string) => {
+        const entry = typeof model === 'string'
+            ? buildMappedModelStorageEntry(providerId || manualProviderId, model)
+            : buildMappedModelStorageEntry(model.providerId || providerId || activeProviderId, model.id);
+        if (!entry) return;
+
+        if (category === 'script') {
+            setSelectedScriptModels((prev) => prev.includes(entry) ? prev.filter((id) => id !== entry) : [...prev, entry]);
+        } else if (category === 'image') {
+            if (typeof model === 'string' && model === AUTO_IMAGE_OPTION_ID) {
+                setSelectedImageModels([AUTO_IMAGE_OPTION_ID]);
+            } else {
+                setSelectedImageModels((prev) => {
+                    const base = prev.filter((id) => id !== AUTO_IMAGE_OPTION_ID);
+                    return base.includes(entry)
+                        ? base.filter((id) => id !== entry)
+                        : [...base, entry];
+                });
+            }
+        } else {
+            setSelectedVideoModels((prev) => prev.includes(entry) ? prev.filter((id) => id !== entry) : [...prev, entry]);
+        }
+    };
+
+    const removeSelectedModel = (category: MappingCategory, entry: string) => {
+        if (category === 'script') {
+            setSelectedScriptModels((prev) => prev.filter((id) => id !== entry));
+            return;
+        }
+        if (category === 'image') {
+            const next = selectedImageModels.filter((id) => id !== entry);
+            setSelectedImageModels(normalizeImageSelection(next));
+            return;
+        }
+        setSelectedVideoModels((prev) => prev.filter((id) => id !== entry));
+    };
+
+    const reorderSelectedModels = (category: MappingCategory, fromIndex: number, toIndex: number) => {
+        if (fromIndex === toIndex || fromIndex < 0 || toIndex < 0) return;
+
+        if (category === 'script') {
+            setSelectedScriptModels((prev) => moveItem(prev, fromIndex, toIndex));
+            return;
+        }
+        if (category === 'image') {
+            setSelectedImageModels((prev) => normalizeImageSelection(moveItem(prev, fromIndex, toIndex)));
+            return;
+        }
+        setSelectedVideoModels((prev) => moveItem(prev, fromIndex, toIndex));
+    };
+
+    const getDropPosition = (event: React.DragEvent<HTMLDivElement>): 'before' | 'after' => {
+        const rect = event.currentTarget.getBoundingClientRect();
+        const midpoint = rect.top + rect.height / 2;
+        return event.clientY < midpoint ? 'before' : 'after';
+    };
+
+    const clearSelectedModelDragState = () => {
+        setDraggingSelectedModel(null);
+        setDragOverSelectedModel(null);
+    };
+
+    const addManualModel = (category: MappingCategory) => {
+        const rawValue =
+            category === 'script'
+                ? manualScriptModel
+                : category === 'image'
+                    ? manualImageModel
+                    : manualVideoModel;
+        const normalized = rawValue.trim();
+        if (!normalized) return;
+        toggleModel(category, normalized, manualProviderId);
+
+        if (category === 'script') setManualScriptModel('');
+        else if (category === 'image') setManualImageModel('');
+        else setManualVideoModel('');
+    };
+
     const filteredModels = useMemo(() => {
-        return availableModels.filter(m => {
+        return availableModels.filter((m) => {
             if (m.id.toLowerCase().includes('embedding')) return false;
             const matchesCategory = m.category === expandedCategory;
             const matchesSearch = m.id.toLowerCase().includes(searchQuery.toLowerCase());
@@ -230,31 +381,32 @@ const SettingsPage: React.FC = () => {
         });
     }, [availableModels, searchQuery, brandFilter, expandedCategory]);
 
+    const visibleModels = useMemo(() => filteredModels.slice(0, visibleCount), [filteredModels, visibleCount]);
+    const availableBrands = useMemo(() => {
+        const brands = availableModels
+            .filter((model) => model.category === expandedCategory)
+            .map((model) => model.brand)
+            .filter((brand): brand is NonNullable<ModelInfo['brand']> => Boolean(brand));
+        return Array.from(new Set(brands)).sort((a, b) => a.localeCompare(b));
+    }, [availableModels, expandedCategory]);
+
     useEffect(() => {
         setVisibleCount(60);
-    }, [searchQuery, brandFilter, availableModels]);
+    }, [searchQuery, brandFilter, availableModels, expandedCategory]);
 
     const tabs: { id: SettingsTab; label: string; icon: any }[] = [
         { id: 'api', label: '服务商配置', icon: Key },
-        { id: 'hosting', label: '图床配置', icon: ImageIcon },
-        { id: 'advanced', label: '交互设置', icon: Sliders },
-        { id: 'storage', label: '缓存磁盘', icon: HardDrive },
-        { id: 'about', label: '系统架构', icon: Info },
+        { id: 'mapping', label: '模型映射', icon: Bot },
+        { id: 'hosting', label: '图床设置', icon: ImageIcon },
+        { id: 'advanced', label: '高级设置', icon: Sliders },
+        { id: 'about', label: '关于', icon: Info },
     ];
 
-    const toggleModel = (category: 'script' | 'image' | 'video', modelId: string) => {
-        if (category === 'script') {
-            setSelectedScriptModels(prev => prev.includes(modelId) ? prev.filter(id => id !== modelId) : [...prev, modelId]);
-        } else if (category === 'image') {
-            if (modelId === AUTO_IMAGE_OPTION_ID) {
-                setSelectedImageModels([AUTO_IMAGE_OPTION_ID]);
-            } else {
-                setSelectedImageModels([modelId]);
-            }
-        } else if (category === 'video') {
-            setSelectedVideoModels(prev => prev.includes(modelId) ? prev.filter(id => id !== modelId) : [...prev, modelId]);
-        }
-    };
+    const activeMappingCategory = (expandedCategory && categoryMeta.some((category) => category.id === expandedCategory)
+        ? expandedCategory
+        : 'image') as 'script' | 'image' | 'video';
+    const selectedModelsForExpanded = getSelectedModels(activeMappingCategory);
+
 
     return (
         <div className="flex min-h-screen bg-[#f8f9fa] selection:bg-black/5 transition-colors duration-500">
@@ -278,7 +430,7 @@ const SettingsPage: React.FC = () => {
                                     </span>
                                 )}
                             </h3>
-                            <p className="hidden lg:block text-[11px] lg:text-xs text-muted-foreground/60 uppercase tracking-[0.2em] mt-1.5 font-semibold">XC-STUDIO Infrastructure</p>
+                            <p className="hidden lg:block text-[11px] lg:text-xs text-muted-foreground/60 uppercase tracking-[0.2em] mt-1.5 font-semibold">Jacky-Studio Infrastructure</p>
                         </div>
                     </div>
                     <div className="flex items-center gap-4">
@@ -424,6 +576,340 @@ const SettingsPage: React.FC = () => {
                             </div>
                         )}
 
+                        {activeTab === 'mapping' && (
+                            <div className="space-y-8 animate-in fade-in slide-in-from-bottom-4 duration-500">
+                                <div className="flex flex-col gap-3 lg:flex-row lg:items-end lg:justify-between">
+                                    <div>
+                                        <h4 className="text-xl font-display font-bold text-gray-900">模型映射</h4>
+                                        <p className="text-xs text-gray-400 font-bold uppercase tracking-widest mt-1">Workflow Model Routing</p>
+                                    </div>
+                                    <div className="flex flex-wrap items-center gap-3">
+                                        <button
+                                            onClick={() => void handleRefreshModels()}
+                                            disabled={isLoadingModels}
+                                            className="inline-flex items-center gap-2 px-4 py-2.5 rounded-xl bg-white border border-gray-200 text-sm font-bold text-gray-700 hover:border-gray-400 transition-all disabled:opacity-60 disabled:cursor-not-allowed"
+                                        >
+                                            {isLoadingModels ? <Loader2 size={16} className="animate-spin" /> : <RefreshCw size={16} />}
+                                            刷新所有供应商模型
+                                        </button>
+                                        <div className="px-4 py-2.5 rounded-xl bg-white border border-gray-200 text-xs font-semibold text-gray-500">
+                                            已接入 <span className="text-gray-900">{providers.length}</span> 个供应商
+                                        </div>
+                                    </div>
+                                </div>
+
+                                <div className="grid grid-cols-1 xl:grid-cols-[340px_minmax(0,1fr)] gap-8">
+                                    <div className="space-y-6">
+                                        <SettingsCard
+                                            title="映射类别"
+                                            icon={<Bot size={18} />}
+                                            description="按能力类别指定默认模型，后续工作区里的局部手动选择会在此基础上覆盖。"
+                                        >
+                                            <div className="space-y-3 pt-4">
+                                                {categoryMeta.map((category) => {
+                                                    const isActive = activeMappingCategory === category.id;
+                                                    const selectedCount = getSelectedModels(category.id).length;
+                                                    return (
+                                                        <button
+                                                            key={category.id}
+                                                            onClick={() => setExpandedCategory(category.id)}
+                                                            className={`w-full rounded-2xl border p-4 text-left transition-all ${
+                                                                isActive
+                                                                    ? 'bg-black text-white border-black shadow-lg shadow-black/10'
+                                                                    : 'bg-white border-gray-200 hover:border-gray-400'
+                                                            }`}
+                                                        >
+                                                            <div className="flex items-start justify-between gap-4">
+                                                                <div>
+                                                                    <div className="text-sm font-bold tracking-tight">{category.label}</div>
+                                                                    <div className={`text-xs mt-1 ${isActive ? 'text-white/70' : 'text-gray-500'}`}>
+                                                                        {category.hint}
+                                                                    </div>
+                                                                </div>
+                                                                <div className={`text-[11px] font-bold px-2.5 py-1 rounded-full ${
+                                                                    isActive ? 'bg-white/10 text-white' : 'bg-gray-100 text-gray-600'
+                                                                }`}>
+                                                                    {selectedCount} 已选
+                                                                </div>
+                                                            </div>
+                                                        </button>
+                                                    );
+                                                })}
+                                            </div>
+                                        </SettingsCard>
+
+                                        <SettingsCard
+                                            title="手动添加模型"
+                                            icon={<Plus size={18} />}
+                                            description="当接口不返回模型列表时，也可以手动指定供应商和模型 ID。"
+                                        >
+                                            <div className="space-y-3 pt-4">
+                                                <div className="text-xs font-semibold text-gray-500">
+                                                    当前类别: <span className="text-gray-900">{categoryMeta.find((item) => item.id === activeMappingCategory)?.label}</span>
+                                                </div>
+                                                <SettingsSelect
+                                                    value={manualProviderId}
+                                                    onChange={(e) => setManualProviderId(e.target.value)}
+                                                >
+                                                    {providers.map((provider) => (
+                                                        <option key={provider.id} value={provider.id}>
+                                                            {provider.name}
+                                                        </option>
+                                                    ))}
+                                                </SettingsSelect>
+                                                <SettingsInput
+                                                    value={
+                                                        activeMappingCategory === 'script'
+                                                            ? manualScriptModel
+                                                            : activeMappingCategory === 'image'
+                                                                ? manualImageModel
+                                                                : manualVideoModel
+                                                    }
+                                                    onChange={(e) => {
+                                                        const nextValue = e.target.value;
+                                                        if (activeMappingCategory === 'script') setManualScriptModel(nextValue);
+                                                        else if (activeMappingCategory === 'image') setManualImageModel(nextValue);
+                                                        else setManualVideoModel(nextValue);
+                                                    }}
+                                                    placeholder="输入完整模型 ID，例如 gemini-3.1-pro-preview"
+                                                />
+                                                <button
+                                                    onClick={() => addManualModel(activeMappingCategory)}
+                                                    className="w-full inline-flex items-center justify-center gap-2 px-4 py-3 rounded-xl bg-black text-white text-sm font-bold hover:bg-gray-800 transition-all"
+                                                >
+                                                    <Plus size={16} />
+                                                    加入当前映射
+                                                </button>
+                                                {activeMappingCategory === 'image' && (
+                                                    <button
+                                                        onClick={() => setSelectedImageModels([AUTO_IMAGE_OPTION_ID])}
+                                                        className={`w-full inline-flex items-center justify-center gap-2 px-4 py-3 rounded-xl border text-sm font-bold transition-all ${
+                                                            selectedImageModels.includes(AUTO_IMAGE_OPTION_ID)
+                                                                ? 'bg-gray-900 text-white border-gray-900'
+                                                                : 'bg-white text-gray-700 border-gray-200 hover:border-gray-400'
+                                                        }`}
+                                                    >
+                                                        <ImageIcon size={16} />
+                                                        使用 Auto 图片路由
+                                                    </button>
+                                                )}
+                                            </div>
+                                        </SettingsCard>
+                                    </div>
+
+                                    <div className="space-y-6">
+                                        <SettingsCard
+                                            title="当前已选模型"
+                                            icon={<Check size={18} />}
+                                            description="这里保存的是全局默认映射。工作区局部手动选模型时，会优先覆盖这里。"
+                                        >
+                                            <div className="pt-4 space-y-4">
+                                                {selectedModelsForExpanded.length > 1 && (
+                                                    <div className="text-xs text-gray-500">
+                                                        可直接拖拽已选模型调整顺序，排在前面的模型会在工作区里优先显示和优先路由。
+                                                    </div>
+                                                )}
+                                                {selectedModelsForExpanded.length === 0 ? (
+                                                    <div className="rounded-2xl border border-dashed border-gray-200 bg-gray-50 px-4 py-6 text-sm text-gray-500">
+                                                        当前类别还没有选中模型。
+                                                    </div>
+                                                ) : (
+                                                    <div className="space-y-3">
+                                                        {selectedModelsForExpanded.map((entry, index) => {
+                                                            const meta = getModelEntryMeta(activeMappingCategory, entry);
+                                                            const showBeforeIndicator =
+                                                                dragOverSelectedModel?.entry === entry &&
+                                                                dragOverSelectedModel.position === 'before' &&
+                                                                draggingSelectedModel !== entry;
+                                                            const showAfterIndicator =
+                                                                dragOverSelectedModel?.entry === entry &&
+                                                                dragOverSelectedModel.position === 'after' &&
+                                                                draggingSelectedModel !== entry;
+                                                            return (
+                                                                <div
+                                                                    key={entry}
+                                                                    draggable={selectedModelsForExpanded.length > 1}
+                                                                    onDragStart={() => setDraggingSelectedModel(entry)}
+                                                                    onDragEnd={clearSelectedModelDragState}
+                                                                    onDragOver={(event) => {
+                                                                        if (!draggingSelectedModel || draggingSelectedModel === entry) return;
+                                                                        event.preventDefault();
+                                                                        const position = getDropPosition(event);
+                                                                        setDragOverSelectedModel((current) =>
+                                                                            current?.entry === entry && current.position === position
+                                                                                ? current
+                                                                                : { entry, position }
+                                                                        );
+                                                                    }}
+                                                                    onDragLeave={(event) => {
+                                                                        const nextTarget = event.relatedTarget as Node | null;
+                                                                        if (nextTarget && event.currentTarget.contains(nextTarget)) {
+                                                                            return;
+                                                                        }
+                                                                        setDragOverSelectedModel((current) =>
+                                                                            current?.entry === entry ? null : current
+                                                                        );
+                                                                    }}
+                                                                    onDrop={(event) => {
+                                                                        event.preventDefault();
+                                                                        if (!draggingSelectedModel || draggingSelectedModel === entry) return;
+                                                                        const fromIndex = selectedModelsForExpanded.indexOf(draggingSelectedModel);
+                                                                        const position = getDropPosition(event);
+                                                                        let targetIndex = index;
+                                                                        if (position === 'after') {
+                                                                            targetIndex += 1;
+                                                                        }
+                                                                        if (fromIndex < targetIndex) {
+                                                                            targetIndex -= 1;
+                                                                        }
+                                                                        reorderSelectedModels(activeMappingCategory, fromIndex, targetIndex);
+                                                                        clearSelectedModelDragState();
+                                                                    }}
+                                                                    className="relative"
+                                                                >
+                                                                    <div
+                                                                        className={`pointer-events-none absolute left-4 right-4 top-0 h-0.5 -translate-y-1/2 rounded-full bg-blue-500 transition-opacity ${
+                                                                            showBeforeIndicator ? 'opacity-100' : 'opacity-0'
+                                                                        }`}
+                                                                    />
+                                                                    <div
+                                                                        className={`pointer-events-none absolute left-4 right-4 bottom-0 h-0.5 translate-y-1/2 rounded-full bg-blue-500 transition-opacity ${
+                                                                            showAfterIndicator ? 'opacity-100' : 'opacity-0'
+                                                                        }`}
+                                                                    />
+                                                                    <div
+                                                                        className={`flex items-center gap-3 rounded-2xl border px-4 py-3 transition-all ${
+                                                                            draggingSelectedModel === entry
+                                                                                ? 'border-gray-900 bg-gray-900 text-white shadow-lg shadow-black/10'
+                                                                                : 'border-gray-200 bg-white text-gray-900 hover:border-gray-300'
+                                                                        } ${
+                                                                            selectedModelsForExpanded.length > 1
+                                                                                ? 'cursor-grab active:cursor-grabbing'
+                                                                                : ''
+                                                                        }`}
+                                                                    >
+                                                                        <div
+                                                                            className={`flex h-10 w-10 shrink-0 items-center justify-center rounded-xl border ${
+                                                                                draggingSelectedModel === entry
+                                                                                    ? 'border-white/15 bg-white/10 text-white/80'
+                                                                                    : 'border-gray-200 bg-gray-50 text-gray-500'
+                                                                            }`}
+                                                                            aria-hidden="true"
+                                                                        >
+                                                                            <GripVertical size={16} />
+                                                                        </div>
+                                                                        <div className="min-w-0 flex-1">
+                                                                            <div className="flex items-center gap-2">
+                                                                                <span
+                                                                                    className={`text-xs font-bold uppercase tracking-[0.18em] ${
+                                                                                        draggingSelectedModel === entry ? 'text-white/55' : 'text-gray-400'
+                                                                                    }`}
+                                                                                >
+                                                                                    #{index + 1}
+                                                                                </span>
+                                                                                <span className="truncate text-sm font-semibold">
+                                                                                    {meta.displayLabel}
+                                                                                </span>
+                                                                            </div>
+                                                                            <div
+                                                                                className={`mt-1 text-xs ${
+                                                                                    draggingSelectedModel === entry ? 'text-white/65' : 'text-gray-500'
+                                                                                }`}
+                                                                            >
+                                                                                {meta.providerName}
+                                                                            </div>
+                                                                        </div>
+                                                                        <button
+                                                                            onClick={() => removeSelectedModel(activeMappingCategory, entry)}
+                                                                            className={`flex h-8 w-8 shrink-0 items-center justify-center rounded-full transition-colors ${
+                                                                                draggingSelectedModel === entry
+                                                                                    ? 'text-white/70 hover:bg-white/10 hover:text-white'
+                                                                                    : 'text-gray-400 hover:bg-gray-100 hover:text-gray-700'
+                                                                            }`}
+                                                                            aria-label={`移除 ${meta.displayLabel}`}
+                                                                        >
+                                                                            <X size={14} />
+                                                                        </button>
+                                                                    </div>
+                                                                </div>
+                                                            );
+                                                        })}
+                                                    </div>
+                                                )}
+                                            </div>
+                                        </SettingsCard>
+
+                                        <SettingsCard
+                                            title="可选模型库"
+                                            icon={<Search size={18} />}
+                                            description="已聚合所有供应商返回的模型列表，可以直接跨供应商指定默认映射。"
+                                        >
+                                            <div className="space-y-4 pt-4">
+                                                <div className="grid grid-cols-1 lg:grid-cols-[minmax(0,1fr)_220px] gap-4">
+                                                    <div className="relative">
+                                                        <Search size={16} className="absolute left-4 top-1/2 -translate-y-1/2 text-gray-400" />
+                                                        <input
+                                                            value={searchQuery}
+                                                            onChange={(e) => setSearchQuery(e.target.value)}
+                                                            placeholder="搜索模型 ID"
+                                                            className="w-full h-12 rounded-xl border border-gray-200 bg-white pl-11 pr-4 text-sm outline-none focus:ring-4 focus:ring-black/5"
+                                                        />
+                                                    </div>
+                                                    <SettingsSelect
+                                                        value={brandFilter}
+                                                        onChange={(e) => setBrandFilter(e.target.value)}
+                                                    >
+                                                        <option value="all">全部品牌</option>
+                                                        {availableBrands.map((brand) => (
+                                                            <option key={brand} value={brand}>
+                                                                {brand}
+                                                            </option>
+                                                        ))}
+                                                    </SettingsSelect>
+                                                </div>
+
+                                                <div className="flex flex-wrap items-center gap-2 text-xs text-gray-500">
+                                                    <span className="font-semibold">当前类别:</span>
+                                                    <span className="px-2.5 py-1 rounded-full bg-gray-100 text-gray-700">
+                                                        {categoryMeta.find((item) => item.id === activeMappingCategory)?.label}
+                                                    </span>
+                                                    <span className="font-semibold">候选模型:</span>
+                                                    <span>{filteredModels.length}</span>
+                                                </div>
+
+                                                {visibleModels.length === 0 ? (
+                                                    <div className="rounded-2xl border border-dashed border-gray-200 bg-gray-50 px-4 py-8 text-sm text-gray-500">
+                                                        当前筛选条件下没有可选模型。可以先刷新模型列表，或手动输入模型 ID。
+                                                    </div>
+                                                ) : (
+                                                    <div className="grid grid-cols-1 2xl:grid-cols-2 gap-3">
+                                                        {visibleModels.map((model) => (
+                                                            <ModelCard
+                                                                key={`${model.providerId || 'default'}-${model.category}-${model.id}`}
+                                                                model={model}
+                                                                isSelected={isModelSelected(model.category, model)}
+                                                                onToggle={() => toggleModel(model.category, model)}
+                                                                providerName={model.provider || providers.find((item) => item.id === model.providerId)?.name || model.providerId || '默认供应商'}
+                                                            />
+                                                        ))}
+                                                    </div>
+                                                )}
+
+                                                {visibleModels.length < filteredModels.length && (
+                                                    <button
+                                                        onClick={() => setVisibleCount((prev) => prev + 60)}
+                                                        className="w-full px-4 py-3 rounded-xl border border-gray-200 bg-white text-sm font-bold text-gray-700 hover:border-gray-400 transition-all"
+                                                    >
+                                                        加载更多
+                                                    </button>
+                                                )}
+                                            </div>
+                                        </SettingsCard>
+                                    </div>
+                                </div>
+                            </div>
+                        )}
+
                         {activeTab === 'hosting' && (
                             <div className="space-y-8 animate-in fade-in slide-in-from-bottom-4 duration-500">
                                 <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
@@ -543,19 +1029,11 @@ const SettingsPage: React.FC = () => {
                             </div>
                         )}
 
-                        {activeTab === 'storage' && (
-                            <div className="flex flex-col items-center justify-center py-20 bg-gray-50/50 rounded-2xl border border-dashed border-gray-200">
-                                <HardDrive size={48} className="text-gray-300 mb-6" />
-                                <h4 className="text-lg font-bold text-gray-900 mb-2">架构节点加载中</h4>
-                                <p className="text-xs text-gray-400 max-w-xs leading-relaxed">当前版本 XC-Studio 仅支持本地存储，云端同步模块正在进行内测（预计 V5.0 加入）。</p>
-                            </div>
-                        )}
-
                         {activeTab === 'about' && (
                             <div className="space-y-10 max-w-4xl mx-auto">
                                 <div className="bg-foreground p-12 lg:p-16 rounded-lg text-background relative overflow-hidden shadow-2xl">
                                     <div className="relative z-10">
-                                        <h4 className="text-5xl lg:text-7xl font-display font-bold mb-4 tracking-tighter">XC-STUDIO</h4>
+                                        <h4 className="text-5xl lg:text-7xl font-display font-bold mb-4 tracking-tighter">Jacky-Studio</h4>
                                         <p className="text-primary text-xs lg:text-sm font-bold uppercase tracking-[0.4em] mb-12">System Architecture Engine V4.2.0</p>
                                         <div className="flex flex-wrap gap-4">
                                             <div className="px-5 py-2 bg-background/10 rounded-md text-[10px] font-bold backdrop-blur-md border border-background/20 uppercase tracking-widest">PRODUCTION STABLE</div>
@@ -671,3 +1149,5 @@ const SettingsPage: React.FC = () => {
 };
 
 export default SettingsPage;
+
+

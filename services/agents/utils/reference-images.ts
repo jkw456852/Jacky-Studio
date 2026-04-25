@@ -48,8 +48,8 @@ export function collectReferenceCandidates(
   const maxAttachmentFallback = preferHostedUrls && uploaded.length > 0 ? 2 : Number.POSITIVE_INFINITY;
   let attachmentFallbackCount = 0;
   (input.attachments || []).forEach((file, index) => {
-      // [XC-STUDIO] 修正：如果该附件带有 markerInfo 且其 parentUrl 已经在 seen 中，则跳过计件
-      // 这里的 logic 是为了防止 1+1=2 的认知错误
+      // [Jacky-Studio] 如果该附件带有 markerInfo，且其 parentUrl 已经在 seen 中，则跳过计入候选。
+      // 这里保留这层判断，是为了避免同一素材被 parent + attachment 重复统计。
       const fileAny = file as any;
       if (fileAny?.markerInfo?.parentUrl && seen.has(fileAny.markerInfo.parentUrl)) {
         return; 

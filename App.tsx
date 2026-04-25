@@ -9,6 +9,10 @@ const Projects = lazy(() => import('./pages/Projects'));
 const Settings = lazy(() => import('./pages/Settings'));
 const VideoWorkspace = lazy(() => import('./pages/VideoWorkspace'));
 const Landing = lazy(() => import('./pages/Landing'));
+// 用户管理页面
+const UserLogin = lazy(() => import('./pages/User/Login'));
+const UserRegister = lazy(() => import('./pages/User/Register'));
+const UserForgotPassword = lazy(() => import('./pages/User/ForgotPassword'));
 
 const App: React.FC<{ onExit?: () => void }> = ({ onExit }) => {
   return (
@@ -24,6 +28,10 @@ const App: React.FC<{ onExit?: () => void }> = ({ onExit }) => {
             {/* 新版Workspace - 使用Store和组件化架构 */}
             <Route path={`${ROUTES.workspaceNew}/:id`} element={<WorkspaceNew />} />
             <Route path={ROUTES.settings} element={<Settings />} />
+            {/* 用户管理页面 */}
+            <Route path={ROUTES.userLogin} element={<UserLogin />} />
+            <Route path={ROUTES.userRegister} element={<UserRegister />} />
+            <Route path={ROUTES.userForgotPassword} element={<UserForgotPassword />} />
             <Route path="*" element={<Navigate to={ROUTES.dashboard} replace />} />
           </Routes>
         </Suspense>

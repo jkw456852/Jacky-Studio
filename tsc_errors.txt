@@ -1,3 +1,0 @@
-pages/Workspace/components/InputArea.tsx(119,2): error TS17008: JSX element 'div' has no corresponding closing tag.
-pages/Workspace/components/InputArea.tsx(777,1): error TS1381: Unexpected token. Did you mean `{'}'}` or `&rbrace;`?
-pages/Workspace/components/InputArea.tsx(778,1): error TS1005: '</' expected.

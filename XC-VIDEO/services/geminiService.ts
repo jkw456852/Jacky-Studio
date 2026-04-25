@@ -54,7 +54,7 @@ export const getRawConfig = () => {
     const rawApiKey = process.env.API_KEY || providerApiKey || legacyKey;
 
     if (!rawApiKey) {
-        throw new Error("API Key is missing. Please configure your API Key in XC-STUDIO Settings.");
+        throw new Error("API Key is missing. Please configure your API Key in Jacky-Studio Settings.");
     }
 
     // --- Polling / Random Selection Logic ---
@@ -260,7 +260,7 @@ export const extractLastFrame = (videoSrc: string): Promise<string> => {
 // --- System Prompts ---
 
 const SYSTEM_INSTRUCTION = `
-You are XcAISTUDIO AI, an expert multimedia creative assistant.
+You are Jacky-Studio Video AI, an expert multimedia creative assistant.
 Your goal is to assist users in generating images, videos, audio, and scripts.
 Always be concise, professional, and helpful.
 When the user asks for creative ideas, provide vivid, detailed descriptions suitable for generative AI prompts.
@@ -309,7 +309,7 @@ const HELP_ME_WRITE_INSTRUCTION = `
 生成三个不同层次的版本，以满足不同需求。
 
 #### 版本一：简洁关键词 (Concise Keywords)
-* **策略：** 仅提取主体、动作、背景和最核心的 3-5 个关键词。关键词之间用逗号 , 分隔，**不使用复杂的句子结构**。
+* **策略：** 仅提取主体、动作、背景和最核心的 3-5 个关键词。关键词之间用逗号 \`,\` 分隔，**不使用复杂的句子结构**。
 
 #### 版本二：标准结构化提示 (Standard Structured Prompt)
 * **策略：** 必须采用结构化清单格式。将描述拆解为以下**权重递减**的明确元素标签，并填充专业细节：
@@ -330,7 +330,7 @@ const HELP_ME_WRITE_INSTRUCTION = `
 1.  **负面提示 (Negative Prompt / NO-LIST)**
     * **要求：** 基于用户的输入主题，预判并列出通常会降低结果质量的常见负面元素（如：模糊、畸形、低质量、水印、文字）。
 2.  **核心参数调整建议 (Parameter Suggestions)**
-    * **要求：** 提供可调整的专业参数，包括：**画面比例 (Aspect Ratio)**、**镜头语言 (Lens/Shot Type)**、**模型/风格权重 (Style Weight)**（例如：::2.5 来强调某一元素）、以及**（文本适用）** **语气 (Tone)** 和 **输出格式 (Output Format)**。
+    * **要求：** 提供可调整的专业参数，包括：**画面比例 (Aspect Ratio)**、**镜头语言 (Lens/Shot Type)**、**模型/风格权重 (Style Weight)**（例如：\`::2.5\` 来强调某一元素）、以及**（文本适用）** **语气 (Tone)** 和 **输出格式 (Output Format)**。
 
 ### 步骤 4: 自我校验与下一步 (Self-Correction & Next Step)
 
@@ -361,7 +361,7 @@ const HELP_ME_WRITE_INSTRUCTION = `
 * **负面提示 (Negative Prompt):**
     * [预判并列出不希望出现的元素]
 * **核心参数与权重建议:**
-    * [专业参数建议列表，包含权重概念 (如 ::2.0)]
+    * [专业参数建议列表，包含权重概念 (如 \`::2.0\`)]
 
 ### 💡 优化说明与下一步 (Rationale & Next Step)
 
@@ -560,7 +560,7 @@ export const generateVideo = async (
                     if (!res.ok) {
                         const errText = await res.text();
                         if (res.status === 503 || errText.includes('503')) {
-                            throw new Error(`Yunwu Video API Error (503): 该模型在当前分组下没有可用渠道。请尝试在设置中切换“API 分组”（如 premium）并确保该分组下有 Grok 模型权限。原始错误: ${errText}`);
+                            throw new Error(`Yunwu Video API Error (503): 当前云雾视频节点不可用。请确认所填 API 分组是 premium，并且该账号已开通 Grok 视频能力。${errText}`);
                         }
                         throw new Error(`Yunwu Video API Error (${res.status}): ${errText}`);
                     }

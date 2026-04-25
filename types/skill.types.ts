@@ -1,8 +1,16 @@
 import { ImageModel, VideoModel } from './common';
 
+export interface ImageTextPolicy {
+  enforceChinese?: boolean;
+  requiredCopy?: string;
+}
+
+export type PromptLanguagePolicy = 'original-zh' | 'translate-en';
+
 export interface ImageGenSkillParams {
   prompt: string;
   model: ImageModel;
+  providerId?: string | null;
   aspectRatio: string;
   imageSize?: '1K' | '2K' | '4K';
   referenceImage?: string;
@@ -14,6 +22,8 @@ export interface ImageGenSkillParams {
   referenceStrength?: number;
   referencePriority?: 'first' | 'all';
   referenceMode?: 'style' | 'product';
+  promptLanguagePolicy?: PromptLanguagePolicy;
+  textPolicy?: ImageTextPolicy;
   brandContext?: {
     colors?: string[];
     style?: string;
@@ -53,5 +63,6 @@ export interface TouchEditSkillParams {
   regionHeight: number;
   editInstruction: string;
   aspectRatio?: string;
+  imageSize?: '1K' | '2K' | '4K';
   preservePrompt?: string;
 }

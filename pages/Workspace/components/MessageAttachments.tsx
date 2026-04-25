@@ -1,10 +1,16 @@
 import React from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import ReactDOM from 'react-dom';
+import type { WorkspaceMarkerInfo } from '../../../types';
+
+type MessageAttachmentMetadata = {
+  markerName?: string;
+  markerInfo?: WorkspaceMarkerInfo;
+};
 
 interface MessageAttachmentsProps {
   attachments?: string[];
-  attachmentMetadata?: any[];
+  attachmentMetadata?: MessageAttachmentMetadata[];
   onPreview?: (url: string) => void;
 }
 

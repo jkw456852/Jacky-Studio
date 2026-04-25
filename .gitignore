@@ -37,3 +37,36 @@ public/xc-video/*.map
 
 # Windows/command redirection accidents
 nul
+
+# Local workspace artifacts
+tmp/
+.tmp/
+.tmp*.patch
+.tmp*.txt
+.claude/worktrees/
+.claude/skills/
+.codebuddy/
+.jk-studio-runtime/
+.roo/
+.roomodes
+.xc-studio-runtime/
+XC-STUDIO.code-workspace
+test-results/
+__codex_patch.*
+zz_test_apply_patch.txt
+.codex-dev-*.log
+.vite-dev-*.log
+
+# Codex local backups and recovery files
+*.bak
+*.bak-*
+*.codex-backup-*
+*.codex-broken-*
+*.broken-backup
+*.broken-backup.*
+*.corrupted-*
+pages/*.codex-backup-*.tsx.bak
+pages/**/*.codex-backup-*.tsx.bak
+pages/*.broken-backup
+pages/**/*.broken-backup
+pages/**/*.broken-backup.*

@@ -34,6 +34,7 @@ export async function touchEditSkill(params: TouchEditSkillParams): Promise<{
       prompt: `${params.preservePrompt || 'Preserve overall composition, identity, lighting, materials, text layout, and all untouched regions.'} Edit only the target region at position (${params.regionX}, ${params.regionY}), size ${params.regionWidth}x${params.regionHeight}. Instruction: ${params.editInstruction}`,
       model: 'gemini-3-pro-image-preview',
       aspectRatio: params.aspectRatio || '1:1',
+      imageSize: params.imageSize,
     });
 
     return { analysis, editedImage: editedImage || null };

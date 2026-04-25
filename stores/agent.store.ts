@@ -2,24 +2,51 @@ import { create } from 'zustand';
 import { devtools } from 'zustand/middleware';
 import { immer } from 'zustand/middleware/immer';
 import { AgentTask, AgentType } from '../types/agent.types';
-import { ChatMessage, InputBlock, ImageModel, VideoModel } from '../types';
+import { CanvasElement, ChatMessage, InputBlock, ImageModel, VideoModel, WorkspaceInputFile } from '../types';
 
-export type AttachmentSource = 'canvas' | 'upload';
+type VideoGenDuration = NonNullable<CanvasElement['genDuration']>;
+type VideoGenQuality = NonNullable<CanvasElement['genQuality']>;
+
+export interface AgentComposerState {
+  inputBlocks: InputBlock[];
+  activeBlockId: string;
+  selectionIndex: number | null;
+  pendingAttachments: AttachmentItem[];
+  confirmedAttachments: AttachmentItem[];
+}
+
+export interface AgentGenerationState {
+  imageGenRatio: string;
+  imageGenRes: '1K' | '2K' | '4K';
+  imageGenCount: 1 | 2 | 3 | 4;
+  imageGenUploads: File[];
+  isPickingFromCanvas: boolean;
+  videoGenRatio: string;
+  videoGenDuration: VideoGenDuration;
+  videoGenQuality: VideoGenQuality;
+  videoGenModel: VideoModel;
+  videoGenMode: 'startEnd' | 'multiRef';
+  videoStartFrame: File | null;
+  videoEndFrame: File | null;
+  videoMultiRefs: File[];
+  showVideoModelDropdown: boolean;
+}
+
+export type AttachmentSource = 'upload' | 'canvas';
 
 export interface AttachmentItem {
   id: string;
-  file: File;
+  file: WorkspaceInputFile;
   source: AttachmentSource;
   canvasElId?: string;
 }
 
-const ensureAttachmentId = (file: File): string => {
-  const fileAny = file as any;
-  if (typeof fileAny._attachmentId === 'string' && fileAny._attachmentId) {
-    return fileAny._attachmentId;
+const ensureAttachmentId = (file: WorkspaceInputFile): string => {
+  if (typeof file._attachmentId === 'string' && file._attachmentId) {
+    return file._attachmentId;
   }
   const id = `att-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
-  fileAny._attachmentId = id;
+  file._attachmentId = id;
   return id;
 };
 
@@ -34,20 +61,27 @@ const collectConfirmedAttachmentsFromBlocks = (blocks: InputBlock[]): Attachment
     if (seen.has(id)) continue;
     seen.add(id);
 
-    const fileAny = file as any;
-    const source: AttachmentSource = (fileAny._canvasElId || fileAny._canvasAutoInsert) ? 'canvas' : 'upload';
+    const source: AttachmentSource = (file._canvasElId || file._canvasAutoInsert) ? 'canvas' : 'upload';
     items.push({
       id,
       file,
       source,
-      canvasElId: typeof fileAny._canvasElId === 'string' ? fileAny._canvasElId : undefined,
+      canvasElId: typeof file._canvasElId === 'string' ? file._canvasElId : undefined,
     });
   }
 
   return items;
 };
 
-const appendFileBlockToInput = (state: any, file: File) => {
+type InputComposerState = Pick<
+  AgentComposerState,
+  'inputBlocks' | 'activeBlockId' | 'selectionIndex'
+>;
+
+const appendFileBlockToInput = (
+  state: InputComposerState,
+  file: WorkspaceInputFile,
+) => {
   if (state.inputBlocks.length === 0) {
     state.inputBlocks.push({ id: `text-${Date.now()}`, type: 'text', text: '' });
   }
@@ -115,11 +149,7 @@ interface AgentState {
 
   // 消息和输入
   messages: ChatMessage[];
-  inputBlocks: InputBlock[];
-  activeBlockId: string;
-  selectionIndex: number | null;
-  pendingAttachments: AttachmentItem[];
-  confirmedAttachments: AttachmentItem[];
+  composer: AgentComposerState;
 
   // 聊天状态
   isTyping: boolean;
@@ -128,23 +158,12 @@ interface AgentState {
   modelMode: 'thinking' | 'fast';
   webEnabled: boolean;
   imageModelEnabled: boolean;
+  translatePromptToEnglish: boolean;
+  enforceChineseTextInImage: boolean;
+  requiredChineseCopy: string;
 
   // 图像生成器配置
-  imageGenRatio: string;
-  imageGenRes: string;
-  imageGenUploads: File[];
-  isPickingFromCanvas: boolean;
-
-  // 视频生成器配置
-  videoGenRatio: string;
-  videoGenDuration: string;
-  videoGenQuality: string;
-  videoGenModel: VideoModel;
-  videoGenMode: 'startEnd' | 'multiRef';
-  videoStartFrame: File | null;
-  videoEndFrame: File | null;
-  videoMultiRefs: File[];
-  showVideoModelDropdown: boolean;
+  generation: AgentGenerationState;
 
   // 文本编辑
   detectedTexts: string[];
@@ -189,15 +208,19 @@ interface AgentState {
     setModelMode: (mode: 'thinking' | 'fast') => void;
     setWebEnabled: (enabled: boolean) => void;
     setImageModelEnabled: (enabled: boolean) => void;
+    setTranslatePromptToEnglish: (enabled: boolean) => void;
+    setEnforceChineseTextInImage: (enabled: boolean) => void;
+    setRequiredChineseCopy: (copy: string) => void;
 
     setImageGenRatio: (ratio: string) => void;
-    setImageGenRes: (res: string) => void;
+    setImageGenRes: (res: '1K' | '2K' | '4K') => void;
+    setImageGenCount: (count: 1 | 2 | 3 | 4) => void;
     setImageGenUploads: (files: File[]) => void;
     setIsPickingFromCanvas: (picking: boolean) => void;
 
     setVideoGenRatio: (ratio: string) => void;
-    setVideoGenDuration: (duration: string) => void;
-    setVideoGenQuality: (quality: string) => void;
+    setVideoGenDuration: (duration: VideoGenDuration) => void;
+    setVideoGenQuality: (quality: VideoGenQuality) => void;
     setVideoGenModel: (model: VideoModel) => void;
     setVideoGenMode: (mode: 'startEnd' | 'multiRef') => void;
     setVideoStartFrame: (file: File | null) => void;
@@ -218,38 +241,45 @@ interface AgentState {
   };
 }
 
-const initialState = {
+const initialState: Omit<AgentState, 'actions'> = {
   isAgentMode: false,
 
   currentTask: null,
 
   messages: [],
-  inputBlocks: [{ id: 'init', type: 'text' as const, text: '' }],
-  activeBlockId: 'init',
-  selectionIndex: null,
-  pendingAttachments: [] as AttachmentItem[],
-  confirmedAttachments: [] as AttachmentItem[],
+  composer: {
+    inputBlocks: [{ id: 'init', type: 'text' as const, text: '' }],
+    activeBlockId: 'init',
+    selectionIndex: null,
+    pendingAttachments: [] as AttachmentItem[],
+    confirmedAttachments: [] as AttachmentItem[],
+  },
 
   isTyping: false,
 
   modelMode: 'fast' as const,
   webEnabled: false,
   imageModelEnabled: false,
+  translatePromptToEnglish: false,
+  enforceChineseTextInImage: true,
+  requiredChineseCopy: '',
 
-  imageGenRatio: '1:1',
-  imageGenRes: '1K',
-  imageGenUploads: [] as File[],
-  isPickingFromCanvas: false,
-
-  videoGenRatio: '16:9',
-  videoGenDuration: '5s',
-  videoGenQuality: '1080p',
-  videoGenModel: 'veo-3.1-fast-generate-preview' as VideoModel,
-  videoGenMode: 'startEnd' as const,
-  videoStartFrame: null,
-  videoEndFrame: null,
-  videoMultiRefs: [] as File[],
-  showVideoModelDropdown: false,
+  generation: {
+    imageGenRatio: '1:1',
+    imageGenRes: '1K',
+    imageGenCount: 1,
+    imageGenUploads: [] as File[],
+    isPickingFromCanvas: false,
+    videoGenRatio: '16:9',
+    videoGenDuration: '5s',
+    videoGenQuality: '1080p',
+    videoGenModel: 'veo-3.1-fast-generate-preview' as VideoModel,
+    videoGenMode: 'startEnd' as const,
+    videoStartFrame: null,
+    videoEndFrame: null,
+    videoMultiRefs: [] as File[],
+    showVideoModelDropdown: false,
+  },
 
   detectedTexts: [],
   editedTexts: [],
@@ -269,9 +299,28 @@ export const useAgentStore = create<AgentState>()(
       actions: {
         setIsAgentMode: (mode) => set({ isAgentMode: mode }),
 
-        setCurrentTask: (task) => set({ currentTask: task }),
+        setCurrentTask: (task) => set((state) => {
+          if (!task) {
+            state.currentTask = null;
+            return;
+          }
+          // 自动把新的 progressMessage 追加到 progressLog（去重 + 保留历史）
+          const prevLog = state.currentTask?.progressLog || [];
+          const newMsg = task.progressMessage;
+          let log = prevLog;
+          if (newMsg && (prevLog.length === 0 || prevLog[prevLog.length - 1] !== newMsg)) {
+            log = [...prevLog, newMsg];
+          }
+          // 任务切换（新 id）时重置 log
+          if (state.currentTask?.id !== task.id) {
+            log = newMsg ? [newMsg] : [];
+          }
+          state.currentTask = { ...task, progressLog: log };
+        }),
 
         addMessage: (message) => set((state) => {
+          // 幂等：已存在相同 ID 的消息时跳过，防止重复 key 警告
+          if (state.messages.some(m => m.id === message.id)) return;
           state.messages.push(message);
         }),
 
@@ -291,66 +340,79 @@ export const useAgentStore = create<AgentState>()(
 
         setMessages: (messages) => set({ messages }),
 
-        clearMessages: () => set({ messages: [], inputBlocks: [{ id: 'init', type: 'text', text: '' }], pendingAttachments: [], confirmedAttachments: [] }),
+        clearMessages: () => set((state) => {
+          state.messages = [];
+          state.composer = {
+            ...initialState.composer,
+            inputBlocks: [...initialState.composer.inputBlocks],
+          };
+        }),
 
         setInputBlocks: (blocks) => {
           const normalized = normalizeInputBlocks(blocks);
-          set({ inputBlocks: normalized, confirmedAttachments: collectConfirmedAttachmentsFromBlocks(normalized) });
+          set((state) => {
+            state.composer.inputBlocks = normalized;
+            state.composer.confirmedAttachments = collectConfirmedAttachmentsFromBlocks(normalized);
+          });
         },
 
         addInputBlock: (block) => set((state) => {
-          state.inputBlocks.push(block);
-          state.confirmedAttachments = collectConfirmedAttachmentsFromBlocks(state.inputBlocks);
+          state.composer.inputBlocks.push(block);
+          state.composer.confirmedAttachments = collectConfirmedAttachmentsFromBlocks(state.composer.inputBlocks);
         }),
 
         removeInputBlock: (id) => set((state) => {
-          const idx = state.inputBlocks.findIndex(b => b.id === id);
+          const idx = state.composer.inputBlocks.findIndex(b => b.id === id);
           if (idx === -1) return;
 
-          const left = state.inputBlocks[idx - 1];
-          const right = state.inputBlocks[idx + 1];
+          const left = state.composer.inputBlocks[idx - 1];
+          const right = state.composer.inputBlocks[idx + 1];
 
           if (left?.type === 'text' && right?.type === 'text') {
             left.text = (left.text || '') + (right.text || '');
-            state.inputBlocks.splice(idx, 2);
+            state.composer.inputBlocks.splice(idx, 2);
           } else {
-            state.inputBlocks.splice(idx, 1);
-            if (state.inputBlocks.length === 0) {
-              state.inputBlocks.push({ id: `text-${Date.now()}`, type: 'text', text: '' });
+            state.composer.inputBlocks.splice(idx, 1);
+            if (state.composer.inputBlocks.length === 0) {
+              state.composer.inputBlocks.push({ id: `text-${Date.now()}`, type: 'text', text: '' });
             }
           }
 
-          state.confirmedAttachments = collectConfirmedAttachmentsFromBlocks(state.inputBlocks);
+          state.composer.confirmedAttachments = collectConfirmedAttachmentsFromBlocks(state.composer.inputBlocks);
         }),
 
         updateInputBlock: (id, updates) => set((state) => {
-          const block = state.inputBlocks.find(b => b.id === id);
+          const block = state.composer.inputBlocks.find(b => b.id === id);
           if (block) {
             Object.assign(block, updates);
-            state.confirmedAttachments = collectConfirmedAttachmentsFromBlocks(state.inputBlocks);
+            state.composer.confirmedAttachments = collectConfirmedAttachmentsFromBlocks(state.composer.inputBlocks);
           }
         }),
 
-        setActiveBlockId: (id) => set({ activeBlockId: id }),
-        setSelectionIndex: (index) => set({ selectionIndex: index }),
+        setActiveBlockId: (id) => set((state) => {
+          state.composer.activeBlockId = id;
+        }),
+        setSelectionIndex: (index) => set((state) => {
+          state.composer.selectionIndex = index;
+        }),
 
         insertInputFile: (file) => set((state) => {
-          const activeIndex = state.inputBlocks.findIndex(b => b.id === state.activeBlockId);
+          const activeIndex = state.composer.inputBlocks.findIndex(b => b.id === state.composer.activeBlockId);
 
           if (activeIndex === -1) {
             const fileBlock: InputBlock = { id: `file-${Date.now()}`, type: 'file', file };
             const textBlock: InputBlock = { id: `text-${Date.now() + 1}`, type: 'text', text: '' };
-            state.inputBlocks.push(fileBlock, textBlock);
-            state.activeBlockId = textBlock.id;
-            state.selectionIndex = 0;
+            state.composer.inputBlocks.push(fileBlock, textBlock);
+            state.composer.activeBlockId = textBlock.id;
+            state.composer.selectionIndex = 0;
             return;
           }
 
-          const activeBlock = state.inputBlocks[activeIndex];
+          const activeBlock = state.composer.inputBlocks[activeIndex];
 
           if (activeBlock.type === 'text') {
             const text = activeBlock.text || '';
-            const idx = state.selectionIndex !== null ? state.selectionIndex : text.length;
+            const idx = state.composer.selectionIndex !== null ? state.composer.selectionIndex : text.length;
             const preText = text.slice(0, idx);
             const postText = text.slice(idx);
             const newTextBlockId = `text-${Date.now() + 1}`;
@@ -361,75 +423,109 @@ export const useAgentStore = create<AgentState>()(
               { id: newTextBlockId, type: 'text', text: postText }
             ];
 
-            state.inputBlocks.splice(activeIndex, 1, ...newBlocks);
-            state.activeBlockId = newTextBlockId;
-            state.selectionIndex = 0;
+            state.composer.inputBlocks.splice(activeIndex, 1, ...newBlocks);
+            state.composer.activeBlockId = newTextBlockId;
+            state.composer.selectionIndex = 0;
             // Focus is handled reactively via useEffect on activeBlockId in the UI
           } else {
             const fileBlock: InputBlock = { id: `file-${Date.now()}`, type: 'file', file };
             const textBlock: InputBlock = { id: `text-${Date.now() + 1}`, type: 'text', text: '' };
-            state.inputBlocks.push(fileBlock, textBlock);
-            state.activeBlockId = textBlock.id;
-            state.selectionIndex = 0;
+            state.composer.inputBlocks.push(fileBlock, textBlock);
+            state.composer.activeBlockId = textBlock.id;
+            state.composer.selectionIndex = 0;
           }
 
-          state.confirmedAttachments = collectConfirmedAttachmentsFromBlocks(state.inputBlocks);
+          state.composer.confirmedAttachments = collectConfirmedAttachmentsFromBlocks(state.composer.inputBlocks);
         }),
 
         appendInputFile: (file) => set((state) => {
-          appendFileBlockToInput(state, file);
-          state.confirmedAttachments = collectConfirmedAttachmentsFromBlocks(state.inputBlocks);
+          appendFileBlockToInput(state.composer, file);
+          state.composer.confirmedAttachments = collectConfirmedAttachmentsFromBlocks(state.composer.inputBlocks);
         }),
 
         setPendingAttachments: (attachments) => set((state) => {
-          state.pendingAttachments = attachments;
+          state.composer.pendingAttachments = attachments;
         }),
 
         addPendingAttachment: (attachment) => set((state) => {
-          if (!state.pendingAttachments.find(a => a.id === attachment.id)) {
-            state.pendingAttachments.push(attachment);
+          if (!state.composer.pendingAttachments.find(a => a.id === attachment.id)) {
+            state.composer.pendingAttachments.push(attachment);
           }
         }),
 
         removePendingAttachment: (id) => set((state) => {
-          state.pendingAttachments = state.pendingAttachments.filter(a => a.id !== id);
+          state.composer.pendingAttachments = state.composer.pendingAttachments.filter(a => a.id !== id);
         }),
 
         confirmPendingAttachments: () => set((state) => {
-          const pendings = state.pendingAttachments;
+          const pendings = state.composer.pendingAttachments;
           if (pendings.length === 0) return;
 
           for (const pending of pendings) {
-            (pending.file as any)._canvasAutoInsert = false;
-            appendFileBlockToInput(state, pending.file);
+            pending.file._canvasAutoInsert = false;
+            appendFileBlockToInput(state.composer, pending.file);
           }
 
-          state.confirmedAttachments = collectConfirmedAttachmentsFromBlocks(state.inputBlocks);
-          state.pendingAttachments = [];
+          state.composer.confirmedAttachments = collectConfirmedAttachmentsFromBlocks(state.composer.inputBlocks);
+          state.composer.pendingAttachments = [];
         }),
 
-        clearPendingAttachments: () => set({ pendingAttachments: [] }),
+        clearPendingAttachments: () => set((state) => {
+          state.composer.pendingAttachments = [];
+        }),
 
         setIsTyping: (typing) => set({ isTyping: typing }),
 
         setModelMode: (mode) => set({ modelMode: mode }),
         setWebEnabled: (enabled) => set({ webEnabled: enabled }),
         setImageModelEnabled: (enabled) => set({ imageModelEnabled: enabled }),
+        setTranslatePromptToEnglish: (enabled) => set({ translatePromptToEnglish: enabled }),
+        setEnforceChineseTextInImage: (enabled) => set({ enforceChineseTextInImage: enabled }),
+        setRequiredChineseCopy: (copy) => set({ requiredChineseCopy: copy }),
 
-        setImageGenRatio: (ratio) => set({ imageGenRatio: ratio }),
-        setImageGenRes: (res) => set({ imageGenRes: res }),
-        setImageGenUploads: (files) => set({ imageGenUploads: files }),
-        setIsPickingFromCanvas: (picking) => set({ isPickingFromCanvas: picking }),
+        setImageGenRatio: (ratio) => set((state) => {
+          state.generation.imageGenRatio = ratio;
+        }),
+        setImageGenRes: (res) => set((state) => {
+          state.generation.imageGenRes = res;
+        }),
+        setImageGenCount: (count) => set((state) => {
+          state.generation.imageGenCount = count;
+        }),
+        setImageGenUploads: (files) => set((state) => {
+          state.generation.imageGenUploads = files;
+        }),
+        setIsPickingFromCanvas: (picking) => set((state) => {
+          state.generation.isPickingFromCanvas = picking;
+        }),
 
-        setVideoGenRatio: (ratio) => set({ videoGenRatio: ratio }),
-        setVideoGenDuration: (duration) => set({ videoGenDuration: duration }),
-        setVideoGenQuality: (quality) => set({ videoGenQuality: quality }),
-        setVideoGenModel: (model) => set({ videoGenModel: model }),
-        setVideoGenMode: (mode) => set({ videoGenMode: mode }),
-        setVideoStartFrame: (file) => set({ videoStartFrame: file }),
-        setVideoEndFrame: (file) => set({ videoEndFrame: file }),
-        setVideoMultiRefs: (refs) => set({ videoMultiRefs: refs }),
-        setShowVideoModelDropdown: (show) => set({ showVideoModelDropdown: show }),
+        setVideoGenRatio: (ratio) => set((state) => {
+          state.generation.videoGenRatio = ratio;
+        }),
+        setVideoGenDuration: (duration) => set((state) => {
+          state.generation.videoGenDuration = duration;
+        }),
+        setVideoGenQuality: (quality) => set((state) => {
+          state.generation.videoGenQuality = quality;
+        }),
+        setVideoGenModel: (model) => set((state) => {
+          state.generation.videoGenModel = model;
+        }),
+        setVideoGenMode: (mode) => set((state) => {
+          state.generation.videoGenMode = mode;
+        }),
+        setVideoStartFrame: (file) => set((state) => {
+          state.generation.videoStartFrame = file;
+        }),
+        setVideoEndFrame: (file) => set((state) => {
+          state.generation.videoEndFrame = file;
+        }),
+        setVideoMultiRefs: (refs) => set((state) => {
+          state.generation.videoMultiRefs = refs;
+        }),
+        setShowVideoModelDropdown: (show) => set((state) => {
+          state.generation.showVideoModelDropdown = show;
+        }),
 
         setDetectedTexts: (texts) => set({ detectedTexts: texts }),
         setEditedTexts: (texts) => set({ editedTexts: texts }),
@@ -451,6 +547,8 @@ export const useAgentMode = () => useAgentStore(s => s.isAgentMode);
 export const useAgentMessages = () => useAgentStore(s => s.messages);
 export const useAgentTyping = () => useAgentStore(s => s.isTyping);
 export const useCurrentTask = () => useAgentStore(s => s.currentTask);
-export const useInputBlocks = () => useAgentStore(s => s.inputBlocks);
+export const useInputBlocks = () => useAgentStore(s => s.composer.inputBlocks);
+export const useComposerState = () => useAgentStore(s => s.composer);
+export const useGenerationState = () => useAgentStore(s => s.generation);
 export const useModelMode = () => useAgentStore(s => s.modelMode);
 export const useAgentActions = () => useAgentStore(s => s.actions);

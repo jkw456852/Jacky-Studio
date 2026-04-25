@@ -1,4 +1,4 @@
-/**
+﻿/**
  * 项目标题头部组件
  * 
  * 展示如何在组件中管理项目标题状态
@@ -34,7 +34,7 @@ export const ProjectHeader: React.FC<ProjectHeaderProps> = ({
         onClick={() => navigate(ROUTES.landing)}
         className="w-10 h-10 bg-black rounded-full flex items-center justify-center text-white font-bold text-xs shadow-md hover:scale-105 transition"
       >
-        XC
+        JK
       </button>
 
       {/* Project Title */}
@@ -50,3 +50,5 @@ export const ProjectHeader: React.FC<ProjectHeaderProps> = ({
     </div>
   );
 };
+
+

@@ -107,7 +107,7 @@ export default async function handler(req: any, res: any) {
     const response = await fetch(targetUrl, {
       headers: {
         "User-Agent":
-          "Mozilla/5.0 (compatible; XC-Studio-ResearchBot/1.0; +https://xc-studio.vercel.app)",
+          "Mozilla/5.0 (compatible; Jacky-Studio-ResearchBot/1.0; +https://jacky-studio.vercel.app)",
       },
       signal: controller.signal,
     }).finally(() => clearTimeout(timeout));

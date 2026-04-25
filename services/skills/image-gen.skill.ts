@@ -18,25 +18,21 @@ export async function imageGenSkill(params: ImageGenSkillParams): Promise<string
     enhancedPrompt += `, style: ${params.brandContext.style}`;
   }
 
-  if (params.consistencyContext?.referenceSummary) {
-    enhancedPrompt += `\n\nConsistency anchor: ${params.consistencyContext.referenceSummary}`;
-  }
-
-  if (params.consistencyContext?.forbiddenChanges?.length) {
-    enhancedPrompt += `\nDo not change: ${params.consistencyContext.forbiddenChanges.join(', ')}`;
-  }
-
   return generateImageWithProvider(
     {
       prompt: enhancedPrompt,
+      providerId: params.providerId,
       aspectRatio: params.aspectRatio,
       imageSize: params.imageSize || '2K',
       referenceImage: normalizedReferenceImage,
       referenceImages: params.referenceImages,
+      maskImage: params.maskImage,
       referenceStrength: params.referenceStrength,
       referencePriority: params.referencePriority,
       referenceMode: params.referenceMode,
-      maskImage: params.maskImage,
+      promptLanguagePolicy: params.promptLanguagePolicy,
+      textPolicy: params.textPolicy,
+      consistencyContext: params.consistencyContext,
     },
     params.model
   );

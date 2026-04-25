@@ -7,18 +7,102 @@ import {
 import { ChatMessage } from '../../../types';
 import { MarkdownRenderer } from './MarkdownRenderer';
 import { ClothingStudioCards } from './workflow/ClothingStudioCards';
-import type { Requirements, ModelGenOptions } from '../../../types/workflow.types';
+import { EcommerceOneClickCards } from './workflow/EcommerceOneClickCards';
+import type {
+    EcommerceImageAnalysis,
+    EcommerceOverlayState,
+    EcommercePlanGroup,
+    EcommerceRecommendedType,
+    EcommerceResultItem,
+    EcommerceSupplementField,
+    Requirements,
+    ModelGenOptions,
+} from '../../../types/workflow.types';
+import {
+    deriveAgentMessageContent,
+    deriveAgentMessageImageCards,
+    deriveAgentMessageOneClickView,
+    deriveProposalPrompt,
+} from './AgentMessage.helpers';
+
+export type AgentMessageClothingActionsProps = {
+    onClothingSubmitRequirements?: (data: Requirements) => void;
+    onClothingGenerateModel?: (data: ModelGenOptions) => void;
+    onClothingPickModelCandidate?: (url: string) => void;
+    onClothingInsertToCanvas?: (url: string, label?: string) => void;
+    onClothingRetryFailed?: () => void;
+};
+
+export type AgentMessageEcommerceActionsProps = {
+    onEcommerceRefineAnalysis?: (feedback: string) => Promise<void> | void;
+    onEcommerceConfirmTypes?: (items: EcommerceRecommendedType[]) => void;
+    onEcommerceConfirmImageAnalyses?: (items: EcommerceImageAnalysis[]) => void;
+    onEcommerceRetryImageAnalysis?: (imageId: string) => void;
+    onEcommerceRewritePlanPrompt?: (
+        groups: EcommercePlanGroup[],
+        planItemId: string,
+        feedback?: string,
+    ) => Promise<string | null>;
+    onEcommerceGeneratePlanItem?: (
+        groups: EcommercePlanGroup[],
+        planItemId: string,
+    ) => Promise<void>;
+    onEcommerceGenerateExtraPlanItem?: (
+        groups: EcommercePlanGroup[],
+        typeId: string,
+    ) => Promise<void>;
+    onEcommerceOpenResultOverlayEditor?: (url: string) => void;
+    onEcommerceCloseResultOverlayEditor?: () => void;
+    onEcommerceSaveResultOverlayDraft?: (
+        url: string,
+        overlayState: EcommerceOverlayState | null,
+    ) => Promise<void> | void;
+    onEcommerceApplyResultOverlay?: (
+        url: string,
+        overlayState: EcommerceOverlayState | null,
+    ) => Promise<void> | void;
+    onEcommerceUploadResultOverlayFont?: (
+        url: string,
+        file: File,
+    ) => Promise<void> | void;
+    onEcommerceUploadResultOverlayIcon?: (
+        url: string,
+        file: File,
+    ) => Promise<void> | void;
+    onEcommerceResetResultOverlay?: (url: string) => Promise<void> | void;
+    onEcommercePromoteResult?: (url: string) => void;
+    onEcommercePromoteSelectedResults?: (urls: string[]) => void;
+    onEcommerceDeleteResult?: (url: string) => void;
+    onEcommerceConfirmPlans?: (groups: EcommercePlanGroup[]) => void;
+    onEcommerceConfirmSupplements?: (fields: EcommerceSupplementField[]) => void;
+    onEcommerceSelectModel?: (modelId: string, promptLanguage?: "zh" | "en" | "auto") => void;
+    onEcommerceSyncBatchPlanItemRatio?: (
+        planItemId: string,
+        ratio: string,
+    ) => Promise<void> | void;
+    onEcommerceSyncBatchPrompt?: (
+        planItemId: string,
+        prompt: string,
+    ) => Promise<void> | void;
+    onEcommerceRunBatchGenerate?: (
+        promptOverrides?: Record<string, string>,
+        options?: {
+            promptOnly?: boolean;
+            targetPlanItemIds?: string[];
+            preserveExistingResults?: boolean;
+        },
+    ) => void;
+    onEcommerceRetryFailedBatch?: () => void;
+    onEcommerceInsertToCanvas?: (result: EcommerceResultItem | string, label?: string) => void;
+};
 
 interface AgentMessageProps {
     message: ChatMessage;
     onPreview: (url: string) => void;
     onAction?: (action: string) => void;
     onSmartGenerate?: (prompt: string, proposalId?: string) => void;
-    onClothingSubmitRequirements?: (data: Requirements) => void;
-    onClothingGenerateModel?: (data: ModelGenOptions) => void;
-    onClothingPickModelCandidate?: (url: string) => void;
-    onClothingInsertToCanvas?: (url: string, label?: string) => void;
-    onClothingRetryFailed?: () => void;
+    clothingActions?: AgentMessageClothingActionsProps;
+    ecommerceActions?: AgentMessageEcommerceActionsProps;
 }
 
 export const AgentMessage: React.FC<AgentMessageProps> = ({
@@ -26,12 +110,43 @@ export const AgentMessage: React.FC<AgentMessageProps> = ({
     onPreview,
     onAction,
     onSmartGenerate,
-    onClothingSubmitRequirements,
-    onClothingGenerateModel,
-    onClothingPickModelCandidate,
-    onClothingInsertToCanvas,
-    onClothingRetryFailed,
+    clothingActions,
+    ecommerceActions,
 }) => {
+    const {
+        onClothingSubmitRequirements,
+        onClothingGenerateModel,
+        onClothingPickModelCandidate,
+        onClothingInsertToCanvas,
+        onClothingRetryFailed,
+    } = clothingActions || {};
+    const {
+        onEcommerceConfirmTypes,
+        onEcommerceRefineAnalysis,
+        onEcommerceConfirmImageAnalyses,
+        onEcommerceRetryImageAnalysis,
+        onEcommerceRewritePlanPrompt,
+        onEcommerceGenerateExtraPlanItem,
+        onEcommerceGeneratePlanItem,
+        onEcommerceOpenResultOverlayEditor,
+        onEcommerceCloseResultOverlayEditor,
+        onEcommerceSaveResultOverlayDraft,
+        onEcommerceApplyResultOverlay,
+        onEcommerceUploadResultOverlayFont,
+        onEcommerceUploadResultOverlayIcon,
+        onEcommerceResetResultOverlay,
+        onEcommercePromoteResult,
+        onEcommercePromoteSelectedResults,
+        onEcommerceDeleteResult,
+        onEcommerceConfirmPlans,
+        onEcommerceConfirmSupplements,
+        onEcommerceSelectModel,
+        onEcommerceSyncBatchPlanItemRatio,
+        onEcommerceSyncBatchPrompt,
+        onEcommerceRunBatchGenerate,
+        onEcommerceRetryFailedBatch,
+        onEcommerceInsertToCanvas,
+    } = ecommerceActions || {};
     const [isAnalysisExpanded, setIsAnalysisExpanded] = useState(false);
     const [copied, setCopied] = useState(false);
 
@@ -40,94 +155,26 @@ export const AgentMessage: React.FC<AgentMessageProps> = ({
         setCopied(true);
         setTimeout(() => setCopied(false), 2000);
     };
+    const { cleanText, proposals } = useMemo(
+        () => deriveAgentMessageContent(message),
+        [message],
+    );
 
-    const normalizeEscapedNewlines = (value: string): string =>
-        (value || '')
-            .replace(/\r\n/g, '\n')
-            .replace(/\\r\\n/g, '\n')
-            .replace(/\\n/g, '\n');
+    const agentData = message.agentData;
+    const imageCards = useMemo(
+        () => deriveAgentMessageImageCards(agentData),
+        [agentData],
+    );
 
-    // 解析 json:generation 块
-    const { cleanText, proposals } = useMemo(() => {
-        // 优先使用结构化 proposals（来自 AgentTask.output.proposals）
-        if (message.agentData?.proposals && message.agentData.proposals.length > 0) {
-            return { cleanText: message.text, proposals: message.agentData.proposals as any[] };
-        }
-
-        // 如果消息已经包含了生成的资产 url 或 assets，说明任务已自动执行，不再展示方案按钮
-        const hasExecuted = (message.agentData?.imageUrls?.length || 0) > 0 || (message.agentData?.assets?.length || 0) > 0;
-
-        const proposalRegex = /```json:generation\n([\s\S]*?)\n```/g;
-        const foundProposals: any[] = [];
-        let match;
-        
-        while ((match = proposalRegex.exec(message.text)) !== null) {
-            try {
-                // 如果已执行，我们跳过解析 proposals，只负责清理文本
-                if (!hasExecuted) {
-                    const parsed = JSON.parse(match[1]);
-                    foundProposals.push(parsed);
-                }
-            } catch (e) {
-                console.error("Failed to parse generation proposal", e);
-            }
-        }
-
-        const textWithoutProposals = normalizeEscapedNewlines(message.text.replace(proposalRegex, '').trim());
-        return { cleanText: textWithoutProposals, proposals: foundProposals };
-    }, [message.text, message.agentData]);
-
-    const agentData = message.agentData as any;
-    const imageCards = useMemo(() => {
-        const urls: string[] = agentData?.imageUrls || [];
-        const skillCalls: any[] = agentData?.skillCalls || [];
-        const successfulImageCalls = skillCalls.filter((s: any) => s?.success && s?.skillName === 'generateImage');
-
-        return urls.map((url, index) => {
-            const matched = successfulImageCalls[index];
-            const title =
-                matched?.description ||
-                matched?.title ||
-                `第 ${index + 1} 张`;
-            return {
-                url,
-                title,
-            };
-        });
-    }, [agentData]);
-
-    const oneClickView = useMemo(() => {
-        if (message.skillData?.id !== 'xcai-oneclick' && message.text.indexOf('SKYSPER One-Click') === -1) return { intro: '', sections: [] as Array<{ title: string; body: string }> };
-        const sections: Array<{ title: string; body: string }> = [];
-        const lines = cleanText.split('\n');
-        const intro: string[] = [];
-        let currentTitle = '';
-        let currentBody: string[] = [];
-
-        const pushCurrent = () => {
-            if (currentTitle && currentBody.length > 0) {
-                sections.push({ title: currentTitle, body: currentBody.join('\n').trim() });
-            }
-        };
-
-        for (const rawLine of lines) {
-            const line = rawLine.trim();
-            if (/^##\s+/.test(line)) {
-                pushCurrent();
-                currentTitle = line.replace(/^##\s+/, '').trim();
-                currentBody = [];
-            } else if (!currentTitle) {
-                intro.push(rawLine);
-            } else if (currentTitle) {
-                currentBody.push(rawLine);
-            }
-        }
-
-        pushCurrent();
-        return { intro: intro.join('\n').trim(), sections };
-    }, [cleanText, message.skillData?.id, message.text]);
+    const oneClickView = useMemo(
+        () => deriveAgentMessageOneClickView(cleanText, message),
+        [cleanText, message],
+    );
 
     const isWorkflowUi = message.kind === 'workflow_ui' && !!message.workflowUi;
+    const workflowType = message.workflowUi?.type || '';
+    const isClothingWorkflowUi = workflowType.startsWith('clothingStudio.');
+    const isEcommerceWorkflowUi = workflowType.startsWith('ecomOneClick.');
 
     return (
         <div className="w-full group">
@@ -160,14 +207,68 @@ export const AgentMessage: React.FC<AgentMessageProps> = ({
 
                 {isWorkflowUi && message.workflowUi && (
                     <div className="px-1 mt-1">
-                        <ClothingStudioCards
-                            message={message.workflowUi as any}
-                            onSubmitRequirements={(data) => onClothingSubmitRequirements?.(data)}
-                            onGenerateModel={(data) => onClothingGenerateModel?.(data)}
-                            onPickModelCandidate={(url) => onClothingPickModelCandidate?.(url)}
-                            onInsertToCanvas={(url, label) => onClothingInsertToCanvas?.(url, label)}
-                            onRetryFailed={() => onClothingRetryFailed?.()}
-                        />
+                        {isClothingWorkflowUi ? (
+                            <ClothingStudioCards
+                                message={message.workflowUi}
+                                onSubmitRequirements={(data) => onClothingSubmitRequirements?.(data)}
+                                onGenerateModel={(data) => onClothingGenerateModel?.(data)}
+                                onPickModelCandidate={(url) => onClothingPickModelCandidate?.(url)}
+                                onInsertToCanvas={(url, label) => onClothingInsertToCanvas?.(url, label)}
+                                onRetryFailed={() => onClothingRetryFailed?.()}
+                            />
+                        ) : null}
+                        {isEcommerceWorkflowUi ? (
+                            <EcommerceOneClickCards
+                                message={message.workflowUi}
+                                onRefineAnalysis={(feedback) => onEcommerceRefineAnalysis?.(feedback)}
+                                onConfirmTypes={(items) => onEcommerceConfirmTypes?.(items)}
+                                onConfirmImageAnalyses={(items) => onEcommerceConfirmImageAnalyses?.(items)}
+                                onRetryImageAnalysis={(imageId) => onEcommerceRetryImageAnalysis?.(imageId)}
+                                onRewritePlanPrompt={(groups, planItemId, feedback) =>
+                                    onEcommerceRewritePlanPrompt?.(groups, planItemId, feedback) ?? Promise.resolve(null)
+                                }
+                                onGeneratePlanItem={(groups, planItemId) =>
+                                    onEcommerceGeneratePlanItem?.(groups, planItemId) ?? Promise.resolve()
+                                }
+                                onGenerateExtraPlanItem={(groups, typeId) =>
+                                    onEcommerceGenerateExtraPlanItem?.(groups, typeId) ?? Promise.resolve()
+                                }
+                                onOpenResultOverlayEditor={(url) => onEcommerceOpenResultOverlayEditor?.(url)}
+                                onCloseResultOverlayEditor={() => onEcommerceCloseResultOverlayEditor?.()}
+                                onSaveResultOverlayDraft={(url, overlayState) =>
+                                    onEcommerceSaveResultOverlayDraft?.(url, overlayState) ?? Promise.resolve()
+                                }
+                                onApplyResultOverlay={(url, overlayState) =>
+                                    onEcommerceApplyResultOverlay?.(url, overlayState) ?? Promise.resolve()
+                                }
+                                onUploadResultOverlayFont={(url, file) =>
+                                    onEcommerceUploadResultOverlayFont?.(url, file) ?? Promise.resolve()
+                                }
+                                onUploadResultOverlayIcon={(url, file) =>
+                                    onEcommerceUploadResultOverlayIcon?.(url, file) ?? Promise.resolve()
+                                }
+                                onResetResultOverlay={(url) =>
+                                    onEcommerceResetResultOverlay?.(url) ?? Promise.resolve()
+                                }
+                                onPromoteResult={(url) => onEcommercePromoteResult?.(url)}
+                                onPromoteSelectedResults={(urls) => onEcommercePromoteSelectedResults?.(urls)}
+                                onDeleteResult={(url) => onEcommerceDeleteResult?.(url)}
+                                onConfirmPlans={(groups) => onEcommerceConfirmPlans?.(groups)}
+                                onConfirmSupplements={(fields) => onEcommerceConfirmSupplements?.(fields)}
+                                onSelectModel={(modelId, promptLanguage) => onEcommerceSelectModel?.(modelId, promptLanguage)}
+                                onSyncBatchPlanItemRatio={(planItemId, ratio) =>
+                                    onEcommerceSyncBatchPlanItemRatio?.(planItemId, ratio)
+                                }
+                                onSyncBatchPrompt={(planItemId, prompt) =>
+                                    onEcommerceSyncBatchPrompt?.(planItemId, prompt)
+                                }
+                                onRunBatchGenerate={(promptOverrides, options) =>
+                                    onEcommerceRunBatchGenerate?.(promptOverrides, options)
+                                }
+                                onRetryFailedBatch={() => onEcommerceRetryFailedBatch?.()}
+                                onInsertToCanvas={(url, label) => onEcommerceInsertToCanvas?.(url, label)}
+                            />
+                        ) : null}
                     </div>
                 )}
 
@@ -277,10 +378,15 @@ export const AgentMessage: React.FC<AgentMessageProps> = ({
                                 </p>
                                 <button
                                     onClick={() => {
+                                        const promptFromSkillCall = prop.skillCalls?.find(
+                                            (skillCall) => skillCall?.skillName === 'generateImage',
+                                        )?.params?.prompt;
                                         const prompt =
                                             prop.prompt ||
-                                            prop.skillCalls?.[0]?.params?.prompt ||
-                                            prop.skillCalls?.find((s: any) => s?.skillName === 'generateImage')?.params?.prompt ||
+                                            (typeof prop.skillCalls?.[0]?.params?.prompt === 'string'
+                                                ? prop.skillCalls[0]?.params?.prompt
+                                                : '') ||
+                                            (typeof promptFromSkillCall === 'string' ? promptFromSkillCall : '') ||
                                             '';
                                         if (prompt) {
                                             onSmartGenerate?.(prompt, prop.id);

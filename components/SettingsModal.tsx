@@ -1,11 +1,13 @@
-import React, { useState, useEffect, useMemo } from 'react';
+﻿import React, { useState, useEffect, useMemo } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { Key, X, Check, Eye, EyeOff, Loader2, Link as LinkIcon, Shield, Sliders, HardDrive, Info, Globe, Banana, Zap, Bot, Search, RefreshCw, ChevronDown, ChevronUp, FileText, Image as ImageIcon, Video, Plus, Box } from 'lucide-react';
 import { createPortal } from 'react-dom';
+import { useNavigate } from 'react-router-dom';
 import { SettingsCard } from './Settings/SettingsCard';
 import { SettingsControl, SettingsToggle, SettingsInput, SettingsSelect } from './Settings/SettingsControl';
 import { fetchAvailableModels } from '../services/gemini';
 import { useImageHostStore } from '../stores/imageHost.store';
+import { ROUTES } from '../utils/routes';
 import {
     ApiProviderConfig,
     ModelInfo,
@@ -24,6 +26,7 @@ interface SettingsModalProps {
 type ApiProvider = 'gemini' | 'yunwu' | 'plato' | 'custom';
 type SettingsTab = 'api' | 'mapping' | 'hosting' | 'advanced' | 'storage' | 'about';
 const AUTO_IMAGE_OPTION_ID = 'Auto';
+const DEFAULT_IMAGE_MODEL_ID = 'gemini-3-pro-image-preview';
 
 const RECOMMENDED_MODELS = {
     script: [
@@ -87,6 +90,7 @@ const ModelCard = React.memo(({
 ModelCard.displayName = 'ModelCard';
 
 export const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose }) => {
+    const navigate = useNavigate();
     const [activeTab, setActiveTab] = useState<SettingsTab>('api');
     const imageHost = useImageHostStore();
     const [providers, setProviders] = useState<ApiProviderConfig[]>(getDefaultProviders());
@@ -124,7 +128,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose })
     const [showCustomHostKeys, setShowCustomHostKeys] = useState(false);
 
     const normalizeImageSelection = (models: string[]): string[] => {
-        if (!Array.isArray(models) || models.length === 0) return [AUTO_IMAGE_OPTION_ID];
+        if (!Array.isArray(models) || models.length === 0) return [DEFAULT_IMAGE_MODEL_ID];
         if (models.includes(AUTO_IMAGE_OPTION_ID)) return [AUTO_IMAGE_OPTION_ID];
         return [models[0]];
     };
@@ -306,7 +310,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose })
                                     <Zap size={24} fill="white" />
                                 </div>
                                 <div>
-                                    <h2 className="text-lg font-black text-gray-900 leading-tight">XC-STUDIO</h2>
+                                    <h2 className="text-lg font-black text-gray-900 leading-tight">Jacky-Studio</h2>
                                     <p className="text-[10px] text-gray-400 font-bold uppercase tracking-widest leading-none mt-1">AI INFRASTRUCTURE</p>
                                 </div>
                             </div>
@@ -483,146 +487,46 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose })
 
                                 {activeTab === 'mapping' && (
                                     <div className="space-y-6 animate-in fade-in slide-in-from-bottom-4 duration-500">
-                                        <div className="grid grid-cols-1 gap-6">
-                                            {(['script', 'image', 'video'] as const).map(cat => (
-                                                <div key={cat} className="bg-white border border-gray-100 rounded-[2.5rem] shadow-sm overflow-hidden group/cat">
-                                                    <button
-                                                        onClick={() => setExpandedCategory(expandedCategory === cat ? null : cat)}
-                                                        className={`w-full px-10 py-8 flex items-center justify-between text-left transition-all ${expandedCategory === cat ? (cat === 'script' ? 'bg-purple-50/30' : cat === 'image' ? 'bg-rose-50/30' : 'bg-teal-50/30') : 'hover:bg-gray-50/50'}`}
-                                                    >
-                                                        <div className="flex items-center gap-6">
-                                                            <div className={`p-4 rounded-2xl shadow-sm transition-transform group-hover/cat:scale-105 ${cat === 'script' ? 'bg-purple-100 text-purple-600' : cat === 'image' ? 'bg-rose-100 text-rose-600' : 'bg-teal-100 text-teal-600'}`}>
-                                                                {cat === 'script' ? <Bot size={24} /> : cat === 'image' ? <ImageIcon size={24} /> : <Video size={24} />}
-                                                            </div>
-                                                            <div>
-                                                                <div className="text-[10px] text-gray-400 font-black uppercase tracking-[0.2em] mb-1">Functional Module</div>
-                                                                <h4 className="text-xl font-black text-gray-900 leading-tight">{cat === 'script' ? '智能体思考' : cat === 'image' ? '图像生成' : '视频生成'}</h4>
-                                                            </div>
-                                                        </div>
-                                                        <div className="flex items-center gap-4">
-                                                            <div className="text-right hidden sm:block">
-                                                                <div className="text-[10px] font-black text-gray-300 uppercase tracking-widest leading-none">Status</div>
-                                                                <div className="text-xs font-black text-gray-900 mt-1">已选 {(cat === 'script' ? selectedScriptModels : cat === 'image' ? selectedImageModels : selectedVideoModels).length} 项适配</div>
-                                                            </div>
-                                                            <div className={`w-10 h-10 rounded-xl flex items-center justify-center transition-all ${expandedCategory === cat ? 'bg-black text-white' : 'bg-gray-50 text-gray-400 group-hover/cat:bg-gray-100'}`}>
-                                                                {expandedCategory === cat ? <ChevronUp size={20} /> : <ChevronDown size={20} />}
-                                                            </div>
-                                                        </div>
-                                                    </button>
-
-                                                    <AnimatePresence>
-                                                        {expandedCategory === cat && (
-                                                            <motion.div initial={{ height: 0 }} animate={{ height: 'auto' }} exit={{ height: 0 }} className="overflow-hidden">
-                                                                <div className="p-10 border-t border-gray-50 bg-[#fafafa]">
-                                                                    <div className="flex items-center gap-4 mb-8">
-                                                                        <div className="relative flex-1">
-                                                                            <Search size={16} className="absolute left-6 top-1/2 -translate-y-1/2 text-gray-400" />
-                                                                            <input
-                                                                                value={searchQuery}
-                                                                                onChange={e => setSearchQuery(e.target.value)}
-                                                                                placeholder="搜索模型，支持品牌、版本..."
-                                                                                className="w-full pl-14 pr-6 py-4 bg-white border border-gray-200 rounded-2xl text-sm outline-none focus:ring-8 focus:ring-blue-500/5 focus:border-blue-500 transition-all"
-                                                                            />
-                                                                        </div>
-                                                                        <div className="flex flex-wrap gap-2 bg-gray-100 p-1.5 rounded-2xl shrink-0 overflow-visible no-scrollbar">
-                                                                            {[
-                                                                                { id: 'all', label: '全部' },
-                                                                                { id: 'OpenAI', label: 'OpenAI' },
-                                                                                { id: 'Flux', label: 'Flux' },
-                                                                                { id: 'Ideogram', label: 'Ideogram' },
-                                                                                { id: 'Fal', label: 'Fal' },
-                                                                                { id: 'Replicate', label: 'Replicate' },
-                                                                                { id: 'Midjourney', label: 'Midjourney' },
-                                                                                { id: 'Bailian', label: '阿里百炼' }, // cspell:disable-line
-                                                                                { id: 'Google', label: 'Google' },
-                                                                                { id: 'DeepSeek', label: 'DeepSeek' },
-                                                                                { id: 'Anthropic', label: 'Anthropic' },
-                                                                                { id: 'ChatGLM', label: '智谱' },
-                                                                                { id: 'Grok', label: 'Grok' },
-                                                                                { id: 'Moonshot', label: '月之暗面' },
-                                                                                { id: 'Minimax', label: 'Minimax' },
-                                                                                { id: 'Volcengine', label: '火山' }, // cspell:disable-line
-                                                                                { id: 'Wenxin', label: '文心' } // cspell:disable-line
-                                                                            ].map(b => (
-                                                                                <button
-                                                                                    key={b.id}
-                                                                                    onClick={() => setBrandFilter(b.id)}
-                                                                                    className={`px-4 py-2 rounded-xl text-xs font-black transition-all whitespace-nowrap ${brandFilter === b.id ? 'bg-white text-black shadow-lg shadow-black/5' : 'text-gray-400 hover:text-black'}`}
-                                                                                >
-                                                                                    {b.label}
-                                                                                </button>
-                                                                            ))}
-                                                                        </div>
-                                                                    </div>
-
-                                                                    <div className="mb-6">
-                                                                        <div className="flex items-center gap-2 mb-4">
-                                                                            <Zap size={14} className="text-orange-500 fill-orange-500" />
-                                                                            <span className="text-[10px] font-black text-gray-400 uppercase tracking-widest">热门推荐 (Hot Models)</span>
-                                                                        </div>
-                                                                        <div className="flex flex-wrap gap-2">
-                                                                            {(cat === 'image'
-                                                                                ? [{ id: AUTO_IMAGE_OPTION_ID, name: '自动选择 (Gemini Pro)', brand: 'Google' }, ...RECOMMENDED_MODELS[cat]]
-                                                                                : RECOMMENDED_MODELS[cat]
-                                                                            ).map(hot => {
-                                                                                const isSelected = (cat === 'script' ? selectedScriptModels : cat === 'image' ? selectedImageModels : selectedVideoModels).includes(hot.id);
-                                                                                // Only show if available in current provider's list OR it's a known placeholder
-                                                                                return (
-                                                                                    <button
-                                                                                        key={hot.id}
-                                                                                        onClick={() => toggleModel(cat, hot.id)}
-                                                                                        className={`px-4 py-2 rounded-xl text-xs font-bold border transition-all flex items-center gap-2 ${isSelected
-                                                                                            ? 'bg-blue-600 border-blue-600 text-white shadow-lg shadow-blue-500/20'
-                                                                                            : 'bg-white border-gray-100 text-gray-600 hover:border-blue-200'}`}
-                                                                                    >
-                                                                                        <span className="opacity-50 text-[10px]">{hot.brand}</span>
-                                                                                        {hot.name}
-                                                                                        {isSelected && <Check size={12} strokeWidth={3} />}
-                                                                                    </button>
-                                                                                );
-                                                                            })}
-                                                                        </div>
-                                                                    </div>
-
-                                                                    <div className="grid grid-cols-2 gap-4 max-h-[500px] overflow-y-auto pr-4 no-scrollbar pb-10">
-                                                                        {(cat === 'image'
-                                                                            ? [{ id: AUTO_IMAGE_OPTION_ID, name: AUTO_IMAGE_OPTION_ID, brand: 'Google', category: 'image', provider: activeProvider.name } as ModelInfo, ...filteredModels]
-                                                                            : filteredModels
-                                                                        ).slice(0, visibleCount).map(m => (
-                                                                            <ModelCard
-                                                                                key={m.id}
-                                                                                model={m}
-                                                                                isSelected={(cat === 'script' ? selectedScriptModels : cat === 'image' ? selectedImageModels : selectedVideoModels).includes(m.id)}
-                                                                                onToggle={() => toggleModel(cat, m.id)}
-                                                                                providerName={activeProvider.name}
-                                                                            />
-                                                                        ))}
-
-                                                                        {filteredModels.length > visibleCount && (
-                                                                            <button
-                                                                                onClick={() => setVisibleCount(prev => prev + 100)}
-                                                                                className="col-span-2 py-4 bg-gray-50 rounded-2xl text-xs font-black text-gray-400 hover:bg-gray-100 transition-colors mt-2"
-                                                                            >
-                                                                                显示更多模型 ({filteredModels.length - visibleCount}+)
-                                                                            </button>
-                                                                        )}
-
-                                                                        {filteredModels.length === 0 && (
-                                                                            <div className="col-span-2 text-center py-20 bg-white border border-dashed border-gray-200 rounded-[2rem]">
-                                                                                <div className="w-16 h-16 bg-gray-50 rounded-full flex items-center justify-center text-gray-300 mx-auto mb-4">
-                                                                                    {isLoadingModels ? <Loader2 size={24} className="animate-spin" /> : <Box size={24} />}
-                                                                                </div>
-                                                                                <h5 className="text-sm font-black text-gray-400 uppercase tracking-[0.2em]">No Engines Discovered</h5>
-                                                                                <p className="text-xs text-gray-300 mt-2">请检查 API Key 配置并刷新模型库</p>
-                                                                            </div>
-                                                                        )}
-                                                                    </div>
-                                                                </div>
-                                                            </motion.div>
-                                                        )}
-                                                    </AnimatePresence>
+                                        <div className="bg-white border border-gray-100 rounded-[2rem] p-8 shadow-sm">
+                                            <div className="flex items-start justify-between gap-6">
+                                                <div className="space-y-3">
+                                                    <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-blue-50 text-blue-600 text-[10px] font-black uppercase tracking-[0.2em]">
+                                                        <Bot size={14} />
+                                                        Single Source Of Truth
+                                                    </div>
+                                                    <div>
+                                                        <h4 className="text-xl font-black text-gray-900">模型映射已统一到完整设置中心</h4>
+                                                        <p className="text-sm text-gray-500 leading-7 max-w-2xl mt-2">
+                                                            这里不再维护第二套模型池和默认模型配置，避免 Home / Projects / Workspace 三处出现不同步。
+                                                            现在请统一在完整设置页里维护 `script / image / video` 映射。
+                                                        </p>
+                                                    </div>
                                                 </div>
-                                            ))}
+                                                <button
+                                                    onClick={() => {
+                                                        onClose();
+                                                        navigate(`${ROUTES.settings}?tab=mapping`);
+                                                    }}
+                                                    className="shrink-0 inline-flex items-center gap-2 px-5 py-3 rounded-2xl bg-blue-600 text-white text-sm font-black shadow-lg shadow-blue-500/20 hover:bg-blue-700 transition-all"
+                                                >
+                                                    <Globe size={16} />
+                                                    打开完整设置
+                                                </button>
+                                            </div>
+
+                                            <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mt-8">
+                                                {[
+                                                    { id: 'script', label: '文本 / 推理', count: selectedScriptModels.length, detail: selectedScriptModels.join(' / ') || '未配置' },
+                                                    { id: 'image', label: '图片', count: selectedImageModels.length, detail: selectedImageModels.join(' / ') || '未配置' },
+                                                    { id: 'video', label: '视频', count: selectedVideoModels.length, detail: selectedVideoModels.join(' / ') || '未配置' },
+                                                ].map(section => (
+                                                    <div key={section.id} className="rounded-2xl border border-gray-100 bg-[#fafafa] p-5">
+                                                        <div className="text-[11px] font-black uppercase tracking-[0.2em] text-gray-400">{section.label}</div>
+                                                        <div className="text-2xl font-black text-gray-900 mt-3">{section.count}</div>
+                                                        <div className="text-xs text-gray-500 leading-6 mt-3 break-all">{section.detail}</div>
+                                                    </div>
+                                                ))}
+                                            </div>
                                         </div>
                                     </div>
                                 )}
@@ -726,7 +630,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose })
                                                         </div>
                                                     </div>
                                                     <div className="space-y-2">
-                                                        <div className="text-xs font-black text-gray-800 ml-1">响应解析路径 (JSON Path)</div>
+                                                        <div className="text-xs font-black text-gray-800 ml-1">响应解析路径 (JKON Path)</div>
                                                         <SettingsInput 
                                                             value={imageHost.customConfig.responsePath} // cspell:disable-line
                                                             onChange={(e) => imageHost.actions.setCustomConfig({ responsePath: e.target.value })} // cspell:disable-line
@@ -787,7 +691,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose })
                                     <div className="space-y-8 animate-in fade-in slide-in-from-bottom-4 duration-500">
                                         <div className="bg-black p-14 rounded-[3rem] text-white relative overflow-hidden shadow-2xl">
                                             <div className="relative z-10">
-                                                <h4 className="text-5xl font-black mb-4 tracking-tighter">XC-STUDIO</h4>
+                                                <h4 className="text-5xl font-black mb-4 tracking-tighter">Jacky-Studio</h4>
                                                 <p className="text-blue-400 text-sm font-bold uppercase tracking-[0.3em] mb-10">Engine Version Pro Max 2.6.8</p>
                                                 <div className="flex gap-4">
                                                     <div className="px-5 py-2 bg-white/10 rounded-2xl text-[10px] font-black border border-white/10">STABLE RELEASE</div>
@@ -807,7 +711,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose })
                                             </SettingsCard>
                                             <SettingsCard title="渲染环境" icon={<Globe size={20} />}>
                                                 <SettingsControl label="浏览器" description="检测到内核：Chromium">
-                                                    <span className="text-xs font-black text-green-500">EXCELLENT</span>
+                                                    <span className="text-xs font-black text-green-500">ECCELLENT</span>
                                                 </SettingsControl>
                                             </SettingsCard>
                                         </div>
@@ -970,3 +874,5 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose })
         document.body
     );
 };
+
+

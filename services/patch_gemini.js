@@ -1,6 +1,7 @@
 const fs = require('fs');
-const path = 'c:\\Users\\xiaoc\\Desktop\\XC-STUDIO\\services\\gemini.ts';
-let content = fs.readFileSync(path, 'utf8');
+const path = require('path');
+const targetPath = path.join(process.cwd(), 'services', 'gemini.ts');
+let content = fs.readFileSync(targetPath, 'utf8');
 
 const oldCode = `export const getClient = () => {
     const config: any = { apiKey: getApiKey() };
@@ -52,7 +53,7 @@ if (content.includes('export const getClient')) {
     const originalBlock = content.substring(startIdx, endIdx);
     console.log('Original block found, patching...');
     content = content.replace(originalBlock, newCode);
-    fs.writeFileSync(path, content, 'utf8');
+    fs.writeFileSync(targetPath, content, 'utf8');
     console.log('Patch applied successfully!');
 } else {
     console.error('Could not find getClient function in gemini.ts');

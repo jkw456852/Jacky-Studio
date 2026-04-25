@@ -1,5 +1,5 @@
 import { useState, useCallback, useRef } from 'react';
-import { AgentType, AgentTask, ProjectContext, GeneratedAsset } from '../types/agent.types';
+import { AgentType, AgentTask, ProjectContext, GeneratedAsset, AgentTaskMetadata } from '../types/agent.types';
 import { routeToAgent, executeAgentTask, getAgentInfo, detectPipeline, executePipeline, PIPELINES } from '../services/agents';
 import { ChatMessage, CanvasElement } from '../types';
 import { assetsToCanvasElementsAtCenter } from '../utils/canvas-helpers';
@@ -19,7 +19,12 @@ import { optimizeUserText } from '../services/agents/prompt-optimizer/service';
 import { useProjectStore } from '../stores/project.store';
 import { rememberApprovedAsset } from '../services/topic-memory';
 
-const inferTaskModeFromRequest = (message: string, metadata?: Record<string, any>) => {
+const viteEnv =
+  ((import.meta as unknown as {
+    env?: Record<string, string | boolean | undefined>;
+  }).env || {});
+
+const inferTaskModeFromRequest = (message: string, metadata?: AgentTaskMetadata) => {
   const lower = String(message || '').toLowerCase();
   if (metadata?.enableWebSearch || metadata?.multimodalContext?.research) return 'research' as const;
   if (metadata?.skillData?.name?.toLowerCase?.().includes('text') || /文字|文案|改字|text/i.test(lower)) return 'text-edit' as const;
@@ -30,6 +35,8 @@ const inferTaskModeFromRequest = (message: string, metadata?: Record<string, any
 };
 
 const MAX_ORCHESTRATOR_HISTORY_MESSAGES = 6;
+const AGENT_EXECUTION_TIMEOUT_MS = 600_000; // 与 EnhancedBaseAgent 默认超时保持一致（10 分钟）
+const PIPELINE_EXECUTION_TIMEOUT_MS = 180_000;
 
 interface CanvasState {
   elements: CanvasElement[];
@@ -66,7 +73,7 @@ export function useAgentOrchestrator(options: UseAgentOrchestratorOptions) {
   const messageQueue = useRef<Array<{
     message: string;
     attachments?: File[];
-    metadata?: Record<string, any>;
+    metadata?: AgentTaskMetadata;
     userMessageId?: string;
   }>>([]);
 
@@ -138,21 +145,10 @@ export function useAgentOrchestrator(options: UseAgentOrchestratorOptions) {
   const processMessage = useCallback(async (
     message: string,
     attachments?: File[],
-    metadata?: Record<string, any>,
+    metadata?: AgentTaskMetadata,
     userMessageId?: string
   ): Promise<AgentTask | null> => {
     if (!message.trim()) return null;
-
-    // Normalize metadata flags used across layers.
-    // Workspace uses `forceToolCall` (e.g. marker edits) while agents gate execution via `forceSkills`.
-    // Keep them aligned to avoid "should force" paths diverging.
-    const normalizedMetadata: Record<string, any> = { ...(metadata || {}) };
-    if (normalizedMetadata.forceToolCall === true && normalizedMetadata.forceSkills !== true) {
-      normalizedMetadata.forceSkills = true;
-    }
-    if (normalizedMetadata.forceGenerateImage === true && normalizedMetadata.forceSkills !== true) {
-      normalizedMetadata.forceSkills = true;
-    }
 
     if (isProcessingRef.current) {
       messageQueue.current.push({ message, attachments, metadata, userMessageId });
@@ -188,26 +184,7 @@ export function useAgentOrchestrator(options: UseAgentOrchestratorOptions) {
 
           try {
             const uploadResults = await Promise.allSettled(
-              attachments.map(async (file) => {
-                if ((file as any).markerInfo && (file as any).markerInfo.fullImageUrl) {
-                  const fullUrl = (file as any).markerInfo.fullImageUrl;
-                  // 若原图已经是公网 HTTP 链接，则跳过上传，直接返回该公网链接
-                  if (/^https?:\/\//i.test(fullUrl) && !fullUrl.includes('localhost') && !fullUrl.includes('127.0.0.1')) {
-                    return fullUrl;
-                  }
-                  
-                  // 对于本地/Blob URL，提取并上传完整图片
-                  try {
-                    const res = await fetch(fullUrl);
-                    const blob = await res.blob();
-                    const fullFile = new File([blob], file.name || 'full.png', { type: blob.type });
-                    return uploadImage(fullFile);
-                  } catch (e) {
-                    console.warn('[useAgentOrchestrator] Failed to fetch full image for upload, falling back to crop', e);
-                  }
-                }
-                return uploadImage(file);
-              })
+              attachments.map((file) => uploadImage(file))
             );
             const failedUploads = uploadResults.filter(
               (result): result is PromiseRejectedResult => result.status === 'rejected'
@@ -240,21 +217,35 @@ export function useAgentOrchestrator(options: UseAgentOrchestratorOptions) {
 
       // Read conversation history from store (single source of truth)
       const hostProvider = useImageHostStore.getState().selectedProvider;
+      // 直接从 store 读取最新的 designSession，避免 React 闭包快照导致
+      // 新项目第一条消息仍携带旧项目 subjectAnchors/approvedAssetIds 的问题
+      const freshDesignSession = useProjectStore.getState().designSession;
       const updatedContext = {
         ...projectContext,
+        designSession: {
+          ...freshDesignSession,
+          brand: {
+            ...freshDesignSession.brand,
+            ...useProjectStore.getState().brandInfo,
+          },
+        },
         conversationHistory: useAgentStore.getState().messages.slice(-MAX_ORCHESTRATOR_HISTORY_MESSAGES)
       };
 
       const activeConversationId = String(projectContext.conversationId || '').trim();
       const topicId = String(
-        (normalizedMetadata as any)?.topicId ||
-        (activeConversationId ? getMemoryKey(projectContext.projectId, activeConversationId) : '') ||
-        ''
+        (
+          metadata?.topicId ||
+          (activeConversationId
+            ? getMemoryKey(projectContext.projectId, activeConversationId)
+            : '') ||
+          ''
+        )
       ).trim();
       let topicPinnedContext = '';
       let topicPinnedRefs: string[] = [];
       const projectActions = useProjectStore.getState().actions;
-      const inferredTaskMode = inferTaskModeFromRequest(message, normalizedMetadata);
+      const inferredTaskMode = inferTaskModeFromRequest(message, metadata);
       projectActions.setTaskMode(inferredTaskMode);
 
       if (topicId) {
@@ -284,9 +275,11 @@ export function useAgentOrchestrator(options: UseAgentOrchestratorOptions) {
         }
       }
 
-      const optimizerEnabled = import.meta.env.VITE_PROMPT_OPTIMIZER_ENABLED !== 'false';
-      const optimizerPipelineEnabled = import.meta.env.VITE_PROMPT_OPTIMIZER_PIPELINE_ENABLED !== 'false';
-      const isInternalCall = (metadata as any)?.internalCall === true;
+      const optimizerEnabled =
+        viteEnv.VITE_PROMPT_OPTIMIZER_ENABLED !== 'false';
+      const optimizerPipelineEnabled =
+        viteEnv.VITE_PROMPT_OPTIMIZER_PIPELINE_ENABLED !== 'false';
+      const isInternalCall = metadata?.internalCall === true;
 
       let messageForExecution = message;
       let pinnedAgent: AgentType | null = null;
@@ -354,7 +347,7 @@ export function useAgentOrchestrator(options: UseAgentOrchestratorOptions) {
             console.log(`[useAgentOrchestrator] Pipeline step ${stepIdx} done:`, stepResult.status);
             setCurrentTask(stepResult);
           }),
-          180000,
+          PIPELINE_EXECUTION_TIMEOUT_MS,
           '流水线执行超时，请稍后重试'
         );
         console.log('[useAgentOrchestrator] Pipeline request done');
@@ -400,7 +393,7 @@ export function useAgentOrchestrator(options: UseAgentOrchestratorOptions) {
         console.log('[useAgentOrchestrator] 发起路由请求...');
         decision = await withTimeout(
           routeToAgent(messageForExecution, updatedContext),
-          20000,
+          60000,
           '路由请求超时，请稍后重试'
         );
         console.log('[useAgentOrchestrator] 路由请求返回:', decision?.targetAgent);
@@ -449,37 +442,77 @@ export function useAgentOrchestrator(options: UseAgentOrchestratorOptions) {
         return responseTask;
       }
 
-       const taskMetadata = {
-         ...(normalizedMetadata || {}),
-         imageHostProvider: hostProvider,
-         topicId,
-         topicPinnedContext,
-         taskMode: inferredTaskMode,
-         originalMessage: message,
-         optimizedMessage: optimizedMessageForTrace,
-         optimizerUsed,
-         optimizerStatus,
-         allReferenceImageUrls: [...uploadedUrls],
-         injectedReferenceImageUrls: [] as string[],
-         multimodalContext: {
-           ...(normalizedMetadata?.multimodalContext || {}),
-           referenceImageUrls: [
-             ...topicPinnedRefs,
-             ...((normalizedMetadata?.multimodalContext?.referenceImageUrls as string[]) || []),
-             ...uploadedUrls,
-           ].filter((url, idx, arr) => typeof url === 'string' && !!url && arr.indexOf(url) === idx),
-           hasReferenceImages:
-             topicPinnedRefs.length +
-               (((normalizedMetadata?.multimodalContext?.referenceImageUrls as string[]) || []).length) +
-               uploadedUrls.length >
-             0,
-           referenceSummary: summarizeReferenceSet([
-             ...topicPinnedRefs,
-             ...((normalizedMetadata?.multimodalContext?.referenceImageUrls as string[]) || []),
-             ...uploadedUrls,
-           ]),
-         },
-       };
+      // ── 跟进消息自动继承上次生成图作为参考 ──────────────────────────────
+      // 当用户没有上传新图（"换个风格"/"换个色调"等跟进指令），
+      // 自动把上一次任务生成的图片 URL 注入为参考，防止从头生成无关内容
+      const isFollowUpEdit = !attachments?.length && !uploadedUrls.length && (
+        /换个|换种|换成|改变|调整|重新|再来|再生|另一|不同|其他|新的风格|新的色调|新角度/i.test(message) ||
+        /change|another|different|new style|retry|redo|again/i.test(message)
+      );
+
+      let inheritedReferenceUrls: string[] = [];
+      if (isFollowUpEdit) {
+        // 优先从当前 task 的 output assets 拿
+        const lastTask = useAgentStore.getState().currentTask;
+        const taskAssetUrls = (lastTask?.output?.assets || [])
+          .map((a: any) => a.url)
+          .filter((u: string) => /^https?:\/\//i.test(u))
+          .slice(0, 2);
+
+        // 其次从 designSession.approvedAssetIds 拿（从 store 实时读，避免闭包旧值）
+        const sessionAssetUrls = (useProjectStore.getState().designSession?.approvedAssetIds || [])
+          .filter((u: string) => /^https?:\/\//i.test(u))
+          .slice(0, 2);
+
+        // 也从消息历史里找最近的图片附件（已上传的 ImgBB URL）
+        const historyImageUrls = useAgentStore.getState().messages
+          .slice(-6)
+          .flatMap((msg: any) => msg.attachments || [])
+          .filter((u: string) => /^https?:\/\//i.test(u) && /\.(jpg|jpeg|png|webp|gif)/i.test(u))
+          .slice(0, 2);
+
+        inheritedReferenceUrls = [...new Set([...taskAssetUrls, ...historyImageUrls, ...sessionAssetUrls])].slice(0, 3);
+
+        if (inheritedReferenceUrls.length > 0) {
+          console.log('[useAgentOrchestrator] Follow-up edit: auto-injecting reference URLs:', inheritedReferenceUrls);
+        }
+      }
+      // ────────────────────────────────────────────────────────────────────────
+
+      const taskMetadata = {
+        ...(metadata || {}),
+        imageHostProvider: hostProvider,
+        topicId,
+        topicPinnedContext,
+        taskMode: inferredTaskMode,
+        originalMessage: message,
+        optimizedMessage: optimizedMessageForTrace,
+        optimizerUsed,
+        optimizerStatus,
+        allReferenceImageUrls: [...uploadedUrls],
+        injectedReferenceImageUrls: [] as string[],
+        multimodalContext: {
+          ...(metadata?.multimodalContext || {}),
+          referenceImageUrls: [
+            ...topicPinnedRefs,
+            ...((metadata?.multimodalContext?.referenceImageUrls || [])),
+            ...uploadedUrls,
+            ...inheritedReferenceUrls,  // ← 自动继承上次生成图
+          ].filter((url, idx, arr) => typeof url === 'string' && !!url && arr.indexOf(url) === idx),
+          hasReferenceImages:
+            topicPinnedRefs.length +
+            (((metadata?.multimodalContext?.referenceImageUrls as string[]) || []).length) +
+            uploadedUrls.length +
+            inheritedReferenceUrls.length >
+            0,
+          referenceSummary: summarizeReferenceSet([
+            ...topicPinnedRefs,
+            ...((metadata?.multimodalContext?.referenceImageUrls || [])),
+            ...uploadedUrls,
+            ...inheritedReferenceUrls,
+          ]),
+        },
+      };
 
       const existingDesignSession = projectContext.designSession;
       const sessionConstraints = extractConstraintHints(message);
@@ -498,16 +531,16 @@ export function useAgentOrchestrator(options: UseAgentOrchestratorOptions) {
           ...(existingDesignSession?.constraints || []),
           ...sessionConstraints,
         ], [], 20),
-        researchSummary: typeof normalizedMetadata?.multimodalContext?.research?.reportBrief === 'string'
-          ? normalizedMetadata.multimodalContext.research.reportBrief
+        researchSummary: typeof metadata?.multimodalContext?.research?.reportBrief === 'string'
+          ? metadata.multimodalContext.research.reportBrief
           : existingDesignSession?.researchSummary,
-        referenceWebPages: Array.isArray(normalizedMetadata?.multimodalContext?.referenceWebPages)
-          ? normalizedMetadata.multimodalContext.referenceWebPages.slice(0, 8)
+        referenceWebPages: Array.isArray(metadata?.multimodalContext?.referenceWebPages)
+          ? metadata.multimodalContext.referenceWebPages.slice(0, 8)
           : existingDesignSession?.referenceWebPages,
       });
 
       if (topicId) {
-        const researchBrief = normalizedMetadata?.multimodalContext?.research?.reportBrief;
+        const researchBrief = metadata?.multimodalContext?.research?.reportBrief;
         const topicConstraints = mergeUniqueStrings(
           sessionConstraints,
           typeof researchBrief === 'string' && researchBrief ? [researchBrief] : [],
@@ -515,7 +548,7 @@ export function useAgentOrchestrator(options: UseAgentOrchestratorOptions) {
         );
         const topicDecisions = mergeUniqueStrings(
           existingDesignSession?.styleHints || [],
-          typeof normalizedMetadata?.creationMode === 'string' ? [normalizedMetadata.creationMode] : [],
+          typeof metadata?.creationMode === 'string' ? [metadata.creationMode] : [],
           20,
         );
         await upsertTopicSnapshot(topicId, {
@@ -559,7 +592,7 @@ export function useAgentOrchestrator(options: UseAgentOrchestratorOptions) {
       ) {
         const err =
           `[useAgentOrchestrator] Attachment passthrough mismatch: attachments ${passthroughAttachmentCount}/${originalAttachmentCount}, uploaded ${passthroughUploadedCount}/${originalUploadedCount}`;
-        if (import.meta.env.MODE === 'test' || import.meta.env.DEV) {
+        if (viteEnv.MODE === 'test' || viteEnv.DEV) {
           throw new Error(err);
         }
         console.error(err);
@@ -580,7 +613,7 @@ export function useAgentOrchestrator(options: UseAgentOrchestratorOptions) {
       console.log('[useAgentOrchestrator] 发起 Agent 执行请求...');
       const result = await withTimeout(
         executeAgentTask(task),
-        180000,
+        AGENT_EXECUTION_TIMEOUT_MS,
         '任务执行超时，请稍后重试'
       );
       console.log('[useAgentOrchestrator] 收到 Agent 执行回复');
@@ -642,10 +675,9 @@ export function useAgentOrchestrator(options: UseAgentOrchestratorOptions) {
       const failMessage = imageFailure
         ? '图片处理失败，请检查网络或重新上传'
         : '抱歉，生成过程中遇到网络或解析错误，请重试。';
-      const curTask = useAgentStore.getState().currentTask;
       const errorTask: AgentTask = {
-        id: curTask?.id || `task-${Date.now()}`,
-        agentId: curTask?.agentId || 'coco' as AgentType,
+        id: `task-${Date.now()}`,
+        agentId: 'coco' as AgentType,
         status: 'failed',
         input: { message, context: projectContext },
         output: {
@@ -718,7 +750,7 @@ export function useAgentOrchestrator(options: UseAgentOrchestratorOptions) {
       console.log('[useAgentOrchestrator] Proposal request start', { proposalId });
       const result = await withTimeout(
         executeAgentTask(task),
-        180000,
+        AGENT_EXECUTION_TIMEOUT_MS,
         '方案执行超时，请稍后重试'
       );
       console.log('[useAgentOrchestrator] Proposal request done', { status: result.status });

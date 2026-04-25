@@ -5,6 +5,76 @@ const DATA_URL_BASE64_PREFIX = /^data:image\/[a-zA-Z0-9.+-]+;base64,/;
 const IMGBB_ROUND_ROBIN_KEY = 'image_host_poll_index_imgbb';
 const CUSTOM_ROUND_ROBIN_KEY = 'image_host_poll_index_custom';
 
+// ImgBB 限制 32 MB，压缩目标控制在 20 MB 以内留余量
+const IMGBB_MAX_BYTES = 20 * 1024 * 1024;
+const IMGBB_MAX_DIMENSION = 4096; // 最大允许宽/高像素
+
+/**
+ * 用 Canvas 对图片进行等比缩放 + JPEG 压缩，使文件体积不超过 maxBytes
+ * @returns 压缩后的 Blob（JPEG 格式）
+ */
+async function compressImage(file: File, maxBytes = IMGBB_MAX_BYTES): Promise<File> {
+  // 小图直接跳过压缩
+  if (file.size <= maxBytes) return file;
+
+  return new Promise((resolve, reject) => {
+    const img = new Image();
+    const objectUrl = URL.createObjectURL(file);
+
+    img.onload = () => {
+      URL.revokeObjectURL(objectUrl);
+
+      let { width, height } = img;
+
+      // 等比缩放，确保最大边不超过限制
+      if (width > IMGBB_MAX_DIMENSION || height > IMGBB_MAX_DIMENSION) {
+        const ratio = Math.min(IMGBB_MAX_DIMENSION / width, IMGBB_MAX_DIMENSION / height);
+        width = Math.round(width * ratio);
+        height = Math.round(height * ratio);
+      }
+
+      const canvas = document.createElement('canvas');
+      canvas.width = width;
+      canvas.height = height;
+      const ctx = canvas.getContext('2d');
+      if (!ctx) {
+        reject(new Error('Canvas context 获取失败'));
+        return;
+      }
+      ctx.drawImage(img, 0, 0, width, height);
+
+      // 从质量 0.85 开始，若还是太大则逐步降低
+      const tryCompress = (quality: number) => {
+        canvas.toBlob((blob) => {
+          if (!blob) {
+            reject(new Error('图片压缩失败'));
+            return;
+          }
+          if (blob.size <= maxBytes || quality <= 0.3) {
+            const compressed = new File([blob], file.name.replace(/\.[^.]+$/, '.jpg'), {
+              type: 'image/jpeg',
+              lastModified: file.lastModified,
+            });
+            console.log(`[uploader] 图片已压缩: ${(file.size / 1024 / 1024).toFixed(2)} MB → ${(blob.size / 1024 / 1024).toFixed(2)} MB (quality=${quality})`);
+            resolve(compressed);
+          } else {
+            tryCompress(Math.max(quality - 0.15, 0.3));
+          }
+        }, 'image/jpeg', quality);
+      };
+
+      tryCompress(0.85);
+    };
+
+    img.onerror = () => {
+      URL.revokeObjectURL(objectUrl);
+      reject(new Error('图片加载失败，无法压缩'));
+    };
+
+    img.src = objectUrl;
+  });
+}
+
 function splitApiKeys(raw: string): string[] {
   if (!raw) return [];
   return raw
@@ -45,22 +115,24 @@ function resolveCommonImageUrl(payload: any): string | null {
 }
 
 async function uploadToImgbbWithKey(file: File, key: string): Promise<string> {
-  const dataUrl = await fileToDataUrl(file);
-  const pureBase64 = dataUrl.replace(DATA_URL_BASE64_PREFIX, '');
-  if (!pureBase64) {
-    throw new Error('图片编码失败，无法生成有效的 Base64 数据');
-  }
+  // 超大图先压缩，避免超过 ImgBB 32 MB 限制
+  const fileToUpload = await compressImage(file);
 
+  // 直接用 File 对象做 multipart/form-data 上传（等同于 curl --form "image=@file"）
   const formData = new FormData();
-  formData.append('image', pureBase64);
+  formData.append('image', fileToUpload, fileToUpload.name);
 
-  const response = await fetch(`https://api.imgbb.com/1/upload?key=${encodeURIComponent(key)}`, {
+  const cleanKey = key.trim();
+  const response = await fetch(`https://api.imgbb.com/1/upload?key=${cleanKey}`, {
     method: 'POST',
     body: formData,
+    // 注意：不要手动设置 Content-Type，让浏览器自动设置含 boundary 的 multipart/form-data
   });
 
   const payload = await parseJsonSafely(response);
   if (!response.ok || !payload?.success) {
+    // 详细打印原始响应，方便排查
+    console.error('[ImgBB] Upload failed. status:', response.status, 'payload:', JSON.stringify(payload));
     const message = payload?.error?.message || `ImgBB 上传失败 (${response.status})`;
     throw new Error(message);
   }

@@ -433,7 +433,7 @@ const NodeComponent: React.FC<NodeProps> = ({
             }
         }
     };
-    const handleDownload = (e: React.MouseEvent) => { e.stopPropagation(); const a = document.createElement('a'); a.href = node.data.image || videoBlobUrl || node.data.audioUri || ''; a.download = `xcaistudio-${Date.now()}`; document.body.appendChild(a); a.click(); document.body.removeChild(a); };
+    const handleDownload = (e: React.MouseEvent) => { e.stopPropagation(); const a = document.createElement('a'); a.href = node.data.image || videoBlobUrl || node.data.audioUri || ''; a.download = `jackystudio-${Date.now()}`; document.body.appendChild(a); a.click(); document.body.removeChild(a); };
     const handleUploadVideo = (e: React.ChangeEvent<HTMLInputElement>) => { const file = e.target.files?.[0]; if (file) { const reader = new FileReader(); reader.onload = (e) => onUpdate(node.id, { videoUri: e.target?.result as string }); reader.readAsDataURL(file); } };
     const handleUploadImage = (e: React.ChangeEvent<HTMLInputElement>) => { const file = e.target.files?.[0]; if (file) { const reader = new FileReader(); reader.onload = (e) => onUpdate(node.id, { image: e.target?.result as string }); reader.readAsDataURL(file); } };
     const handleAspectRatioSelect = (newRatio: string) => {

@@ -1,7 +1,8 @@
-import React, { useState, useEffect } from "react";
+﻿import React, { useState, useEffect } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import { useNavigate } from "react-router-dom";
 import { Sparkles, ArrowRight, Play } from "lucide-react";
+import { ROUTES } from "../utils/routes";
 
 const slides = [
     {
@@ -56,7 +57,11 @@ export const Landing = () => {
     }, []);
 
     const handleStart = () => {
-        navigate(`/dashboard`);
+        navigate(ROUTES.dashboard);
+    };
+
+    const handleGoDashboard = () => {
+        navigate(ROUTES.dashboard);
     };
 
     const currentSlide = slides[currentSlideIndex];
@@ -67,15 +72,37 @@ export const Landing = () => {
             <header className="absolute top-0 left-0 right-0 h-20 px-6 lg:px-12 flex items-center justify-between z-50">
                 <div className="flex items-center gap-3">
                     <div className="w-8 h-8 bg-white text-black rounded-full flex items-center justify-center font-bold text-xs tracking-tighter">
-                        XC
+                        JK
                     </div>
-                    <span className="font-bold text-lg tracking-wide hidden sm:block">XcAISTUDIO</span>
+                    <span className="font-bold text-lg tracking-wide hidden sm:block">Jacky-Studio</span>
                 </div>
 
                 <nav className="hidden md:flex items-center gap-10">
-                    <a href="#" className="text-[13px] font-medium text-white/90 hover:text-white transition-colors">首页</a>
-                    <a href="#" className="text-[13px] font-medium text-white/50 hover:text-white transition-colors">定价</a>
-                    <a href="#" className="text-[13px] font-medium text-white/50 hover:text-white transition-colors">新闻</a>
+                    <button
+                        type="button"
+                        onClick={handleGoDashboard}
+                        className="text-[13px] font-medium text-white/90 hover:text-white transition-colors"
+                    >
+                        首页
+                    </button>
+                    <button
+                        type="button"
+                        disabled
+                        aria-disabled="true"
+                        className="text-[13px] font-medium text-white/30 cursor-not-allowed select-none"
+                        title="功能开发中"
+                    >
+                        定价
+                    </button>
+                    <button
+                        type="button"
+                        disabled
+                        aria-disabled="true"
+                        className="text-[13px] font-medium text-white/30 cursor-not-allowed select-none"
+                        title="功能开发中"
+                    >
+                        新闻
+                    </button>
                 </nav>
 
                 <div className="flex items-center gap-4">
@@ -228,4 +255,6 @@ export const Landing = () => {
 };
 
 export default Landing;
+
+
 

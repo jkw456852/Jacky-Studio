@@ -22,5 +22,30 @@
     },
     "allowImportingTsExtensions": true,
     "noEmit": true
-  }
+  },
+  "include": [
+    "App.tsx",
+    "index.tsx",
+    "vite-env.d.ts",
+    "api/**/*",
+    "components/**/*",
+    "constants/**/*",
+    "hooks/**/*",
+    "knowledge/**/*",
+    "pages/**/*",
+    "services/**/*",
+    "stores/**/*",
+    "types/**/*",
+    "utils/**/*"
+  ],
+  "exclude": [
+    "dist",
+    "node_modules",
+    "docs/testing",
+    "scripts",
+    "test-results",
+    "tmp",
+    "user-management",
+    "XC-VIDEO"
+  ]
 }

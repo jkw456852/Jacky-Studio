@@ -1,4 +1,4 @@
-import React, { useState, useRef, useEffect } from 'react';
+﻿import React, { useState, useRef, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { motion } from 'framer-motion';
 import { 
@@ -6,7 +6,12 @@ import {
   Box, Image as ImageIcon, Video, Hash, Search, Filter, MoreHorizontal, Trash2, CheckSquare, X, Edit2, Settings
 } from 'lucide-react';
 import { Project } from '../types';
-import { getProject, getProjects, deleteProject, saveProject } from '../services/storage';
+import {
+  getProject,
+  getProjectSummaries,
+  deleteProject,
+  saveProject,
+} from '../services/storage';
 import { deleteTopicMemory } from '../services/topic-memory';
 import { getMemoryKey } from '../services/topicMemory/key';
 import { AnimatePresence } from 'framer-motion';
@@ -25,8 +30,8 @@ const toMemoryKey = (workspaceId: string, conversationId: string): string => {
 const Header = () => (
   <header className="fixed top-0 left-0 right-0 h-16 px-8 flex items-center justify-between z-40 bg-white/70 backdrop-blur-md border-b border-white/20 shadow-sm shadow-gray-100/20">
     <div className="flex items-center gap-2">
-      <div className="w-8 h-8 bg-black rounded-full flex items-center justify-center text-white font-bold text-xs">XC</div>
-      <span className="font-bold text-xl tracking-tight">XcAISTUDIO</span>
+      <div className="w-8 h-8 bg-black rounded-full flex items-center justify-center text-white font-bold text-xs">JK</div>
+      <span className="font-bold text-xl tracking-tight">Jacky-Studio</span>
     </div>
     <div className="flex items-center gap-6">
       <div className="text-sm font-medium text-gray-600 flex items-center gap-1 cursor-pointer">
@@ -35,8 +40,8 @@ const Header = () => (
       <button className="p-2 rounded-full hover:bg-gray-200 transition">
         <Bell size={20} className="text-gray-600" />
       </button>
-      <div className="w-8 h-8 rounded-full overflow-hidden border border-gray-200 cursor-pointer">
-         <img src="https://cdn.jsdelivr.net/gh/xiaoche0907/pic-bed@main/img_1769761984824_282_11dff4f8-a0df-43a9-b0db-09a846b50d34.jpg" alt="User" />
+      <div className="w-8 h-8 rounded-full border border-gray-200 cursor-pointer bg-black text-white text-[10px] font-bold flex items-center justify-center">
+        JK
       </div>
     </div>
   </header>
@@ -215,7 +220,7 @@ const Projects: React.FC<{ onExit?: () => void }> = ({ onExit }) => {
   const [searchQuery, setSearchQuery] = useState('');
 
   const loadProjects = async () => {
-      const loadedProjects = await getProjects();
+      const loadedProjects = await getProjectSummaries();
       setProjects(loadedProjects);
   };
 
@@ -277,7 +282,7 @@ const Projects: React.FC<{ onExit?: () => void }> = ({ onExit }) => {
   };
 
   const handleRename = async (id: string, newName: string) => {
-      const project = projects.find(p => p.id === id);
+      const project = await getProject(id);
       if (project) {
           await saveProject({ ...project, title: newName });
           await loadProjects();
@@ -411,3 +416,5 @@ const Projects: React.FC<{ onExit?: () => void }> = ({ onExit }) => {
 };
 
 export default Projects;
+
+

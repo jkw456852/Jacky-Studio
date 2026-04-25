@@ -16,9 +16,6 @@ import { errorHandler, ErrorType, AppError } from "../../utils/error-handler";
 import { buildEcommerceProposals } from "./shared/ecommerce-variants";
 import { useAgentStore } from "../../stores/agent.store";
 import { collectReferenceCandidates } from "./utils/reference-images";
-import { sanitizeObject, sanitizeStringBase64 } from "./utils/payload-sanitizer";
-import { createMaskDataUrl } from "./utils/mask-generator";
-import { loadTopicSnapshot } from "../topic-memory";
 
 // 带指数退避的重试工具（用于 analyzeAndPlan 等内部调用）
 const retryAsync = async <T>(
@@ -151,7 +148,7 @@ const MULTI_IMAGE_REQUEST_RE = /(\d+)\s*张|(\d+)\s*images?|一套|一组|系列
 const ECOM_SET_RE = /亚马逊|amazon|listing|副图|电商|主图|详情图|套图/i;
 const BANNED_MULTI_FRAME_TERMS_RE =
   /\b(collage|set of images|multiple views|listing template|contact sheet|mosaic|grid panel)\b/gi;
-const MAX_ANALYZE_HISTORY_MESSAGES = 6;
+const MAX_ANALYZE_HISTORY_MESSAGES = 4; // 减少历史条数防止 Token 爆炸
 const MAX_MESSAGE_TEXT_CHARS = 1200;
 const MAX_TOPIC_CONTEXT_CHARS = 1200;
 const MAX_REFERENCE_SUMMARY_CHARS = 400;
@@ -189,10 +186,6 @@ export abstract class EnhancedBaseAgent {
     message: string,
     metadata?: Record<string, any>,
   ): boolean {
-    // 两步交互 skill 的第一步不强制生图，让 AI 先分析并输出 suggestions
-    const skillData = metadata?.skillData as { config?: { twoStep?: boolean } } | undefined;
-    if (skillData?.config?.twoStep) return false;
-
     // 上游可显式强制
     if (
       metadata?.forceToolCall === true ||
@@ -244,38 +237,26 @@ export abstract class EnhancedBaseAgent {
     else if (aspectRatio === "3:4") layoutDescriptor = "high-definition 2k portrait photography, 3:4 orientation, ";
     else if (aspectRatio === "1:1") layoutDescriptor = "hi-res 2k square format, 1:1 ratio, ";
 
-    // 智能补强：根据消息内容增加基础材质/品类锚点，防止 AI 产生“分类漂移”
-    let categoryEnhancer = "";
-    if (/(衣服|裤子|裙子|服装|穿穿|试穿|上身|cloth|wear|outfit|dress)/i.test(message)) {
-      categoryEnhancer = "fabric texture details, realistic garment draping, ";
-    } else if (/(盒|包|瓶|罐|package|box|bottle)/i.test(message)) {
-      categoryEnhancer = "packaging structural details, high-end materials, ";
-    } else if (/(耳机|科技|电子|机箱|芯片|tech|gadget|headphone)/i.test(message)) {
-      categoryEnhancer = "precision industrial components, metallic finish, ";
-    }
-
     const forcedCall: any = {
       skillName: "generateImage",
       params: {
-        prompt: `${layoutDescriptor}${categoryEnhancer}${message}, high-impact visual design, clean composition, studio lighting, professional 2K digital art, 8K resolution details`,
+        prompt: `${layoutDescriptor}${message}, high-impact visual design, clean composition, studio lighting, professional 2k digital art, 8k resolution details`,
         aspectRatio,
-        quality: "hd",
-        resolution: "2048x2048",
-        // Keep default aligned with provider alias routing.
-        model: "nanobanana2",
+        quality: "hd", // 默认高清
+        resolution: "2048x2048", // 默认 2K 级别
+        model: "Nano Banana Pro",
       },
     };
 
-    // 有附件时强制锚定【最后一张】附件（通常是用户最新上传的核心主体），防止历史干扰
+    // 有附件时默认绑定首张参考图，确保不会空跑
     if (attachments && attachments.length > 0) {
-      const lastIdx = attachments.length - 1;
       const attachmentRefs = attachments.map((_, index) => `ATTACHMENT_${index}`);
       forcedCall.params.referenceImages = attachmentRefs;
-      forcedCall.params.referenceImage = `ATTACHMENT_${lastIdx}`;
-      forcedCall.params.reference_image_url = `ATTACHMENT_${lastIdx}`;
-      forcedCall.params.init_image = `ATTACHMENT_${lastIdx}`;
-      forcedCall.params.referencePriority = "first"; // 强制以当前指定的图为主
-      forcedCall.params.referenceMode = categoryEnhancer.includes("fabric") ? "portrait" : "product";
+      forcedCall.params.referenceImage = "ATTACHMENT_0";
+      forcedCall.params.reference_image_url = "ATTACHMENT_0";
+      forcedCall.params.init_image = "ATTACHMENT_0";
+      forcedCall.params.referencePriority = attachmentRefs.length > 1 ? "all" : "first";
+      forcedCall.params.referenceMode = "product";
     }
 
     return forcedCall;
@@ -320,7 +301,7 @@ export abstract class EnhancedBaseAgent {
   ): any[] {
     const safeCount = Math.max(1, Math.min(count || 5, 8));
     const aspectRatio = (metadata?.preferredAspectRatio as string) || "1:1";
-    const model = "nanobanana2";
+    const model = "Nano Banana Pro";
     const variants = [
       {
         title: "白底主图",
@@ -387,6 +368,90 @@ export abstract class EnhancedBaseAgent {
         description: `第 ${index + 1} 张（${variant.title}）`,
       };
     });
+  }
+
+  private getPreferredImageCount(metadata?: Record<string, any>): number {
+    const rawValue = Number.parseInt(
+      String(metadata?.preferredImageCount ?? 1),
+      10,
+    );
+
+    if (!Number.isFinite(rawValue)) {
+      return 1;
+    }
+
+    return Math.min(4, Math.max(1, rawValue));
+  }
+
+  private decoratePreferredImageVariantPrompt(
+    prompt: string,
+    index: number,
+    total: number,
+  ): string {
+    if (index === 0 || total <= 1) {
+      return prompt;
+    }
+
+    const variantHints = [
+      "Create a distinct composition variation while preserving the same subject, style, and prompt intent.",
+      "Create another clearly different framing and visual rhythm while keeping the same subject and style constraints.",
+      "Create a fresh alternate shot with different composition emphasis, while preserving the same product, scene goal, and aesthetic direction.",
+    ];
+    const hint = variantHints[Math.min(index - 1, variantHints.length - 1)];
+
+    return `${prompt}\n\nVariation ${index + 1}/${total}: ${hint}`;
+  }
+
+  private expandPreferredImageCountCalls(
+    skillCalls: any[],
+    preferredImageCount: number,
+  ): any[] {
+    if (preferredImageCount <= 1) {
+      return skillCalls;
+    }
+
+    const generateImageIndices = skillCalls.reduce<number[]>(
+      (indices, call, index) => {
+        if (
+          call?.skillName === "generateImage" ||
+          call?.skillName === "imageGenSkill"
+        ) {
+          indices.push(index);
+        }
+        return indices;
+      },
+      [],
+    );
+
+    if (generateImageIndices.length !== 1) {
+      return skillCalls;
+    }
+
+    const targetIndex = generateImageIndices[0];
+    const baseCall = skillCalls[targetIndex];
+    const expandedCalls = Array.from({ length: preferredImageCount }).map(
+      (_, index) => ({
+        ...baseCall,
+        params: {
+          ...(baseCall?.params || {}),
+          prompt: this.decoratePreferredImageVariantPrompt(
+            String(baseCall?.params?.prompt || ""),
+            index,
+            preferredImageCount,
+          ),
+        },
+        description:
+          index === 0
+            ? baseCall?.description
+            : `Variation ${index + 1}/${preferredImageCount}`,
+      }),
+    );
+
+    return [
+      ...skillCalls.slice(0, targetIndex),
+      ...expandedCalls,
+      ...skillCalls.slice(targetIndex + 1),
+    ];
   }
 
   /**
@@ -564,6 +629,139 @@ export abstract class EnhancedBaseAgent {
           proposals: [],
           assets: [],
           adjustments: ["可继续：按 P3 主图指令直接生成", "可继续：按 P4 输出分批生成副图"],
+        },
+        updatedAt: Date.now(),
+      };
+    }
+
+    if (skillData?.id === "cn-detail-page") {
+      store.actions.setCurrentTask({
+        ...task,
+        status: "executing",
+        progressMessage: "正在生成国内电商中文详情页套图...",
+        progressStep: 3,
+        totalSteps: 4,
+      });
+
+      const imageFiles = (task.input.attachments || []).filter(
+        (file) => file?.type && file.type.startsWith("image/"),
+      );
+      const uploadedRefs = (task.input.uploadedAttachments || []).filter((url) =>
+        /^https?:\/\//i.test(String(url || "")),
+      );
+      const localRefs =
+        uploadedRefs.length > 0
+          ? []
+          : await Promise.all(
+              imageFiles.map(
+                (file) =>
+                  new Promise<string>((resolve) => {
+                    const reader = new FileReader();
+                    reader.onload = () => resolve(String(reader.result || ""));
+                    reader.onerror = () => resolve("");
+                    reader.readAsDataURL(file);
+                  }),
+              ),
+            );
+
+      const productImages = [...uploadedRefs, ...localRefs].filter(Boolean).slice(0, 6);
+
+      if (productImages.length === 0) {
+        return {
+          ...task,
+          status: "completed",
+          output: {
+            message: "请先上传至少 1 张商品图片，我再为你生成中文详情页套图。",
+            proposals: [],
+            assets: [],
+            imageUrls: [],
+            adjustments: ["上传商品图后重试", "可补充品牌调性与人群定位"],
+          },
+          updatedAt: Date.now(),
+        };
+      }
+
+      const defaults = (skillData.config?.defaults || {}) as Record<string, any>;
+      const promptVersion = defaults.promptVersion === "original" ? "original" : "new";
+      const textMode = defaults.textMode === "withText" || defaults.textMode === "noText" ? defaults.textMode : "auto";
+      const ratioMode = defaults.ratioMode === "fixed" ? "fixed" : "adaptive";
+      const fixedAspectRatio = typeof defaults.fixedAspectRatio === "string" ? defaults.fixedAspectRatio : "";
+      const qualityThreshold = Number.isFinite(Number(defaults.qualityThreshold))
+        ? Number(defaults.qualityThreshold)
+        : 0.68;
+      const replacementBudget = Number.isFinite(Number(defaults.replacementBudget))
+        ? Number(defaults.replacementBudget)
+        : 2;
+      const retryPolicy = defaults.retryPolicy && typeof defaults.retryPolicy === "object"
+        ? defaults.retryPolicy
+        : undefined;
+
+      const cnDetailResult = await executeSkill("cnDetailPage", {
+        productImages,
+        brief: message,
+        count: Number(defaults.count ?? 6),
+        aspectRatio: String(defaults.aspectRatio || "3:4"),
+        imageSize: defaults.imageSize || "2K",
+        model: defaults.model || "nanobanana2",
+        promptVersion,
+        textMode,
+        ratioMode,
+        fixedAspectRatio,
+        qualityThreshold,
+        replacementBudget,
+        retryPolicy,
+      });
+
+      const images = Array.isArray(cnDetailResult?.images)
+        ? cnDetailResult.images.filter((item: any) => typeof item?.url === "string" && item.url)
+        : [];
+      const assets: GeneratedAsset[] = images.map((item: any) => ({
+        id: `asset-${Date.now()}-${Math.random()}`,
+        type: "image",
+        url: item.url,
+        metadata: {
+          prompt: item.title || "国内电商中文详情页",
+          model: defaults.model || "nanobanana2",
+          agentId: this.agentInfo.id,
+        },
+      }));
+      const imageUrls = assets.map((asset) => asset.url);
+
+      return {
+        ...task,
+        status: "completed",
+        output: {
+          message:
+            imageUrls.length > 0
+              ? `已为你生成 ${imageUrls.length} 张国内电商中文详情页分屏图。`
+              : "本次未生成有效图片，请调整需求后重试。",
+          analysis: "已按中文详情页结构（KV/卖点/参数/场景/对比/转化）执行。",
+          proposals: [],
+          assets,
+          imageUrls,
+          skillCalls: [
+            {
+              skillName: "cnDetailPage",
+              params: {
+                count: Number(defaults.count ?? 6),
+                aspectRatio: String(defaults.aspectRatio || "3:4"),
+                imageSize: defaults.imageSize || "2K",
+                model: defaults.model || "nanobanana2",
+                promptVersion,
+                textMode,
+                ratioMode,
+                fixedAspectRatio,
+                qualityThreshold,
+                replacementBudget,
+                retryPolicy,
+              },
+              result: cnDetailResult,
+            },
+          ],
+          adjustments:
+            imageUrls.length > 0
+              ? ["继续细化卖点分屏", "改成更强转化风格", "替换场景氛围", "重新生成"]
+              : ["上传更清晰产品图", "补充更具体卖点要求"],
         },
         updatedAt: Date.now(),
       };
@@ -794,7 +992,7 @@ export abstract class EnhancedBaseAgent {
         // 尝试从 proposal 内提取 prompt（AI 可能把 prompt 直接放到 proposal 顶层）
         const prompt =
           p.prompt || p.imagePrompt || p.image_prompt || p.params?.prompt || "";
-        const model = p.model || p.params?.model || "nanobanana2";
+        const model = p.model || p.params?.model || "Nano Banana Pro";
         const ratio =
           p.aspectRatio ||
           p.aspect_ratio ||
@@ -847,7 +1045,7 @@ export abstract class EnhancedBaseAgent {
                 skillName: "generateImage",
                 params: {
                   prompt: fallbackPrompt,
-                  model: "nanobanana2",
+                  model: "Nano Banana Pro",
                   aspectRatio: "1:1",
                 },
               },
@@ -918,7 +1116,7 @@ export abstract class EnhancedBaseAgent {
               skillName: "generateImage",
               params: {
                 prompt: planPrompt,
-                 model: plan.model || "nanobanana2",
+                model: plan.model || "Nano Banana Pro",
                 aspectRatio: plan.aspectRatio || plan.aspect_ratio || "1:1",
               },
             },
@@ -1008,6 +1206,22 @@ export abstract class EnhancedBaseAgent {
       });
     }
 
+    const preferredImageCount = this.getPreferredImageCount(
+      task.input.metadata,
+    );
+    if (requestedCountFromMessage <= 1 && preferredImageCount > 1) {
+      const expandedSkillCalls = this.expandPreferredImageCountCalls(
+        activeSkillCalls,
+        preferredImageCount,
+      );
+      if (expandedSkillCalls.length !== activeSkillCalls.length) {
+        activeSkillCalls = expandedSkillCalls;
+        console.log(
+          `[${this.agentInfo.id}] Applied preferred image count: ${preferredImageCount}`,
+        );
+      }
+    }
+
     let skillResults = [];
     if (activeSkillCalls.length > 0) {
       // Step 3: 生成中
@@ -1034,23 +1248,6 @@ export abstract class EnhancedBaseAgent {
         progressStep: 3,
         totalSteps: 4,
       });
-
-      // --- [XC-STUDIO 优化] 提前将分析和生成中状态推入聊天 ----
-      const existing = store.messages.find((m) => m.id === task.id);
-      if (!existing) {
-        store.actions.addMessage({
-          id: task.id,
-          role: "model",
-          text: plan.preGenerationMessage || `现在我将为您生成${genDesc}。`,
-          timestamp: Date.now(),
-          agentData: {
-            model: task.agentId,
-            title: "智能助理",
-            analysis: plan.analysis,
-            isGenerating: true,
-          },
-        });
-      }
 
       skillResults = await this.executeSkills(activeSkillCalls, task);
     }
@@ -1154,14 +1351,21 @@ export abstract class EnhancedBaseAgent {
 `
         : "";
 
+      const promptLanguagePolicy: 'original-zh' | 'translate-en' =
+        metadata?.promptLanguagePolicy === 'translate-en' ? 'translate-en' : 'original-zh';
+      const promptLanguageRule = promptLanguagePolicy === 'translate-en'
+        ? 'prompt 字段必须使用英文（已开启英译策略）。'
+        : 'prompt 字段可使用中文并优先保留用户中文原文（未开启英译策略）。';
+
       const productSection =
-        hasAttachments
+        hasAttachments && !["cameron"].includes(this.agentInfo.id)
           ? `
-【主体识别优先协议 - VISION_REFRESH_PROTOCOL v4】
-- **实体属性判定 (Entity Category Pre-check) [CRITICAL]**：在分析材质前，必须首先判定主体是 **真人实体** 还是 **非生物物件**。
-- **人像特权识别**：若主体为人类，必须锁定：性别年龄、五官特征、肤质妆造、体势神态。严禁将其抽象化为“几何体”或“材料”。
-- **物件物理分析**：若主体为非生物，按几何拓扑和材质物理属性进行无偏见描述。
-- **视觉瞬间切换**：若最新附件 ATTACHMENT_0 与历史上下文/话题记忆在实体范畴上冲突（如：过去是音箱，现在是真人），你必须**瞬间重置**所有假设，以当前视觉事实为唯一真理。
+【产品识别 - 最高优先级】
+- 如果用户附带了图片（附件），这些图片就是用户的产品/素材。你必须仔细观察每张图片，识别出产品的具体类型、颜色、材质、形状、品牌元素等细节。
+- 在每个 generateImage 的 prompt 中，必须以产品的精确视觉描述开头（例如“哑光黑不锈钢保温杯，竹盖，极简 logo”，不要只写“一个水杯”）。
+- 所有生成的图片必须围绕这些具体产品，不能生成无关的随机产品。
+- 重要：如果用户上传了多张图片并要求生成，你必须为每一张图片独立创建一个 proposal，并在 params 中设置 "referenceImage": "ATTACHMENT_N"。严禁在多图场景下只参考第一张图。
+- 每个 generateImage 的 prompt 必须以产品的精确视觉描述开头。
 `
           : "";
 
@@ -1195,8 +1399,10 @@ export abstract class EnhancedBaseAgent {
 `
         : "";
 
-      const multimodalRefUrls =
-        metadata?.multimodalContext?.referenceImageUrls || [];
+      // 过滤 base64，只保留正常 https URL，防止 Token 爆炸
+      const multimodalRefUrls = (metadata?.multimodalContext?.referenceImageUrls || [])
+        .filter((u: string) => /^https?:\/\//i.test(u))
+        .slice(0, 4);
       const multimodalReferenceSummary =
         typeof metadata?.multimodalContext?.referenceSummary === 'string'
           ? truncateText(metadata.multimodalContext.referenceSummary.trim(), MAX_REFERENCE_SUMMARY_CHARS)
@@ -1204,59 +1410,56 @@ export abstract class EnhancedBaseAgent {
       const multimodalSection =
         multimodalRefUrls.length > 0
           ? `
-【多模态参考图 URL（实体冲突隔离）】
+【多模态参考图 URL（优先用于 Tool 参数）】
 ${multimodalRefUrls
             .map((url: string, index: number) => `- REF_URL_${index}: ${url}`)
             .join("\n")}
-- 参考摘要: ${multimodalReferenceSummary || '请分析当前主体的视觉锚点。'}
-- **实体级冲突重置 (ENTITY_TYPE_RESET)**：如果历史参考图 (REF_URL_X) 与最新附件 (ATTACHMENT_0) 在“人/物”性质上不符，你必须执行 **强制清空** 记忆。绝对禁止将历史物件属性赋予当前人像，或将历史人设赋予当前物件。
-- 当你构造 generateImage 参数时，优先把参考图填入 reference_image_url。
-- 多张参考图必须优先写入 referenceImages。`
+- 参考摘要: ${multimodalReferenceSummary || '请将这些参考图视为同一主体的多角度/多细节锚点。'}
+- 当你构造 generateImage 参数时，优先把参考图填入 reference_image_url（也可同步填入 init_image）。
+- 多张参考图必须优先写入 referenceImages，只有单张参考时才仅使用 referenceImage。
+- 若使用 ATTACHMENT_N，也请同时保证 referenceImage 字段存在。`
           : "";
 
-      let rawPinnedText = typeof metadata?.topicPinnedContext === "string" && metadata.topicPinnedContext.trim().length > 0
-          ? metadata.topicPinnedContext
-          : "";
-      
-      let finalPinnedText = rawPinnedText;
-
-      // 【记忆净化协议 - CONTEXT_SANITIZATION】
-      // 如果当前是真人图且记忆里包含高频“工业/音箱”幻觉词，执行物理隔离
-      const containsHallucinationWords = /圆柱|音箱|磨砂纸|半透明|核心|纳米/i.test(finalPinnedText);
-      const isCurrentlyHuman = (attachments && attachments.length > 0) || /人|模特|女性|男性|脸|五官/i.test(message); 
-      
-      if (isCurrentlyHuman && containsHallucinationWords) {
-        finalPinnedText = `
-【警告：历史环境已污染 - CONTEXT_RESET】
-当前检测到您的视觉输入为真人，但历史话题记忆中包含无关的物件属性（音箱/圆柱体等）。
-你必须**物理隔离 (Omit)** 以下历史背景，严禁将历史材质应用到真人身上。
-已隔离历史背景摘要: ${finalPinnedText.slice(0, 100)}...
-`;
-      }
-
-      const topicPinnedContext = finalPinnedText ? `
+      const topicPinnedContext =
+        typeof metadata?.topicPinnedContext === "string" && metadata.topicPinnedContext.trim().length > 0
+          ? `
 【话题长期记忆（必须优先遵守）】
-${truncateText(finalPinnedText, MAX_TOPIC_CONTEXT_CHARS)}
-` : "";
+${truncateText(metadata.topicPinnedContext, MAX_TOPIC_CONTEXT_CHARS)}
+`
+          : "";
 
       const designSession = context.designSession;
       const compactConversationHistory = (context.conversationHistory || [])
         .slice(-MAX_ANALYZE_HISTORY_MESSAGES)
         .map((msg) => {
           const roleName = msg.role === "user" ? "用户" : "智能助手";
-          const attachmentsText =
-            msg.attachments && msg.attachments.length > 0
-              ? ` [附图/素材: ${msg.attachments.slice(0, 3).join(", ")}${msg.attachments.length > 3 ? ", ..." : ""}]`
-              : "";
-          return `${roleName}: ${truncateText(msg.text, MAX_MESSAGE_TEXT_CHARS)}${attachmentsText}`;
+          // 清洁文本：剥离 base64 data URL 防止 Token 爆炸
+          const cleanText = truncateText(
+            String(msg.text || "")
+              .replace(/data:[a-z0-9+\-]+\/[a-z0-9+\-]+;base64,[A-Za-z0-9+/=]+/gi, '[图片]')
+              .replace(/https?:\/\/[^\s"']{80,}/g, '[URL]'),
+            MAX_MESSAGE_TEXT_CHARS
+          );
+          // 清洁附件：只保留短 URL，剥离 base64
+          const cleanAttachments = (msg.attachments || [])
+            .slice(0, 3)
+            .map((a: string) =>
+              /^data:/.test(a) ? '[已上传图片]' :
+                a.length > 120 ? '[URL]' : a
+            );
+          const attachmentsText = cleanAttachments.length > 0
+            ? ` [附图/素材: ${cleanAttachments.join(", ")}${(msg.attachments?.length || 0) > 3 ? ", ..." : ""}]`
+            : "";
+          return `${roleName}: ${cleanText}${attachmentsText}`;
         })
         .join("\n");
+      const truncateUrl = (s: string) => s.length > 60 ? s.slice(0, 57) + '...' : s;
       const designSessionSection = designSession
         ? `
 【统一设计会话（必须继承）】
 - 当前任务模式: ${designSession.taskMode}
-- 已批准资产: ${(designSession.approvedAssetIds || []).slice(-4).join(', ') || '无'}
-- 主体锚点: ${(designSession.subjectAnchors || []).slice(-4).join(', ') || '无'}
+- 已批准资产: ${(designSession.approvedAssetIds || []).slice(-3).map(truncateUrl).join(', ') || '无'}
+- 主体锚点: ${(designSession.subjectAnchors || []).slice(-3).map(truncateUrl).join(', ') || '无'}
 - 参考摘要: ${truncateText(designSession.referenceSummary || '无', MAX_REFERENCE_SUMMARY_CHARS)}
 - 禁止变更: ${(designSession.forbiddenChanges || []).join('；') || '无'}
 `
@@ -1264,7 +1467,7 @@ ${truncateText(finalPinnedText, MAX_TOPIC_CONTEXT_CHARS)}
 
       const fullPrompt = `${this.systemPrompt}
 
-【语言要求】你必须用中文回复所有内容（analysis、message、title、description 等字段全部用中文）。只有 prompt 字段用英文（因为图片生成模型需要英文 prompt）。
+【语言要求】你必须用中文回复所有内容（analysis、message、title、description 等字段全部用中文）。${promptLanguageRule}
 
 项目信息:
 - 项目名称: ${context.projectTitle}
@@ -1296,63 +1499,31 @@ ${compactConversationHistory || '无'}
 ${smartEditSection}
 用户请求: ${message}
 ${productSection}${quantitySection}${multiImageSection}${forcedToolSection}${multimodalSection}${topicPinnedContext}${designSessionSection}
-请分析用户需求，严格遵守“先判定性质、再分析、最后执行”的逻辑：
-1. analysis: 【严禁跳步】必须首先确认主体范畴（真人/物件），再进行细节描述。如果是人像，锁定其生物特征；如果是物品，锁定物理材质。
-2. message: 【核心】用感性设计师口吻复述。例如：“我看见您提供了一张真人图片，是一位[描述特征]的模特，我将为您保留其韵味并设计方案...”
-3. skillCalls: 具体的工具调用参数。
-4. suggestions: 给用户的下一步建议。
-
+请分析用户需求，默认返回可直接执行的 JSON（不要让用户二次点击确认）:
 {
-  "analysis": "...",
-  "preGenerationMessage": "调用工具前的设计师沟通文案",
-  "skillCalls": [{"skillName": "generateImage", "params": {"prompt": "...", "referenceImages": ["ATTACHMENT_0", "ATTACHMENT_1"], "referenceImage": "ATTACHMENT_0", "aspectRatio": "1:1", "model": "nanobanana2"}}],
-  "message": "...",
-  "postGenerationSummary": "...",
-  "suggestions": ["..."]
+  "analysis": "用中文简要分析用户需求",
+  "preGenerationMessage": "调用工具前的设计师沟通文案，需复述参考图内容并说明风格与构图策略",
+  "skillCalls": [{"skillName": "generateImage", "params": {"prompt": "...", "referenceImages": ["ATTACHMENT_0", "ATTACHMENT_1"], "referenceImage": "ATTACHMENT_0", "aspectRatio": "1:1", "model": "Nano Banana Pro"}}],
+  "message": "用中文回复用户",
+  "postGenerationSummary": "工具执行后的简短设计复盘，描述灯光/色调/构图亮点",
+  "suggestions": ["可选：如果需要用户提供更多信息或选择项，可在此提供1-4个建议短语供用户快速点击，例如'温馨日常故事'"]
 }
 仅当用户明确要求“先看方案/给几个方案再选”时，才返回 proposals 字段。`;
 
-      // [XC-STUDIO] 最后一层保险：强力清洗满文件名的 base64 内容，防止 413
-      const sanitizedPrompt = sanitizeStringBase64(fullPrompt);
-
       // Build content parts - text + image attachments for visual understanding
-      const parts: any[] = [{ text: sanitizedPrompt }];
-      
-      // [XC-STUDIO] Inject image attachments as inlineData parts for multimodal analysis
-      if (attachments && attachments.length > 0) {
-        attachments.slice(0, 10).forEach(file => { // Limit to 10 images to prevent payload too large
-          const fileAny = file as any;
-          if (fileAny.url && (fileAny.url.startsWith('data:image/') || fileAny.url.includes(';base64,'))) {
-            try {
-              const base64Content = fileAny.url.split(';base64,')[1];
-              const mimeType = fileAny.url.split(';base64,')[0].replace('data:', '');
-              if (base64Content && mimeType) {
-                parts.push({
-                  inlineData: {
-                    data: base64Content,
-                    mimeType: mimeType
-                  }
-                });
-              }
-            } catch (e) {
-              console.warn('[analyzeAndPlan] Failed to process attachment for multimodal', e);
-            }
-          }
-        });
-      }
+      const parts: any[] = [{ text: fullPrompt }];
 
       const selectedMode = useAgentStore.getState().modelMode || 'fast';
       const bestModel = getBestModelId(selectedMode === 'thinking' ? "thinking" : "text");
 
       const payloadDiagnostics = {
-        promptChars: sanitizedPrompt.length,
+        promptChars: fullPrompt.length,
         historyCount: (context.conversationHistory || []).length,
         historyUsed: Math.min((context.conversationHistory || []).length, MAX_ANALYZE_HISTORY_MESSAGES),
         attachmentCount: attachments?.length || 0,
         uploadedAttachmentCount: uploadedAttachments?.length || 0,
-        includesInlineImages: parts.length > 1,
-        partsCount: parts.length,
-        estimatedPayloadChars: JSON.stringify(parts).length,
+        includesInlineImages: false,
+        estimatedPayloadChars: JSON.stringify({ prompt: fullPrompt }).length,
         model: bestModel,
       };
       console.log(`[${this.agentInfo.id}] [analyzeAndPlan] payload diagnostics`, payloadDiagnostics);
@@ -1523,7 +1694,7 @@ ${productSection}${quantitySection}${multiImageSection}${forcedToolSection}${mul
 
     // --- 进度反馈增强逻辑 (Patch v16) ---
     const progressSteps = [
-      "正在连接 nanobanana2 模型...",
+      "正在连接 Nano Banana Pro 模型...",
       "正在分析视觉元素与构图构思...",
       "正在渲染高动态范围光影细节...",
       "正在进行 2K 超清分辨率优化...",
@@ -1616,36 +1787,18 @@ ${productSection}${quantitySection}${multiImageSection}${forcedToolSection}${mul
       call.params = {};
     }
 
-    // Amazon listing resume: if topic memory has remaining shots and caller didn't specify shots,
-    // auto-inject them so the workflow can continue without repeating completed shots.
-    if (call.skillName === "amazonListing") {
-      try {
-        const topicId = String(task.input.metadata?.topicId || "").trim();
-        const hasExplicitShots = Array.isArray(call.params?.shots) && call.params.shots.length > 0;
-        if (topicId && !hasExplicitShots) {
-          const snapshot = await loadTopicSnapshot(topicId);
-          const remaining = snapshot?.listing?.amazonListing?.remaining;
-          if (Array.isArray(remaining) && remaining.length > 0) {
-            call.params.shots = remaining;
-            if (call.params.count == null) {
-              call.params.count = remaining.length;
-            }
-            console.log(
-              `[${this.agentInfo.id}] Injected amazonListing shots from topic memory: ${remaining.length}`,
-            );
-          }
-        }
-      } catch (e) {
-        console.warn(`[${this.agentInfo.id}] Failed to inject amazonListing remaining shots`, e);
-      }
-    }
-
     if (!AVAILABLE_SKILLS[call.skillName as keyof typeof AVAILABLE_SKILLS]) {
       throw new Error(`Skill ${call.skillName} not found`);
     }
 
     const preferredAspectRatio = task.input.metadata?.preferredAspectRatio;
+    const preferredImageSize = task.input.metadata?.preferredImageSize;
     const creationMode = task.input.metadata?.creationMode;
+    const promptLanguagePolicy =
+      task.input.metadata?.promptLanguagePolicy === "translate-en"
+        ? "translate-en"
+        : "original-zh";
+    const textRenderPolicy = task.input.metadata?.textRenderPolicy;
     if (
       typeof preferredAspectRatio === "string" &&
       preferredAspectRatio &&
@@ -1654,6 +1807,34 @@ ${productSection}${quantitySection}${multiImageSection}${forcedToolSection}${mul
     ) {
       call.params = call.params || {};
       call.params.aspectRatio = preferredAspectRatio;
+    }
+
+    // 把用户选择的分辨率（1K / 2K / 4K）注入到 generateImage，确保 UI 设置生效
+    if (
+      call.skillName === "generateImage" &&
+      typeof preferredImageSize === "string" &&
+      preferredImageSize &&
+      !call.params.imageSize // 只在 AI 没有明确指定时才覆盖
+    ) {
+      call.params = call.params || {};
+      call.params.imageSize = preferredImageSize;
+    }
+
+    // 把语言策略/画面文字策略注入到 generateImage，确保与输入框开关一致
+    if (call.skillName === "generateImage") {
+      call.params = call.params || {};
+      if (!call.params.promptLanguagePolicy) {
+        call.params.promptLanguagePolicy = promptLanguagePolicy;
+      }
+      if (!call.params.textPolicy && textRenderPolicy) {
+        call.params.textPolicy = {
+          enforceChinese: textRenderPolicy.enforceChinese !== false,
+          requiredCopy:
+            typeof textRenderPolicy.requiredCopy === "string"
+              ? textRenderPolicy.requiredCopy.trim() || undefined
+              : undefined,
+        };
+      }
     }
 
     if (
@@ -1689,22 +1870,16 @@ ${productSection}${quantitySection}${multiImageSection}${forcedToolSection}${mul
         call.skillName === "generateVideo"
       ) {
         if (call.skillName === "generateImage") {
-          const portraitKeywords = ["发型", "发色", "头发", "脸", "面部", "人像", "证件照", "模特", "五官", "wolf cut", "hair", "face", "portrait"];
-          const isPortraitRequest = portraitKeywords.some(kw => (call.params.prompt || "").toLowerCase().includes(kw));
-
-          // 无论是否是人像，都显著提高默认一致性强度 (从 0.75 -> 0.85)
           if (typeof call.params.referenceStrength !== "number") {
-            call.params.referenceStrength = 0.85;
+            call.params.referenceStrength = 0.75;
           }
-
-          if (isPortraitRequest) {
-            if (!call.params.referenceMode) {
-              call.params.referenceMode = "portrait";
-            }
-          } else {
-            if (!call.params.referenceMode) {
-              call.params.referenceMode = "product";
-            }
+          if (!call.params.referencePriority) {
+            call.params.referencePriority = task.input.context.designSession?.subjectAnchors?.length && task.input.context.designSession.subjectAnchors.length > 1
+              ? "all"
+              : "first";
+          }
+          if (!call.params.referenceMode) {
+            call.params.referenceMode = "product";
           }
           if (!call.params.consistencyContext) {
             call.params.consistencyContext = {
@@ -1713,9 +1888,6 @@ ${productSection}${quantitySection}${multiImageSection}${forcedToolSection}${mul
               referenceSummary: task.input.context.designSession?.referenceSummary,
               forbiddenChanges: task.input.context.designSession?.forbiddenChanges || [],
             };
-          }
-          if (!call.params.imageSize) {
-            call.params.imageSize = "2K";
           }
         }
 
@@ -1753,9 +1925,9 @@ ${productSection}${quantitySection}${multiImageSection}${forcedToolSection}${mul
           }
         }
 
-        const nextMetadata = { ...(task.input.metadata || {}) };
-        nextMetadata.referenceInjection = {
-          ...(nextMetadata.referenceInjection || {}),
+        // ⚠️ task 来自 immer store，metadata 是冻结对象，不能直接赋值
+        // 必须通过 structuredClone 或 spread 创建可写副本，不修改原对象
+        const injectionStats = {
           maxReferenceImages: MAX_REFERENCE_IMAGES,
           uploaded_total: task.input.uploadedAttachments?.length || 0,
           source_total: resolvedRefs.sourceCount,
@@ -1763,11 +1935,9 @@ ${productSection}${quantitySection}${multiImageSection}${forcedToolSection}${mul
           truncated: resolvedRefs.truncated,
           omitted_total: resolvedRefs.omittedCount,
         };
-        task.input = { ...task.input, metadata: nextMetadata };
-        
         console.info(
           `[${this.agentInfo.id}] reference injection stats`,
-          task.input.metadata.referenceInjection,
+          injectionStats,
         );
       }
 
@@ -1825,56 +1995,16 @@ ${productSection}${quantitySection}${multiImageSection}${forcedToolSection}${mul
               reader.readAsDataURL(file);
             });
             call.params[paramKey] = base64;
-          }
-        }
 
-        // Shared logic for both hosted and base64 attachments: Inject Mask & Aspect Ratio
-        const availableAttachments = task.input.attachments || [];
-        if (availableAttachments[index]) {
-          const file = availableAttachments[index];
-          if ((call.skillName === "smartEdit" || call.skillName === "generateImage") && (file as any).markerInfo) {
-            const info = (file as any).markerInfo;
-            
-            // 强制原图：如果未选用图床 url 并且存在全图，我们必须覆盖 paramKey 为 fullImageUrl
-            if (!preferHostedUrls && info.fullImageUrl) {
-              call.params[paramKey] = info.fullImageUrl;
-            }
-            
-            // 1. 设置宽高比 —— 必须使用原图的真实尺寸 (imageWidth / imageHeight)
-            // 注意：info.width/height 是圈选区域的大小，不是原图大小！
-            const imgW = info.imageWidth || info.width;
-            const imgH = info.imageHeight || info.height;
-            const ratio = imgW / imgH;
-            let aspect = "1:1";
-            if (ratio > 1.5) aspect = "16:9";
-            else if (ratio < 0.67) aspect = "9:16";
-            else if (ratio > 1.2) aspect = "4:3";
-            else if (ratio < 0.83) aspect = "3:4";
-            call.params.aspectRatio = aspect;
-            console.log(`[${this.agentInfo.id}] Original image size: ${imgW}x${imgH}, ratio=${ratio.toFixed(3)}, aspectRatio=${aspect}`);
-
-            // 2. 核心修复：生成遮罩图片注入 maskImage
-            try {
-              const maskBase64 = await createMaskDataUrl(info);
-              if (maskBase64) {
-                call.params.maskImage = maskBase64;
-
-                // 3. 增强指令：强制保留原图上下文，防止“人没了”或背景变白底
-                if (typeof call.params.prompt === 'string') {
-                  const contextGuidance = "Must preserve the person, background, pose, and all untouched areas from the original image. ONLY change the selected area according to the prompt.";
-                  if (!call.params.prompt.includes(contextGuidance)) {
-                    call.params.prompt = `${contextGuidance}\n\nTask: ${call.params.prompt}`;
-                  }
-                }
-
-                if (call.skillName === "generateImage") {
-                  call.params.referenceMode = "portrait";
-                  // 强制高一致性，确保非选区绝对不动
-                  call.params.referenceStrength = 0.85; 
-                }
-              }
-            } catch (maskErr) {
-              console.warn(`[${this.agentInfo.id}] Failed to generate mask for ${call.skillName}:`, maskErr);
+            if (call.skillName === "smartEdit" && (file as any).markerInfo) {
+              const info = (file as any).markerInfo;
+              const ratio = info.width / info.height;
+              let aspect = "1:1";
+              if (ratio > 1.5) aspect = "16:9";
+              else if (ratio < 0.7) aspect = "9:16";
+              else if (ratio > 1.2) aspect = "4:3";
+              else if (ratio < 0.8) aspect = "3:4";
+              call.params.aspectRatio = aspect;
             }
           }
         }
@@ -1914,22 +2044,6 @@ ${productSection}${quantitySection}${multiImageSection}${forcedToolSection}${mul
       if (resolved) references.push(resolved);
     }
 
-    if ((import.meta as any).env?.DEV) {
-      const safe = (v: string) => {
-        if (!v) return '';
-        if (v.startsWith('data:image/')) return `data:image/...(${v.length} chars)`;
-        return v.length > 140 ? `${v.slice(0, 140)}...` : v;
-      };
-      console.info(`[${this.agentInfo.id}] reference candidates`, {
-        sourceCount,
-        truncated,
-        max: MAX_REFERENCE_IMAGES,
-        limitedCandidates: limitedCandidates.map(safe),
-        resolvedCount: references.length,
-        resolved: references.map(safe),
-      });
-    }
-
     return {
       references,
       sourceCount,
@@ -1945,13 +2059,16 @@ ${productSection}${quantitySection}${multiImageSection}${forcedToolSection}${mul
     const selectedProvider = String(task.input.metadata?.imageHostProvider || 'none');
     const preferHostedUrls = selectedProvider !== 'none';
 
-    // If it's already a URL or data URL, pass through.
-    // ATTACHMENT_* should resolve to base64 to remain usable even when hosted URLs
-    // are blocked by CORS/403 in-browser. Hosted URLs are added as separate
-    // candidates upstream.
     if (!value.startsWith("ATTACHMENT_")) return value;
 
     const idx = Number.parseInt(value.split("_")[1] || "", 10);
+    if (preferHostedUrls) {
+      const hostedUrl = task.input.uploadedAttachments?.[idx];
+      if (hostedUrl && /^https?:\/\//i.test(hostedUrl)) {
+        return hostedUrl;
+      }
+    }
+
     const file = task.input.attachments?.[idx];
     if (!file) return null;
 

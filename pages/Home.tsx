@@ -1,4 +1,4 @@
-import React, { useState, useRef, useEffect } from "react";
+﻿import React, { useState, useRef, useEffect } from "react";
 import { useNavigate } from "react-router-dom";
 import { AnimatePresence, motion } from "framer-motion";
 import {
@@ -25,20 +25,33 @@ import {
   Palette,
   Star,
   Settings,
+  Trash2,
 } from "lucide-react";
 import { Project } from "../types";
-import { getProjects } from "../services/storage";
+import {
+  deleteProject,
+  getProject,
+  getProjectSummaries,
+} from "../services/storage";
+import { deleteTopicMemory } from "../services/topic-memory";
+import { getMemoryKey } from "../services/topicMemory/key";
 import { SettingsModal } from "../components/SettingsModal";
 import Sidebar from "../components/Sidebar";
 import { ROUTES, createNewWorkspacePath, workspacePath } from "../utils/routes";
+
+const toMemoryKey = (workspaceId: string, conversationId: string): string => {
+  if (!workspaceId || !conversationId) return conversationId;
+  if (conversationId.includes(":")) return conversationId;
+  return getMemoryKey(workspaceId, conversationId);
+};
 
 const Header = () => (
   <header className="fixed top-0 left-0 right-0 h-16 px-8 flex items-center justify-between z-40 bg-white/70 backdrop-blur-md border-b border-white/20 shadow-sm shadow-gray-100/20">
     <div className="flex items-center gap-2">
       <div className="w-8 h-8 bg-black rounded-full flex items-center justify-center text-white font-bold text-xs">
-        XC
+        JK
       </div>
-      <span className="font-bold text-xl tracking-tight">XcAISTUDIO</span>
+      <span className="font-bold text-xl tracking-tight">Jacky-Studio</span>
     </div>
     <div className="flex items-center gap-6">
       <div className="text-sm font-medium text-gray-600 flex items-center gap-1 cursor-pointer">
@@ -47,11 +60,8 @@ const Header = () => (
       <button className="p-2 rounded-full hover:bg-gray-200 transition">
         <Bell size={20} className="text-gray-600" />
       </button>
-      <div className="w-8 h-8 rounded-full overflow-hidden border border-gray-200 cursor-pointer">
-        <img
-          src="https://cdn.jsdelivr.net/gh/xiaoche0907/pic-bed@main/img_1769761984824_282_11dff4f8-a0df-43a9-b0db-09a846b50d34.jpg"
-          alt="User"
-        />
+      <div className="w-8 h-8 rounded-full border border-gray-200 cursor-pointer bg-black text-white text-[10px] font-bold flex items-center justify-center">
+        JK
       </div>
     </div>
   </header>
@@ -83,11 +93,16 @@ const FilterPill: React.FC<FilterPillProps> = ({
 interface ProjectCardProps {
   project?: Project;
   isNew?: boolean;
+  onDelete?: (
+    project: Project,
+    e: React.MouseEvent<HTMLButtonElement>,
+  ) => void;
 }
 
 const ProjectCard: React.FC<ProjectCardProps> = ({
   project,
   isNew = false,
+  onDelete,
 }) => {
   const navigate = useNavigate();
 
@@ -125,6 +140,15 @@ const ProjectCard: React.FC<ProjectCardProps> = ({
             <Box size={40} />
           </div>
         )}
+        {project && onDelete && (
+          <button
+            onClick={(e) => onDelete(project, e)}
+            className="absolute top-2 right-2 p-1.5 bg-white/90 backdrop-blur-sm rounded-lg border border-black/5 shadow-sm text-red-500 hover:bg-red-50 hover:border-red-200 transition opacity-0 group-hover:opacity-100"
+            title="删除项目"
+          >
+            <Trash2 size={14} />
+          </button>
+        )}
       </div>
       <div>
         <h3 className="text-sm font-medium text-gray-900 truncate">
@@ -153,15 +177,37 @@ const Home: React.FC<{ onExit?: () => void }> = ({ onExit }) => {
   const [imageModelEnabled, setImageModelEnabled] = useState(false); // Cube icon: "Nano Banana Pro"
 
   // UI States
+  const loadRecentProjects = async () => {
+    const all = await getProjectSummaries();
+    setRecentProjects(all.slice(0, 20));
+  };
 
   useEffect(() => {
-    // Load top 5 recent projects
-    const load = async () => {
-      const all = await getProjects();
-      setRecentProjects(all.slice(0, 5));
-    };
-    load();
+    void loadRecentProjects();
   }, []);
+
+  const handleDeleteProject = async (
+    project: Project,
+    e: React.MouseEvent<HTMLButtonElement>,
+  ) => {
+    e.stopPropagation();
+    if (!project?.id) return;
+    if (!window.confirm("确定要删除这个项目吗？此操作无法撤销。")) return;
+
+    try {
+      const fullProject = await getProject(project.id);
+      const conversations = fullProject?.conversations || [];
+      for (const conversation of conversations) {
+        await deleteTopicMemory(toMemoryKey(project.id, conversation.id));
+      }
+      await deleteTopicMemory(project.id);
+      await deleteProject(project.id);
+      await loadRecentProjects();
+    } catch (error) {
+      console.error("[Home] delete project failed", error);
+      window.alert("删除失败，请稍后重试。");
+    }
+  };
 
   const handleSearch = (e: React.FormEvent) => {
     e.preventDefault();
@@ -226,9 +272,9 @@ const Home: React.FC<{ onExit?: () => void }> = ({ onExit }) => {
         >
           <h1 className="text-4xl font-bold text-center mb-3 flex items-center gap-3">
             <div className="w-8 h-8 bg-black rounded-full flex items-center justify-center text-white text-xs">
-              XC
+              JK
             </div>
-            XcAISTUDIO 让设计更简单
+            Jacky-Studio 让设计更简单
           </h1>
           <p className="text-gray-500 mb-10 text-center">
             懂你的设计代理，帮你搞定一切
@@ -400,14 +446,21 @@ const Home: React.FC<{ onExit?: () => void }> = ({ onExit }) => {
         <div className="w-full">
           <div className="flex justify-between items-center mb-6">
             <h2 className="text-lg font-medium">最近项目</h2>
-            <button className="text-sm text-gray-400 hover:text-gray-600 flex items-center gap-1">
+            <button
+              onClick={() => navigate(ROUTES.projects)}
+              className="text-sm text-gray-400 hover:text-gray-600 flex items-center gap-1"
+            >
               查看全部 <span className="text-xs">{">"}</span>
             </button>
           </div>
           <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-5 gap-6">
             <ProjectCard isNew />
             {recentProjects.map((p) => (
-              <ProjectCard key={p.id} project={p} />
+              <ProjectCard
+                key={p.id}
+                project={p}
+                onDelete={handleDeleteProject}
+              />
             ))}
           </div>
         </div>
@@ -417,3 +470,5 @@ const Home: React.FC<{ onExit?: () => void }> = ({ onExit }) => {
 };
 
 export default Home;
+
+
