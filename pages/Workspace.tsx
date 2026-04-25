@@ -4587,8 +4587,6 @@ const Workspace: React.FC = () => {
   const handleGenImage = useWorkspaceElementImageGeneration({
     elementsRef,
     nodeInteractionMode,
-    showAssistant,
-    setShowAssistant,
     setElementGeneratingState,
     addMessage,
     translatePromptToEnglish,

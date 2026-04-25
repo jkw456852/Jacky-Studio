@@ -20,6 +20,7 @@ export const WorkspacePreviewModal: React.FC<WorkspacePreviewModalProps> = ({
   const [scale, setScale] = useState(1);
   const [offset, setOffset] = useState({ x: 0, y: 0 });
   const [isDragging, setIsDragging] = useState(false);
+  const viewportRef = useRef<HTMLDivElement | null>(null);
   const dragStartRef = useRef({ x: 0, y: 0 });
   const offsetStartRef = useRef({ x: 0, y: 0 });
 
@@ -85,11 +86,23 @@ export const WorkspacePreviewModal: React.FC<WorkspacePreviewModalProps> = ({
     }
   };
 
-  const handleWheel: React.WheelEventHandler<HTMLDivElement> = (event) => {
-    event.preventDefault();
-    event.stopPropagation();
-    updateScale(scale + (event.deltaY < 0 ? SCALE_STEP : -SCALE_STEP));
-  };
+  useEffect(() => {
+    const viewport = viewportRef.current;
+    if (!previewUrl || !viewport) return undefined;
+
+    const handleWheel = (event: WheelEvent) => {
+      event.preventDefault();
+      event.stopPropagation();
+      setScale((value) =>
+        clampScale(value + (event.deltaY < 0 ? SCALE_STEP : -SCALE_STEP)),
+      );
+    };
+
+    viewport.addEventListener("wheel", handleWheel, { passive: false });
+    return () => {
+      viewport.removeEventListener("wheel", handleWheel);
+    };
+  }, [previewUrl]);
 
   const handleMouseDown: React.MouseEventHandler<HTMLDivElement> = (event) => {
     event.stopPropagation();
@@ -198,9 +211,9 @@ export const WorkspacePreviewModal: React.FC<WorkspacePreviewModalProps> = ({
       </div>
 
       <div
+        ref={viewportRef}
         className="flex h-full w-full items-center justify-center overflow-hidden"
         onClick={(event) => event.stopPropagation()}
-        onWheel={handleWheel}
         onMouseMove={handleMouseMove}
         onMouseUp={handleMouseUp}
         onMouseLeave={handleMouseUp}

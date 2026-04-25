@@ -1,9 +1,11 @@
 import React from "react";
 import {
+  AlertCircle,
   Download,
   Image as ImageIcon,
   Loader2,
   Pencil,
+  RefreshCw,
   Trash2,
 } from "lucide-react";
 import type { CanvasElement } from "../../../types";
@@ -19,6 +21,10 @@ const LABEL_DOWNLOAD = "\u4e0b\u8f7d";
 const LABEL_DELETE = "\u5220\u9664\u8282\u70b9";
 const LABEL_DOUBLE_CLICK_PREVIEW = "\u53cc\u51fb\u9884\u89c8";
 const LABEL_TREE_IMAGE_NODE = "\u6811\u72b6\u56fe\u7247\u8282\u70b9";
+const LABEL_GENERATING = "\u751f\u56fe\u4e2d";
+const LABEL_GENERATION_FAILED = "\u751f\u56fe\u5931\u8d25";
+const LABEL_RETRY = "\u91cd\u8bd5";
+const LABEL_UNKNOWN_ERROR = "\u751f\u6210\u5931\u8d25\uff0c\u8bf7\u7a0d\u540e\u518d\u8bd5";
 
 type WorkspaceTreeImageNodeProps = {
   element: CanvasElement;
@@ -27,6 +33,7 @@ type WorkspaceTreeImageNodeProps = {
   timestampLabel: string;
   onStartMaskEdit: () => void;
   onDelete: () => void;
+  onRetry?: () => void;
 };
 
 const ImageCardFooter: React.FC<{
@@ -77,23 +84,15 @@ const TreeImageToolbar: React.FC<{
   onStartMaskEdit,
   onDownload,
   onDelete,
-}) => (
-  <div
-    aria-hidden={!isVisible}
-    className={`pointer-events-none absolute inset-x-0 top-0 z-30 flex justify-center transition-opacity duration-200 ${
-      isVisible ? "opacity-100" : "opacity-0"
-    }`}
-  >
+}) =>
+  !isVisible ? null : (
+    <div className="pointer-events-none absolute inset-x-0 top-0 z-30 flex justify-center transition-opacity duration-200 opacity-100">
     <div
-      className={`flex w-max items-center gap-0.5 rounded-full border border-white/82 bg-[rgba(255,255,255,0.98)] px-2 py-1.5 shadow-[0_12px_32px_rgba(15,23,42,0.10),0_1px_0_rgba(255,255,255,0.78)_inset] backdrop-blur-md transition-[transform,opacity] duration-200 ${
-        isVisible
-          ? "pointer-events-auto"
-          : "pointer-events-none"
-      }`}
+      className="pointer-events-auto flex w-max items-center gap-0.5 rounded-full border border-white/82 bg-[rgba(255,255,255,0.98)] px-2 py-1.5 shadow-[0_12px_32px_rgba(15,23,42,0.10),0_1px_0_rgba(255,255,255,0.78)_inset] backdrop-blur-md transition-[transform,opacity] duration-200"
       onMouseDown={(event) => event.stopPropagation()}
       onClick={(event) => event.stopPropagation()}
       style={{
-        transform: `translateY(calc(-100% - 12px)) scale(${isVisible ? 1 : 0.96})`,
+        transform: "translateY(calc(-100% - 12px)) scale(1)",
         transformOrigin: "center bottom",
       }}
     >
@@ -124,8 +123,8 @@ const TreeImageToolbar: React.FC<{
         }}
       />
     </div>
-  </div>
-);
+    </div>
+  );
 
 const DoubleClickHint: React.FC<{
   isVisible: boolean;
@@ -153,6 +152,7 @@ export const WorkspaceTreeImageNode: React.FC<
   timestampLabel,
   onStartMaskEdit,
   onDelete,
+  onRetry,
 }) => {
   const handleDownload = React.useCallback(() => {
     if (!displayUrl || typeof document === "undefined") return;
@@ -214,7 +214,57 @@ export const WorkspaceTreeImageNode: React.FC<
           <div className="pointer-events-none absolute inset-0 flex items-center justify-center bg-black/16 backdrop-blur-[1.5px]">
             <div className="flex items-center gap-2 rounded-full bg-white/94 px-3 py-2 text-[12px] font-semibold text-[#18181b] shadow-[0_10px_24px_rgba(0,0,0,0.14)]">
               <Loader2 size={14} className="animate-spin" />
-              <span>Generating</span>
+              <span>{LABEL_GENERATING}</span>
+            </div>
+          </div>
+        ) : element.genError ? (
+          <div className="absolute inset-0 z-[5] flex items-center justify-center bg-[rgba(18,18,18,0.38)] px-5 backdrop-blur-[2px]">
+            <div
+              className="flex w-full max-w-[280px] flex-col items-center gap-3 rounded-[22px] border border-white/70 bg-[rgba(255,255,255,0.96)] px-4 py-4 text-center shadow-[0_18px_40px_rgba(15,23,42,0.18)]"
+              onMouseDown={(event) => event.stopPropagation()}
+              onClick={(event) => event.stopPropagation()}
+            >
+              <div className="flex h-11 w-11 items-center justify-center rounded-full bg-[#fff1f2] text-[#dc2626]">
+                <AlertCircle size={18} />
+              </div>
+              <div className="space-y-1">
+                <div className="text-[13px] font-semibold text-[#111827]">
+                  {LABEL_GENERATION_FAILED}
+                </div>
+                <p
+                  className="text-[11px] leading-5 text-[#6b7280]"
+                  style={{
+                    display: "-webkit-box",
+                    WebkitBoxOrient: "vertical",
+                    WebkitLineClamp: 3,
+                    overflow: "hidden",
+                    wordBreak: "break-word",
+                  }}
+                >
+                  {element.genError || LABEL_UNKNOWN_ERROR}
+                </p>
+              </div>
+              {onRetry ? (
+                <div
+                  role="button"
+                  tabIndex={0}
+                  className="inline-flex cursor-pointer items-center gap-2 rounded-full bg-[#111827] px-4 py-2 text-[12px] font-semibold text-white transition hover:bg-[#1f2937]"
+                  onMouseDown={(event) => event.stopPropagation()}
+                  onClick={(event) => {
+                    event.stopPropagation();
+                    onRetry();
+                  }}
+                  onKeyDown={(event) => {
+                    if (event.key !== "Enter" && event.key !== " ") return;
+                    event.preventDefault();
+                    event.stopPropagation();
+                    onRetry();
+                  }}
+                >
+                  <RefreshCw size={13} />
+                  <span>{LABEL_RETRY}</span>
+                </div>
+              ) : null}
             </div>
           </div>
         ) : null}

@@ -30,6 +30,10 @@ const formatGenerationError = (error: unknown) => {
     return "The upstream image provider timed out (524). Try 1K or 2K, reduce references, wait a bit, or switch to another image route/provider.";
   }
 
+  if (/408/.test(message) || /upstream timeout/i.test(message)) {
+    return "The upstream image provider timed out (408). Please verify the current provider mirror fully supports the current gpt-image-2 edit payload, including multi-reference uploads and field names.";
+  }
+
   if (
     /429/.test(message) ||
     /rate limited/i.test(message) ||
@@ -52,8 +56,6 @@ const formatGenerationError = (error: unknown) => {
 type UseWorkspaceElementImageGenerationOptions = {
   elementsRef: MutableRefObject<CanvasElement[]>;
   nodeInteractionMode: WorkspaceNodeInteractionMode;
-  showAssistant: boolean;
-  setShowAssistant: (show: boolean) => void;
   setElementGeneratingState: (
     elementId: string,
     isGenerating: boolean,
@@ -95,8 +97,6 @@ export function useWorkspaceElementImageGeneration(
   const {
     elementsRef,
     nodeInteractionMode,
-    showAssistant,
-    setShowAssistant,
     setElementGeneratingState,
     addMessage,
     translatePromptToEnglish,
@@ -114,23 +114,46 @@ export function useWorkspaceElementImageGeneration(
     async (elementId: string) => {
       const requestStartedAt = Date.now();
       const el = elementsRef.current.find((element) => element.id === elementId);
-      if (!el || !el.genPrompt) return;
+      if (!el) return;
       const isTreePromptNode =
         resolveWorkspaceTreeNodeKind(el, nodeInteractionMode) === "prompt";
-      setElementGeneratingState(elementId, true);
-
-      if (!showAssistant) {
-        setShowAssistant(true);
+      const isTreeImageNode =
+        resolveWorkspaceTreeNodeKind(el, nodeInteractionMode) === "image";
+      const parentPromptElement =
+        isTreeImageNode && el.nodeParentId
+          ? elementsRef.current.find(
+              (element) =>
+                element.id === el.nodeParentId &&
+                resolveWorkspaceTreeNodeKind(element, nodeInteractionMode) ===
+                  "prompt",
+            ) || null
+          : null;
+      const sourceElement = parentPromptElement || el;
+      if (!sourceElement.genPrompt) return;
+      const shouldTrackSourceElementState = !isTreePromptNode;
+      if (shouldTrackSourceElementState) {
+        setElementGeneratingState(elementId, true);
       }
 
       const currentAspectRatio =
-        el.genAspectRatio || getClosestAspectRatio(el.width, el.height);
-      const model = el.genModel || "Nano Banana Pro";
-      const imageSize = el.genResolution || "1K";
-      const imageCount = Math.max(1, Math.min(4, el.genImageCount || 1));
+        sourceElement.genAspectRatio ||
+        getClosestAspectRatio(sourceElement.width, sourceElement.height);
+      const model = sourceElement.genModel || "Nano Banana Pro";
+      const imageSize = sourceElement.genResolution || "1K";
+      const imageCount = isTreePromptNode
+        ? Math.max(1, Math.min(4, sourceElement.genImageCount || 1))
+        : 1;
+      const manualReferenceImages =
+        sourceElement.genRefImages ||
+        (sourceElement.genRefImage ? [sourceElement.genRefImage] : []);
       const referenceImages = mergeConsistencyAnchorIntoReferences(
-        el.genRefImages || (el.genRefImage ? [el.genRefImage] : []),
+        manualReferenceImages,
       );
+      const consistencyAnchorInjected =
+        referenceImages.length > 0 &&
+        (manualReferenceImages.length === 0 ||
+          referenceImages[0] !== manualReferenceImages[0] ||
+          referenceImages.length !== manualReferenceImages.length);
 
       addMessage({
         id: `gen-start-${Date.now()}`,
@@ -138,18 +161,27 @@ export function useWorkspaceElementImageGeneration(
         text:
           imageCount > 1
             ? `Created ${imageCount} generation nodes. Starting image 1/${imageCount}...`
-            : `Generating image: ${el.genPrompt.slice(0, 40)}${el.genPrompt.length > 40 ? "..." : ""}`,
+            : `Generating image: ${sourceElement.genPrompt.slice(0, 40)}${sourceElement.genPrompt.length > 40 ? "..." : ""}`,
         timestamp: Date.now(),
       });
 
       try {
         const generationContext = {
           elementId,
+          sourceElementId: sourceElement.id,
           imageCount,
           model,
           aspectRatio: currentAspectRatio,
           imageSize,
+          manualReferenceCount: manualReferenceImages.length,
           referenceCount: referenceImages.length,
+          consistencyAnchorInjected,
+          manualReferenceKinds: manualReferenceImages.map((item) =>
+            String(item || "").startsWith("data:") ? "data" : "url",
+          ),
+          finalReferenceKinds: referenceImages.map((item) =>
+            String(item || "").startsWith("data:") ? "data" : "url",
+          ),
         };
         console.info("[workspace.imggen] request.start", generationContext);
         const targetElementIds = isTreePromptNode
@@ -167,8 +199,8 @@ export function useWorkspaceElementImageGeneration(
 
         const buildVariantPrompt = (index: number, fixPrompt?: string) => {
           const basePrompt = fixPrompt
-            ? `${el.genPrompt}\n\nConsistency fix: ${fixPrompt}`
-            : el.genPrompt!;
+            ? `${sourceElement.genPrompt}\n\nConsistency fix: ${fixPrompt}`
+            : sourceElement.genPrompt!;
           if (index === 0 || imageCount <= 1) {
             return basePrompt;
           }
@@ -179,7 +211,7 @@ export function useWorkspaceElementImageGeneration(
           imageGenSkill({
             prompt: buildVariantPrompt(index, fixPrompt),
             model,
-            providerId: el.genProviderId,
+            providerId: sourceElement.genProviderId,
             aspectRatio: currentAspectRatio,
             imageSize,
             referenceImages,
@@ -242,7 +274,7 @@ export function useWorkspaceElementImageGeneration(
                     resultUrl,
                     (fixPrompt?: string) => runGeneration(index, fixPrompt),
                     consistencyAnchor,
-                    el.genPrompt,
+                    sourceElement.genPrompt,
                     referenceImages.length,
                   )
                 : resultUrl;
@@ -270,7 +302,9 @@ export function useWorkspaceElementImageGeneration(
         }
 
         if (successCount === 0) {
-          setElementGeneratingState(elementId, false);
+          if (shouldTrackSourceElementState) {
+            setElementGeneratingState(elementId, false);
+          }
           addMessage({
             id: Date.now().toString(),
             role: "model",
@@ -283,7 +317,9 @@ export function useWorkspaceElementImageGeneration(
           return;
         }
 
-        setElementGeneratingState(elementId, false);
+        if (shouldTrackSourceElementState) {
+          setElementGeneratingState(elementId, false);
+        }
 
         console.info("[workspace.imggen] request.complete", {
           ...generationContext,
@@ -310,7 +346,9 @@ export function useWorkspaceElementImageGeneration(
           elapsedMs: Date.now() - requestStartedAt,
           error: reason,
         });
-        setElementGeneratingState(elementId, false);
+        if (shouldTrackSourceElementState) {
+          setElementGeneratingState(elementId, false);
+        }
         addMessage({
           id: Date.now().toString(),
           role: "model",
@@ -332,8 +370,6 @@ export function useWorkspaceElementImageGeneration(
       createGeneratingImagesNearElement,
       createGeneratingTreeImageChildren,
       setElementGeneratingState,
-      setShowAssistant,
-      showAssistant,
       translatePromptToEnglish,
     ],
   );

@@ -200,6 +200,12 @@ export function useWorkspaceCanvasPointer(
     }
     pendingDragElementIdRef.current = null;
     const target = e.target as HTMLElement;
+    const clickedNodeGraphBlankArea =
+      target instanceof SVGSVGElement &&
+      target.classList.contains("workspace-node-graph-layer");
+    const clickedNodeGraphHitArea = Boolean(
+      target.closest?.("[data-node-graph-hit='true']"),
+    );
 
     if (
       activeTool === "hand" ||
@@ -215,9 +221,11 @@ export function useWorkspaceCanvasPointer(
     }
 
     if (
-      target === containerRef.current ||
-      target === canvasLayerRef.current ||
-      target.classList.contains("canvas-background")
+      !clickedNodeGraphHitArea &&
+      (target === containerRef.current ||
+        target === canvasLayerRef.current ||
+        target.classList.contains("canvas-background") ||
+        clickedNodeGraphBlankArea)
     ) {
       e.preventDefault();
       (document.activeElement as HTMLElement)?.blur();

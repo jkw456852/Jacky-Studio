@@ -1,7 +1,9 @@
 import React, { memo } from "react";
 import {
+  AlertCircle,
   Image as ImageIcon,
   Loader2,
+  RefreshCw,
 } from "lucide-react";
 import type { CanvasElement, WorkspaceNodeInteractionMode } from "../../../types";
 import { WorkspaceTreePromptNode } from "./WorkspaceTreePromptNode";
@@ -73,6 +75,13 @@ type WorkspaceCanvasImageElementProps = {
 const RELATIVE_TIME_FORMATTER = new Intl.RelativeTimeFormat("en", {
   numeric: "auto",
 });
+const LABEL_PENDING_IMAGE = "\u56fe\u7247\u8282\u70b9";
+const LABEL_GENERATING = "\u751f\u56fe\u4e2d";
+const LABEL_GENERATING_MAGIC = "Creating magic...";
+const LABEL_GENERATION_FAILED = "\u751f\u56fe\u5931\u8d25";
+const LABEL_RETRY = "\u91cd\u8bd5";
+const LABEL_UNKNOWN_ERROR = "\u751f\u6210\u5931\u8d25\uff0c\u8bf7\u7a0d\u540e\u518d\u8bd5";
+const LABEL_AI_IMAGE = "AI\u751f\u56fe";
 
 const extractTimestamp = (id: string): number | null => {
   const match = id.match(/\d{13}/);
@@ -228,25 +237,84 @@ const RoundedImageNode: React.FC<{
   </button>
 );
 
+const GenerationFailureState: React.FC<{
+  errorMessage?: string;
+  onRetry?: () => void;
+  compact?: boolean;
+}> = ({ errorMessage, onRetry, compact = false }) => (
+  <div className="relative z-10 flex w-full flex-col items-center gap-3 px-4 text-center">
+    <div
+      className={`flex items-center justify-center rounded-full bg-[#fff1f2] text-[#dc2626] shadow-[0_10px_24px_rgba(127,29,29,0.10)] ${
+        compact ? "h-11 w-11" : "h-14 w-14"
+      }`}
+    >
+      <AlertCircle size={compact ? 18 : 22} />
+    </div>
+    <div className="space-y-1.5">
+      <div className={`font-semibold text-[#111827] ${compact ? "text-[13px]" : "text-sm"}`}>
+        {LABEL_GENERATION_FAILED}
+      </div>
+      <p
+        className={`mx-auto max-w-[240px] leading-5 text-[#6b7280] ${
+          compact ? "text-[11px]" : "text-[12px]"
+        }`}
+        style={{
+          display: "-webkit-box",
+          WebkitBoxOrient: "vertical",
+          WebkitLineClamp: compact ? 3 : 4,
+          overflow: "hidden",
+          wordBreak: "break-word",
+        }}
+      >
+        {errorMessage || LABEL_UNKNOWN_ERROR}
+      </p>
+    </div>
+    {onRetry ? (
+      <button
+        type="button"
+        className="inline-flex items-center gap-2 rounded-full bg-[#111827] px-4 py-2 text-[12px] font-semibold text-white transition hover:bg-[#1f2937]"
+        onMouseDown={(event) => event.stopPropagation()}
+        onClick={(event) => {
+          event.stopPropagation();
+          onRetry();
+        }}
+      >
+        <RefreshCw size={13} />
+        <span>{LABEL_RETRY}</span>
+      </button>
+    ) : null}
+  </div>
+);
+
 const PendingImageNode: React.FC<{
   element: CanvasElement;
-}> = ({ element }) => (
+  onRetry?: () => void;
+}> = ({ element, onRetry }) => (
   <div
     className={`relative flex h-full w-full items-center justify-center overflow-hidden border border-[#d8e0ea] bg-[linear-gradient(180deg,#f8fafc_0%,#eef2f7_100%)] shadow-[0_18px_42px_rgba(15,23,42,0.08)] ${WORKSPACE_NODE_CARD_RADIUS}`}
   >
     <div className="pointer-events-none absolute inset-0 bg-[radial-gradient(circle_at_top,rgba(255,255,255,0.85),transparent_72%)]" />
-    <div className="relative z-10 flex flex-col items-center gap-3 text-[#64748b]">
-      <div className="flex h-12 w-12 items-center justify-center rounded-full bg-white shadow-[0_10px_24px_rgba(15,23,42,0.08)]">
-        {element.isGenerating ? (
+    {element.isGenerating ? (
+      <div className="relative z-10 flex flex-col items-center gap-3 text-[#64748b]">
+        <div className="flex h-12 w-12 items-center justify-center rounded-full bg-white shadow-[0_10px_24px_rgba(15,23,42,0.08)]">
           <Loader2 size={18} className="animate-spin" />
-        ) : (
+        </div>
+        <div className="text-[13px] font-medium">{LABEL_GENERATING}</div>
+      </div>
+    ) : element.genError ? (
+      <GenerationFailureState
+        errorMessage={element.genError}
+        onRetry={onRetry}
+        compact
+      />
+    ) : (
+      <div className="relative z-10 flex flex-col items-center gap-3 text-[#64748b]">
+        <div className="flex h-12 w-12 items-center justify-center rounded-full bg-white shadow-[0_10px_24px_rgba(15,23,42,0.08)]">
           <ImageIcon size={18} />
-        )}
+        </div>
+        <div className="text-[13px] font-medium">{LABEL_PENDING_IMAGE}</div>
       </div>
-      <div className="text-[13px] font-medium">
-        {element.isGenerating ? "生成中..." : "图片节点"}
-      </div>
-    </div>
+    )}
   </div>
 );
 
@@ -254,7 +322,8 @@ const ClassicEmptyGenNode: React.FC<{
   element: CanvasElement;
   isSelected: boolean;
   zoom: number;
-}> = ({ element, isSelected, zoom }) => {
+  onRetry?: () => void;
+}> = ({ element, isSelected, zoom, onRetry }) => {
   return (
     <div
       className={`relative flex h-full w-full flex-col overflow-hidden border border-[#e7e1ff] bg-[linear-gradient(180deg,#faf8ff_0%,#f4f0ff_100%)] transition-colors ${WORKSPACE_NODE_CARD_RADIUS}`}
@@ -269,7 +338,7 @@ const ClassicEmptyGenNode: React.FC<{
             }}
           >
             <ImageIcon size={12} className="opacity-80" />
-            <span>AI生图</span>
+            <span>{LABEL_AI_IMAGE}</span>
           </div>
           <div
             className="pointer-events-none absolute top-0 right-0 z-50 whitespace-nowrap font-mono text-[10px] font-medium text-gray-500"
@@ -292,12 +361,19 @@ const ClassicEmptyGenNode: React.FC<{
             <Loader2 size={48} className="animate-spin text-[#7C5CFF]" />
             <div className="flex flex-col items-center gap-1">
               <span className="whitespace-nowrap text-sm font-bold text-[#7C5CFF]">
-                正在生成中
+                {LABEL_GENERATING}
               </span>
               <span className="animate-pulse text-[10px] text-[#9a86ff]">
-                Creating magic...
+                {LABEL_GENERATING_MAGIC}
               </span>
             </div>
+          </div>
+        ) : element.genError ? (
+          <div style={{ transform: `scale(${100 / zoom})` }}>
+            <GenerationFailureState
+              errorMessage={element.genError}
+              onRetry={onRetry}
+            />
           </div>
         ) : (
           <div
@@ -470,6 +546,9 @@ const WorkspaceCanvasImageElementImpl: React.FC<
               timestampLabel={timestampLabel}
               onStartMaskEdit={() => setEraserMode(true)}
               onDelete={deleteSelectedElement}
+              onRetry={() => {
+                void handleGenImage(element.id);
+              }}
             />
           ) : (
             <RoundedImageNode
@@ -530,7 +609,12 @@ const WorkspaceCanvasImageElementImpl: React.FC<
         </>
       ) : element.type === "image" ? (
         <>
-          <PendingImageNode element={element} />
+          <PendingImageNode
+            element={element}
+            onRetry={() => {
+              void handleGenImage(element.id);
+            }}
+          />
           {isTreeImageNode ? (
             <TreeNodePorts
               elementId={element.id}
@@ -555,6 +639,9 @@ const WorkspaceCanvasImageElementImpl: React.FC<
             element={element}
             isSelected={isSelected}
             zoom={zoom}
+            onRetry={() => {
+              void handleGenImage(element.id);
+            }}
           />
           {isSelected ? (
             <ResizeHandles

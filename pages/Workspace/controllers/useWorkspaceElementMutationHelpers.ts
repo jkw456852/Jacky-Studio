@@ -303,8 +303,14 @@ export function useWorkspaceElementMutationHelpers(
         zIndex: baseZIndex + index,
         genPrompt: sourceElement.genPrompt,
         genModel: sourceElement.genModel,
+        genProviderId: sourceElement.genProviderId,
         genAspectRatio: `${asset.originalWidth}:${asset.originalHeight}`,
         genResolution: sourceElement.genResolution,
+        genImageCount: sourceElement.genImageCount,
+        genRefImage: sourceElement.genRefImage,
+        genRefImages: sourceElement.genRefImages,
+        genRefPreviewImage: sourceElement.genRefPreviewImage,
+        genRefPreviewImages: sourceElement.genRefPreviewImages,
       }));
 
       const nextElements = [...elementsRef.current, ...newElements];
@@ -419,11 +425,14 @@ export function useWorkspaceElementMutationHelpers(
           generatingType: "gen-image",
           genPrompt: sourceElement.genPrompt,
           genModel: sourceElement.genModel,
+          genProviderId: sourceElement.genProviderId,
           genAspectRatio: sourceElement.genAspectRatio,
           genResolution: sourceElement.genResolution,
           genImageCount: sourceElement.genImageCount,
           genRefImage: sourceElement.genRefImage,
           genRefImages: sourceElement.genRefImages,
+          genRefPreviewImage: sourceElement.genRefPreviewImage,
+          genRefPreviewImages: sourceElement.genRefPreviewImages,
           };
         },
       );
@@ -493,6 +502,7 @@ export function useWorkspaceElementMutationHelpers(
           generatingType: "gen-image",
           genPrompt: sourceElement.genPrompt,
           genModel: sourceElement.genModel,
+          genProviderId: sourceElement.genProviderId,
           genAspectRatio: sourceElement.genAspectRatio,
           genResolution: sourceElement.genResolution,
           genImageCount: sourceElement.genImageCount,

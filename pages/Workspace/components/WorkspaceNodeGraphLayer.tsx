@@ -146,7 +146,7 @@ export const WorkspaceNodeGraphLayer: React.FC<WorkspaceNodeGraphLayerProps> = (
 
   return (
     <svg
-      className="absolute overflow-visible z-[1]"
+      className="workspace-node-graph-layer absolute overflow-visible z-[1]"
       style={{
         left: minX,
         top: minY,
@@ -210,6 +210,7 @@ export const WorkspaceNodeGraphLayer: React.FC<WorkspaceNodeGraphLayerProps> = (
         return (
           <path
             key={`hit-${parent.id}-${child.id}-${points.startX}-${points.endX}-${zoom}`}
+            data-node-graph-hit="true"
             d={d}
             stroke="rgba(0,0,0,0.001)"
             strokeWidth={18}

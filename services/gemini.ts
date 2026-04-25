@@ -39,6 +39,59 @@ const normalizeUrl = (baseUrl: string): string => {
     return url;
 };
 
+const stableHashString = (input: string): string => {
+    let hash = 2166136261;
+    for (let index = 0; index < input.length; index += 1) {
+        hash ^= input.charCodeAt(index);
+        hash = Math.imul(hash, 16777619);
+    }
+    return (hash >>> 0).toString(16).padStart(8, '0');
+};
+
+const buildImageRequestFingerprint = (parts: {
+    model: string;
+    route: string;
+    size: string;
+    aspectRatio?: string;
+    prompt: string;
+    providerId?: string | null;
+    referenceImages?: string[];
+    maskImage?: string | null;
+}): {
+    fingerprint: string;
+    promptHash: string;
+    referenceHash: string;
+} => {
+    const promptHash = stableHashString(parts.prompt || '');
+    const normalizedRefs = (parts.referenceImages || []).map((item, index) => {
+        const value = String(item || '');
+        return `${index}:${estimateDataUrlBytes(value)}:${stableHashString(value)}`;
+    });
+    const referenceHash = stableHashString(normalizedRefs.join('|'));
+    const maskHash = parts.maskImage
+        ? `${estimateDataUrlBytes(parts.maskImage)}:${stableHashString(parts.maskImage)}`
+        : 'none';
+    const fingerprint = stableHashString(
+        [
+            parts.model,
+            parts.route,
+            parts.size,
+            parts.aspectRatio || '',
+            parts.providerId || '',
+            promptHash,
+            referenceHash,
+            maskHash,
+            String(normalizedRefs.length),
+        ].join('||'),
+    );
+
+    return {
+        fingerprint,
+        promptHash,
+        referenceHash,
+    };
+};
+
 const shouldTryAlternateAuth = (status: number): boolean => {
     return status === 401 || status === 403 || status === 404;
 };
@@ -57,6 +110,10 @@ type OpenAIAuthStrategy = 'auto' | 'bearer-only' | 'query-only';
 const OPENAI_QUERY_AUTH_BLOCKED_HOSTS = new Set<string>([
     'api3.wlai.vip',
 ]);
+
+const OPENAI_QUERY_AUTH_BLOCKED_HOST_PATH_PREFIXES: Record<string, string[]> = {
+    'api.bltcy.ai': ['/v1/images/edits', '/v1/images/generations'],
+};
 
 const OPENAI_AUTH_MODE_CACHE_KEY = 'openai_auth_mode_cache_v1';
 const openAIAuthModeMemoryCache = new Map<string, OpenAIAuthMode>();
@@ -127,16 +184,25 @@ const buildOpenAIPath = (baseUrl: string, path: string): string => {
 
 const shouldAllowQueryAuthFallback = (baseUrl: string, path: string): boolean => {
     const normalizedPath = String(path || '').trim() || '/v1/chat/completions';
-    if (normalizedPath !== '/v1/chat/completions') {
-        return true;
-    }
 
     try {
         const host = new URL(normalizeUrl(baseUrl || '')).host.toLowerCase();
+        const blockedPrefixes = OPENAI_QUERY_AUTH_BLOCKED_HOST_PATH_PREFIXES[host] || [];
+        if (blockedPrefixes.some((prefix) => normalizedPath.startsWith(prefix))) {
+            return false;
+        }
+
+        if (normalizedPath !== '/v1/chat/completions') {
+            return true;
+        }
+
         if (OPENAI_QUERY_AUTH_BLOCKED_HOSTS.has(host)) {
             return false;
         }
     } catch {
+        if (normalizedPath !== '/v1/chat/completions') {
+            return true;
+        }
         // ignore URL parse errors and keep fallback enabled
     }
 
@@ -309,6 +375,7 @@ const fetchOpenAIJsonWithFallback = async <T>(
         baseDelayMs?: number;
         maxDelayMs?: number;
         authStrategy?: OpenAIAuthStrategy;
+        requestFingerprint?: string;
     },
 ): Promise<T> => {
     const cacheKey = getOpenAIAuthCacheEntryKey(baseUrl, path);
@@ -345,6 +412,7 @@ const fetchOpenAIJsonWithFallback = async <T>(
                 console.info(`[${contextTag}] transport config`, {
                     authMode,
                     keyIndex: `${keyIndex + 1}/${apiKeys.length}`,
+                    requestFingerprint: requestTuning?.requestFingerprint || null,
                     url: summarizeBaseUrlForLog(url.replace(apiKey, '***')),
                     timeoutMs: requestTuning?.timeoutMs ?? 120000,
                     idleTimeoutMs: requestTuning?.idleTimeoutMs ?? 300000,
@@ -379,6 +447,7 @@ const fetchOpenAIJsonWithFallback = async <T>(
                     console.warn(`[${contextTag}] transport failure`, {
                         authMode,
                         keyIndex: `${keyIndex + 1}/${apiKeys.length}`,
+                        requestFingerprint: requestTuning?.requestFingerprint || null,
                         elapsedMs: Date.now() - requestStartedAt,
                         isTimeoutError,
                         errorName: error instanceof Error ? error.name : typeof error,
@@ -421,6 +490,7 @@ const fetchOpenAIJsonWithFallback = async <T>(
                 console.warn(`[${contextTag}] response error`, {
                     authMode,
                     keyIndex: `${keyIndex + 1}/${apiKeys.length}`,
+                    requestFingerprint: requestTuning?.requestFingerprint || null,
                     elapsedMs: Date.now() - requestStartedAt,
                     status: res.status,
                     bodyPreview: errBody.slice(0, 280),
@@ -480,6 +550,7 @@ const fetchOpenAIFormWithFallback = async <T>(
         baseDelayMs?: number;
         maxDelayMs?: number;
         authStrategy?: OpenAIAuthStrategy;
+        requestFingerprint?: string;
     },
 ): Promise<T> => {
     const cacheKey = getOpenAIAuthCacheEntryKey(baseUrl, path);
@@ -516,6 +587,7 @@ const fetchOpenAIFormWithFallback = async <T>(
                 console.info(`[${contextTag}] transport config`, {
                     authMode,
                     keyIndex: `${keyIndex + 1}/${apiKeys.length}`,
+                    requestFingerprint: requestTuning?.requestFingerprint || null,
                     url: summarizeBaseUrlForLog(url.replace(apiKey, '***')),
                     timeoutMs: requestTuning?.timeoutMs ?? 120000,
                     idleTimeoutMs: requestTuning?.idleTimeoutMs ?? 300000,
@@ -551,6 +623,7 @@ const fetchOpenAIFormWithFallback = async <T>(
                     console.warn(`[${contextTag}] transport failure`, {
                         authMode,
                         keyIndex: `${keyIndex + 1}/${apiKeys.length}`,
+                        requestFingerprint: requestTuning?.requestFingerprint || null,
                         elapsedMs: Date.now() - requestStartedAt,
                         errorName: error instanceof Error ? error.name : typeof error,
                         errorMessage: error instanceof Error ? error.message : String(error),
@@ -566,6 +639,7 @@ const fetchOpenAIFormWithFallback = async <T>(
                     console.info(`[${contextTag}] response payload`, {
                         authMode,
                         keyIndex: `${keyIndex + 1}/${apiKeys.length}`,
+                        requestFingerprint: requestTuning?.requestFingerprint || null,
                         elapsedMs: Date.now() - requestStartedAt,
                         ...(typeof payload === 'object' && payload
                             ? summarizeOpenAIJsonPayloadForLog(payload)
@@ -579,6 +653,7 @@ const fetchOpenAIFormWithFallback = async <T>(
             console.warn(`[${contextTag}] response error`, {
                 authMode,
                 keyIndex: `${keyIndex + 1}/${apiKeys.length}`,
+                requestFingerprint: requestTuning?.requestFingerprint || null,
                 elapsedMs: Date.now() - requestStartedAt,
                 status: res.status,
                 bodyPreview: errBody.slice(0, 500),
@@ -2047,8 +2122,8 @@ const resolveOpenAIImageSize = (
         },
         '2K': {
             '1:1': '1440x1440',
-            '3:4': '1216x1632',
-            '4:3': '1632x1216',
+            '3:4': '1224x1632',
+            '4:3': '1632x1224',
             '9:16': '1152x2048',
             '16:9': '2048x1152',
             '2:3': '1152x1728',
@@ -2104,6 +2179,14 @@ const dataUrlToFilePayload = (
     };
 };
 
+const estimateDataUrlBytes = (dataUrl: string): number => {
+    const match = String(dataUrl || '').match(/^data:(.+);base64,(.+)$/);
+    if (!match) return 0;
+    const base64 = match[2];
+    const padding = (base64.match(/=*$/)?.[0]?.length || 0);
+    return Math.max(0, Math.floor((base64.length * 3) / 4) - padding);
+};
+
 const extractOpenAIImageResult = (payload: any): string | null => {
     const first = Array.isArray(payload?.data) ? payload.data[0] : null;
     if (!first) return null;
@@ -2134,16 +2217,16 @@ const getOpenAIImageRequestTuning = (
                 timeoutMs: 480000,
                 idleTimeoutMs: 480000,
                 retries: 5,
-                baseDelayMs: 1500,
-                maxDelayMs: 25000,
+                baseDelayMs: 750,
+                maxDelayMs: 12500,
             };
         }
         return {
             timeoutMs: 420000,
             idleTimeoutMs: 420000,
             retries: 4,
-            baseDelayMs: 1200,
-            maxDelayMs: 20000,
+            baseDelayMs: 600,
+            maxDelayMs: 10000,
         };
     }
 
@@ -2152,8 +2235,8 @@ const getOpenAIImageRequestTuning = (
             timeoutMs: 300000,
             idleTimeoutMs: 300000,
             retries: 4,
-            baseDelayMs: 1200,
-            maxDelayMs: 20000,
+            baseDelayMs: 600,
+            maxDelayMs: 10000,
         };
     }
 
@@ -2161,8 +2244,52 @@ const getOpenAIImageRequestTuning = (
         timeoutMs: 240000,
         idleTimeoutMs: 240000,
         retries: 3,
-        baseDelayMs: 1000,
-        maxDelayMs: 15000,
+        baseDelayMs: 500,
+        maxDelayMs: 7500,
+    };
+};
+
+const buildOpenAIImageEditFormData = (opts: {
+    model: string;
+    prompt: string;
+    size: string;
+    referenceImages: string[];
+    maskImage?: string | null;
+}): {
+    formData: FormData;
+    imageFieldName: string;
+    referenceMimeTypes: string[];
+    maskMimeType: string | null;
+} => {
+    const formData = new FormData();
+    formData.append('model', opts.model);
+    formData.append('prompt', opts.prompt);
+    formData.append('size', opts.size);
+
+    const imageFieldName = 'image';
+    const referenceMimeTypes: string[] = [];
+    opts.referenceImages.forEach((dataUrl, index) => {
+        const filePayload = dataUrlToFilePayload(dataUrl, `image-${index + 1}`);
+        if (filePayload) {
+            formData.append(imageFieldName, filePayload.blob, filePayload.filename);
+            referenceMimeTypes.push(filePayload.blob.type || 'application/octet-stream');
+        }
+    });
+
+    let maskMimeType: string | null = null;
+    if (opts.maskImage) {
+        const maskPayload = dataUrlToFilePayload(opts.maskImage, 'mask');
+        if (maskPayload) {
+            formData.append('mask', maskPayload.blob, maskPayload.filename);
+            maskMimeType = maskPayload.blob.type || 'application/octet-stream';
+        }
+    }
+
+    return {
+        formData,
+        imageFieldName,
+        referenceMimeTypes,
+        maskMimeType,
     };
 };
 
@@ -2207,7 +2334,40 @@ const requestOpenAICompatibleImage = async (opts: {
             : '/v1/images/generations';
     const requestMode = getOpenAIImageRequestMode(opts.model, opts.imageSize);
     const size = resolveOpenAIImageSize(opts.model, opts.aspectRatio, opts.imageSize);
+    const normalizedAspectRatio = normalizeOpenAIImageAspectRatio(opts.aspectRatio);
     const requestTuning = getOpenAIImageRequestTuning(route, requestMode);
+    const referenceBytes = normalizedReferences.map((item) => estimateDataUrlBytes(item));
+    const totalReferenceBytes = referenceBytes.reduce((sum, item) => sum + item, 0);
+    const requestFingerprintMeta = buildImageRequestFingerprint({
+        model: opts.model,
+        route,
+        size,
+        aspectRatio: opts.aspectRatio,
+        prompt: opts.prompt,
+        providerId: provider.id || opts.providerId || null,
+        referenceImages: normalizedReferences,
+        maskImage: normalizedMask,
+    });
+    const requestTuningWithFingerprint = {
+        ...(requestTuning || {}),
+        requestFingerprint: requestFingerprintMeta.fingerprint,
+    };
+    const editFormMeta =
+        route === '/v1/images/edits'
+            ? buildOpenAIImageEditFormData({
+                model: opts.model,
+                prompt: opts.prompt,
+                size,
+                referenceImages: normalizedReferences,
+                maskImage: normalizedMask,
+            })
+            : null;
+    const imageFieldMode =
+        route === '/v1/images/edits'
+            ? normalizedReferences.length > 1
+                ? 'multi-file-repeated-field'
+                : 'single-file'
+            : 'json';
 
     console.info(`[${opts.contextTag}] request summary`, {
         route,
@@ -2218,39 +2378,49 @@ const requestOpenAICompatibleImage = async (opts: {
         imageSize: opts.imageSize || '1K',
         size,
         providerId: provider.id || opts.providerId || null,
+        requestFingerprint: requestFingerprintMeta.fingerprint,
+        promptHash: requestFingerprintMeta.promptHash,
+        referenceHash: requestFingerprintMeta.referenceHash,
+        promptChars: opts.prompt.length,
         referenceCount: normalizedReferences.length,
+        imageFieldMode,
+        imageFieldName: editFormMeta?.imageFieldName || null,
+        referenceMimeTypes: editFormMeta?.referenceMimeTypes || [],
+        referenceBytes,
+        totalReferenceBytes,
+        referenceKinds: normalizedReferences.map((item) => item.startsWith('data:') ? 'data' : 'other'),
         hasMask: !!normalizedMask,
+        maskMimeType: editFormMeta?.maskMimeType || null,
     });
 
     if (route === '/v1/images/edits') {
+        console.info(`[${opts.contextTag}] form payload`, {
+            model: opts.model,
+            requestMode,
+            providerId: provider.id || opts.providerId || null,
+            requestFingerprint: requestFingerprintMeta.fingerprint,
+            promptHash: requestFingerprintMeta.promptHash,
+            referenceHash: requestFingerprintMeta.referenceHash,
+            imageFieldName: editFormMeta?.imageFieldName || 'image',
+            imagePartCount: normalizedReferences.length,
+            size,
+            aspect_ratio: null,
+            hasMask: !!normalizedMask,
+            promptChars: opts.prompt.length,
+        });
         const payload = await fetchOpenAIFormWithFallback<any>(
             baseUrl,
             route,
             apiKeys,
-            () => {
-                const formData = new FormData();
-                formData.append('model', opts.model);
-                formData.append('prompt', opts.prompt);
-                formData.append('size', size);
-
-                normalizedReferences.forEach((dataUrl, index) => {
-                    const filePayload = dataUrlToFilePayload(dataUrl, `image-${index + 1}`);
-                    if (filePayload) {
-                        formData.append('image', filePayload.blob, filePayload.filename);
-                    }
-                });
-
-                if (normalizedMask) {
-                    const maskPayload = dataUrlToFilePayload(normalizedMask, 'mask');
-                    if (maskPayload) {
-                        formData.append('mask', maskPayload.blob, maskPayload.filename);
-                    }
-                }
-
-                return formData;
-            },
+            () => buildOpenAIImageEditFormData({
+                model: opts.model,
+                prompt: opts.prompt,
+                size,
+                referenceImages: normalizedReferences,
+                maskImage: normalizedMask,
+            }).formData,
             opts.contextTag,
-            requestTuning,
+            requestTuningWithFingerprint,
         );
         return extractOpenAIImageResult(payload);
     }
@@ -2263,10 +2433,10 @@ const requestOpenAICompatibleImage = async (opts: {
             model: opts.model,
             prompt: opts.prompt,
             size,
-            aspect_ratio: normalizeOpenAIImageAspectRatio(opts.aspectRatio),
+            aspect_ratio: normalizedAspectRatio,
         },
         opts.contextTag,
-        requestTuning,
+        requestTuningWithFingerprint,
     );
 
     return extractOpenAIImageResult(payload);

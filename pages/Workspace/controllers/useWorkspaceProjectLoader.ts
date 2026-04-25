@@ -23,7 +23,13 @@ import {
 import {
   createImagePreviewDataUrl,
   estimateDataUrlBytes,
+  getElementDisplayUrl,
+  getElementSourceUrl,
 } from "../workspaceShared";
+import {
+  getAllNodeParentIds,
+  resolveWorkspaceTreeNodeKind,
+} from "../workspaceTreeNode";
 
 type WorkspaceBootstrapLocationState = {
   initialPrompt?: string;
@@ -80,6 +86,8 @@ const SAFE_LOAD_ACTIVE_MESSAGE_LIMIT = 24;
 const SAFE_LOAD_TEXT_LIMIT = 4000;
 const SAFE_LOAD_SUSPEND_AUTOSAVE_MS = 5000;
 const DATA_URL_PREFIX = /^data:/i;
+const LOAD_INTERRUPTED_GENERATION_ERROR =
+  "生成任务因页面刷新已中断，请重试。";
 
 const normalizeLoadedDataUrl = (value: string | undefined): string | undefined => {
   if (typeof value !== "string") {
@@ -140,10 +148,117 @@ const sanitizeLoadedMessage = (message: ChatMessage): ChatMessage => ({
               .slice(0, 4)
               .map((item) => trimLoadText(item, 80))
           : [],
-        isGenerating: message.agentData.isGenerating,
+        isGenerating: false,
       }
     : undefined,
 });
+
+const clearLoadedMessageGeneratingState = (
+  message: ChatMessage,
+): ChatMessage =>
+  message.agentData?.isGenerating
+    ? {
+        ...message,
+        agentData: {
+          ...message.agentData,
+          isGenerating: false,
+        },
+      }
+    : message;
+
+const resolveLoadedTreePromptReferenceState = (
+  elements: CanvasElement[],
+  parentIds: string[],
+): {
+  hasImageParents: boolean;
+  genRefImages?: string[];
+  genRefImage?: string;
+  genRefPreviewImages?: string[];
+  genRefPreviewImage?: string;
+} => {
+  const sourceRefs: string[] = [];
+  const previewRefs: string[] = [];
+  const seenSourceRefs = new Set<string>();
+  let hasImageParents = false;
+
+  for (const currentParentId of parentIds) {
+    const currentParent =
+      elements.find((element) => element.id === currentParentId) || null;
+
+    if (resolveWorkspaceTreeNodeKind(currentParent) !== "image") {
+      continue;
+    }
+
+    hasImageParents = true;
+
+    const sourceRef = (getElementSourceUrl(currentParent) || "").trim();
+    if (!sourceRef || seenSourceRefs.has(sourceRef)) {
+      continue;
+    }
+
+    seenSourceRefs.add(sourceRef);
+    sourceRefs.push(sourceRef);
+
+    const previewRef =
+      (getElementDisplayUrl(currentParent) || sourceRef).trim() || sourceRef;
+    previewRefs.push(previewRef);
+
+    if (sourceRefs.length >= 6) {
+      break;
+    }
+  }
+
+  return {
+    hasImageParents,
+    genRefImages: sourceRefs.length > 0 ? sourceRefs : undefined,
+    genRefImage: sourceRefs[0],
+    genRefPreviewImages: previewRefs.length > 0 ? previewRefs : undefined,
+    genRefPreviewImage: previewRefs[0],
+  };
+};
+
+const reconcileLoadedElements = (
+  elements: CanvasElement[],
+): CanvasElement[] =>
+  elements.map((element) => {
+    let nextElement = element;
+
+    if (element.isGenerating) {
+      nextElement = {
+        ...nextElement,
+        isGenerating: false,
+        generatingType: undefined,
+        genError:
+          nextElement.genError || LOAD_INTERRUPTED_GENERATION_ERROR,
+      };
+    }
+
+    if (resolveWorkspaceTreeNodeKind(nextElement) !== "prompt") {
+      return nextElement;
+    }
+
+    const parentIds = getAllNodeParentIds(nextElement);
+    if (parentIds.length === 0) {
+      return nextElement;
+    }
+
+    const nextReferenceState = resolveLoadedTreePromptReferenceState(
+      elements,
+      parentIds,
+    );
+
+    if (!nextReferenceState.hasImageParents) {
+      return nextElement;
+    }
+
+    return {
+      ...nextElement,
+      genRefImages: nextReferenceState.genRefImages,
+      genRefImage: nextReferenceState.genRefImage,
+      genRefPreviewImages: nextReferenceState.genRefPreviewImages,
+      genRefPreviewImage: nextReferenceState.genRefPreviewImage,
+    };
+  });
 
 const estimateConversationMessageCount = (
   conversations: ConversationSession[] | undefined,
@@ -226,7 +341,12 @@ const buildLoadedConversations = (
 
   if (!safeMode) {
     return {
-      conversations: trimmedConversations,
+      conversations: trimmedConversations.map((conversation) => ({
+        ...conversation,
+        messages: (conversation.messages || []).map(
+          clearLoadedMessageGeneratingState,
+        ),
+      })),
       activeConversationId,
     };
   }
@@ -474,9 +594,11 @@ export const useWorkspaceProjectLoader = ({
             if (cancelled) {
               return;
             }
-            const runtimeElements = buildRuntimeLoadedElements(
-              sanitizedElements,
-              safeLoadMode,
+            const runtimeElements = reconcileLoadedElements(
+              buildRuntimeLoadedElements(
+                sanitizedElements,
+                safeLoadMode,
+              ),
             );
             if (runtimeElements.length > 0) {
               setElementsSynced(runtimeElements);
