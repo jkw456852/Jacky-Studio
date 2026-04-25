@@ -36,6 +36,11 @@ refactor: simplify workspace canvas pointer handling
 docs: update project README
 ```
 
+For a reusable local template and a short guideline, see:
+
+- `./.github/commit-template.txt`
+- `./docs/COMMIT_MESSAGE_GUIDELINES.md`
+
 ## Typical release flow
 
 1. Commit your changes normally.
