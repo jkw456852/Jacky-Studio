@@ -56,14 +56,14 @@ jobs:
           ).splitlines()
 
           categories = [
-              ("feat", "Added"),
-              ("fix", "Fixed"),
-              ("perf", "Improved"),
-              ("refactor", "Refactored"),
-              ("docs", "Docs"),
-              ("test", "Tests"),
-              ("style", "Style"),
-              ("chore", "Chore"),
+              ("feat", "新增"),
+              ("fix", "修复"),
+              ("perf", "优化"),
+              ("refactor", "重构"),
+              ("docs", "文档"),
+              ("test", "测试"),
+              ("style", "样式"),
+              ("chore", "工程"),
           ]
 
           grouped = {key: [] for key, _ in categories}
@@ -82,13 +82,13 @@ jobs:
                   other.append(normalized)
 
           lines = [
-              "## Summary",
+              "## 更新摘要",
               "",
-              f"- Release: `{current_tag}`",
+              f"- 版本：`{current_tag}`",
           ]
 
           if previous_tag:
-              lines.append(f"- Based on changes since `{previous_tag}`")
+              lines.append(f"- 基于 `{previous_tag}` 之后的变更")
 
           lines.extend([
               "",
@@ -108,7 +108,7 @@ jobs:
 
           if other:
               has_section = True
-              lines.append("### Other")
+              lines.append("### 其他")
               lines.append("")
               for item in other:
                   lines.append(f"- {item}")
@@ -116,13 +116,13 @@ jobs:
 
           if not has_section:
               lines.extend([
-                  "### Notes",
+                  "### 说明",
                   "",
-                  "- Internal release update.",
+                  "- 本次为内部版本更新。",
                   "",
               ])
 
-          lines.append(changelog_line)
+          lines.append(changelog_line.replace("Full Changelog:", "完整变更："))
           lines.append("")
 
           with open("release-notes.md", "w", encoding="utf-8") as fh:
