@@ -1,132 +1,179 @@
-# XC-STUDIO: 下一代 AI 辅助设计工作台
+# Jackt Studio
 
 <div align="center">
 
-![版本](https://img.shields.io/badge/version-1.1.0-blue.svg)
+![version](https://img.shields.io/badge/version-rewrite-orange)
 ![React](https://img.shields.io/badge/React-19-61dafb)
 ![Vite](https://img.shields.io/badge/Vite-6.2-646cff)
-![TypeScript](https://img.shields.io/badge/TypeScript-5.8-blue)
-![许可证](https://img.shields.io/badge/license-MIT-green.svg)
+![TypeScript](https://img.shields.io/badge/TypeScript-5.8-3178c6)
+![license](https://img.shields.io/badge/license-MIT-green)
 
-**XC-STUDIO** 是一款专为专业创作者打造的高级无限画布 AI 设计平台。它集成了多智能体编排协作、先进的多模态生成（图像/视频）以及深度的垂直领域工作流，提供无缝、高性能的 Web 设计体验。
+面向 AI 辅助创作的新一代工作台。
 
-[探索功能](#-核心能力) • [智能体系统](#-多智能体协作系统) • [技术架构](#-技术架构) • [快速开始](#-快速快速)
+从多轮对话、无限画布、树节点工作流，到多供应商模型接入、参考图生成/编辑、视频子工作区，这个仓库承载的是重构后的新项目，而不是旧版 XC-STUDIO 的延续包装。
 
 </div>
 
 ---
 
-## 🌟 核心能力
+## 项目定位
 
-### ♾️ 无限创意画布
-专为无约束设计打造的高性能工作空间。
-- **多媒体编排**: 无缝融合图像、视频、文本和矢量形状。
-- **绝对坐标系统**: 专业级的元素定位与图层管理能力。
-- **智能标记系统**: `Ctrl` + 点击可创建高精度选区标记，用于局部 AI 分析、重绘与重绘优化。
-- **持久化存储**: 基于 **IndexedDB** 的强大项目管理，突破浏览器存储限制，支持大规模创意资产存储。
+Jackt Studio 是一个以 `Workspace` 为核心的 AI 创作工作台，重点不是单一聊天窗口，而是把以下能力放进同一个可持续迭代的创作环境里：
 
-### 👔 服装工作室 (垂直领域专业工作流)
-专为时尚与电商领域专家设计的深度集成环境。
-- **身份锁定 (Identity Lock)**: 确保生成的系列组图中，模特的脸部特征与身材比例高度一致。
-- **版型精准 (Garment Precision)**: “产品锚点”系统确保衣服的材质纹理、缝线和结构细节完全忠于原始样衣。
-- **自动化镜头规划**: AI 驱动的分镜计划生成，完美匹配亚马逊、Shopify 等全球电商主图标准。
+- 对话驱动的创作与修改
+- 画布化的图片、文本、形状、视频元素编排
+- 树节点式提示词/参考图生成链路
+- 多供应商、多账号、多模型的统一接入
+- 电商、服装、海报、包装等垂直工作流
+- 项目持久化、历史恢复与主题记忆
 
-### 🎬 高级视频生成
-集成顶级视频模型，支持精确的时长和分辨率控制。
-- **模型支持**: **Grok Video (10s/15s)**, **Sora 2.0 Pro**, **Veo 3.1 Fast/Pro**, 以及 **Kling 1.5**。
-- **上下文感知生成**: 从画布元素一键转换为视频，或直接根据智能体建议的分镜生成。
+## 当前仓库包含什么
 
----
+- `pages/Workspace.tsx`
+  - 当前主工作区入口，承接画布、树节点、消息区和各类编辑工具
+- `pages/Workspace/components/`
+  - 工作区 UI 组件，包括树节点、工具栏、图层、预览、图片编辑等
+- `pages/Workspace/controllers/`
+  - 工作区控制层，负责发送消息、生图、改图、引用图上传、状态同步等
+- `services/gemini.ts`
+  - 当前最核心的模型接入与兼容适配逻辑之一
+- `services/providers/`
+  - 图片/视频/模型供应商抽象层
+- `services/skills/`
+  - 面向具体任务的技能层，如生图、改图、智能编辑、电商流程等
+- `stores/`
+  - Zustand 状态管理
+- `XC-VIDEO/`
+  - 挂载式视频子应用
+- `docs/`
+  - 重构说明、架构图、产品方案、规范、参考资料
 
-## 🤖 多智能体协作系统
+## 核心能力
 
-XC-STUDIO 采用双层路由系统（**本地关键词预匹配 + LLM 语义深度分析**）来精准调用专业 AI 智能体。
+### 1. 工作区式创作
 
-| 智能体 | 核心领域 | 主要交付物 |
-| :--- | :--- | :--- |
-| **Vireo** | 品牌识别 | Logo 系统、VI 规范、品牌配色方案。 |
-| **Cameron** | 影视导演 | 高保真故事板、剧本与分镜计划。 |
-| **Campaign** | 营销/电商 | 电商主图、详情页、亚马逊/Shopify 营销套图。 |
-| **Poster** | 视觉沟通 | 高冲击力的海报、社交媒体封面及平面广告。 |
-| **Package** | 工业设计 | 产品包装、开箱视觉、卷轴及标签设计。 |
-| **Motion** | 动态媒体 | 逐帧视频生成控制与视觉特效调优。 |
+- 不是只有聊天，而是聊天 + 画布 + 节点 + 结果面板并存
+- 支持项目级持久化，便于持续迭代同一个创作主题
+- 通过 Workspace 控制层把输入、生成、编辑、保存串成闭环
 
----
+### 2. 树节点生成链路
 
-## 🏗️ 技术架构
+- 支持提示词节点、图片节点等树状连接关系
+- 参考图与结果图可以在节点结构里持续派生
+- 适合做多轮变体、局部迭代、风格分支和方案对比
 
-XC-STUDIO 构建于现代化的反应式架构之上，专为低延迟和高可靠性而优化。
+### 3. 多模型与多供应商接入
 
-```mermaid
-graph TD
-    A[用户界面 - React 19] --> B[Zustand 状态引擎]
-    B --> C[无限画布上下文]
-    B --> D[多智能体编排器]
-    D --> E[本地路由 - 关键词]
-    D --> F[API 路由 - Gemini 3.1]
-    F --> G[专业化智能体集群]
-    G --> H[技能引擎 Skill Engine]
-    H --> I[高清放大 / 矢量化 / 去背景]
-    H --> J[多模态生成 - 图像/视频]
-```
+- 支持按供应商维度管理模型，而不是只按模型名粗暴合并
+- 支持同一供应商下多个不同 key/账号并存
+- 逐步兼容图片生成、图片编辑、视频生成等不同接口形态
 
-- **前端核心**: React 19, TypeScript 5.8, Vite 6.
-- **状态管理**: 基于持久化层的 Zustand 分布式状态。
-- **AI 后端**: Google Gemini 3.1 (Flash/Pro/Thinking) + 顶级图像/视频提供商。
-- **基础设施**: 使用 IndexedDB 实现海量资产云端同步感知的本地持久化。
+### 4. 垂直工作流
 
----
+- 电商图工作流
+- 服装/商品参考图与一致性生成
+- 智能编辑、局部重绘、触控式修改
+- 视频工作区接入
 
-## 🚀 快速开始
+## 技术栈
 
-### 1. 环境准备与安装
-确保您的环境中已安装 Node.js 18+。
+- React 19
+- TypeScript 5.8
+- Vite 6
+- Zustand
+- Google GenAI SDK 与多供应商适配
+- IndexedDB 本地持久化
+
+## 本地开发
+
+### 安装依赖
 
 ```bash
-# 克隆仓库
-git clone https://github.com/xiaoche0907/XC-STUDIO.git
-cd XC-STUDIO
-
-# 安装主项目依赖
 npm install
-
-# 安装视频子模块依赖
-cd XC-VIDEO && npm install && cd ..
+cd XC-VIDEO
+npm install
+cd ..
 ```
 
-### 2. 本地开发
+### 启动开发环境
+
 ```bash
 npm run dev
 ```
-应用将运行在 `http://localhost:3000`。
 
-### 3. API 配置
-在 UI 侧边栏点击 **设置**（齿轮图标）配置您的 API 提供者：
-- **Gemini 原生**: 通过官方 AI Studio 密钥直连。
-- **云雾 API ⭐**: 推荐中国用户使用，无需特殊网络环境。
-- **自定义代理**: 支持兼容 OpenAI 格式的高级代理协议。
+### 构建
 
----
+```bash
+npm run build
+```
 
-## ⌨️ 专业快捷键
+### 预览
 
-- `空格 (Space)` + **拖拽**: 平移工作区
-- `Ctrl` + **滚轮**: 平滑缩放
-- `Ctrl` + **点击**: 创建选区标记 (Marker)
-- `G` / `Shift + G`: 组合 / 取消组合元素
-- `Delete` / `Backspace`: 删除选中元素
-- `Ctrl + Z / Y`: 专业级 撤销/重做
+```bash
+npm run preview
+```
 
----
+### 现有测试脚本
 
-## 🤝 贡献与许可证
+```bash
+npm run test:optimizer
+```
 
-XC-STUDIO 采用 **MIT 许可证**。我们欢迎来自全球的设计师与 AI 开发者共同完善此项目。
+## 推荐阅读顺序
 
-- [提交问题 (Issue)](https://github.com/xiaoche0907/XC-STUDIO/issues)
-- [提交合并请求 (PR)](https://github.com/xiaoche0907/XC-STUDIO/pulls)
+如果你是第一次进入这个仓库，建议按这个顺序看：
 
-<div align="center">
-  <br/>
-  Made with ❤️ by XC-STUDIO Team
-</div>
+1. `docs/README.md`
+2. `docs/standards/AI_DEVELOPMENT_STANDARD.md`
+3. `docs/architecture/ROOT_DIRECTORY_POLICY.md`
+4. `docs/architecture/PROJECT_MODULE_MAP.md`
+5. `docs/architecture/WORKSPACE_REFACTOR_MAP.md`
+6. `docs/product/tree-node/TREE_NODE_IMPLEMENTATION_PLAN_20260424.md`
+7. `pages/Workspace.tsx`
+8. `pages/Workspace/controllers/useWorkspaceSend.ts`
+9. `pages/Workspace/controllers/useWorkspaceElementImageGeneration.ts`
+10. `services/gemini.ts`
+
+## 目录速览
+
+```text
+.
+├─ pages/
+│  ├─ Workspace/
+│  │  ├─ components/
+│  │  ├─ controllers/
+│  │  ├─ workspaceNodeGraph.ts
+│  │  └─ workspaceTreeNode.ts
+│  ├─ Home.tsx
+│  ├─ Projects.tsx
+│  ├─ Settings.tsx
+│  └─ VideoWorkspace.tsx
+├─ services/
+│  ├─ agents/
+│  ├─ providers/
+│  ├─ skills/
+│  └─ gemini.ts
+├─ stores/
+├─ utils/
+├─ docs/
+├─ XC-VIDEO/
+└─ user-management/
+```
+
+## 文档入口
+
+- [文档索引](./docs/README.md)
+- [项目模块地图](./docs/architecture/PROJECT_MODULE_MAP.md)
+- [Workspace 重构地图](./docs/architecture/WORKSPACE_REFACTOR_MAP.md)
+- [Tree Node 实现计划](./docs/product/tree-node/TREE_NODE_IMPLEMENTATION_PLAN_20260424.md)
+- [API 配置指南](./docs/references/API-CONFIGURATION-GUIDE.md)
+
+## 注意事项
+
+- 这是一个仍在快速重构中的项目，很多能力已经切进新架构，但仍有少量旧项目遗留物待继续清理
+- README 描述以当前仓库实际代码结构为准，不再沿用旧版 XC-STUDIO 的仓库定位
+- 若你在改模型兼容、树节点、生图接口或 Workspace，请优先查看 `docs/` 中对应设计文档
+
+## License
+
+MIT
