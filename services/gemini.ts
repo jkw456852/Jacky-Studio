@@ -2214,6 +2214,7 @@ const getOpenAIImageRequestTuning = (
     if (route === '/v1/images/edits') {
         if (requestMode === 'official-transfer') {
             return {
+                authStrategy: 'bearer-only' as const,
                 timeoutMs: 480000,
                 idleTimeoutMs: 480000,
                 retries: 5,
@@ -2222,6 +2223,7 @@ const getOpenAIImageRequestTuning = (
             };
         }
         return {
+            authStrategy: 'bearer-only' as const,
             timeoutMs: 420000,
             idleTimeoutMs: 420000,
             retries: 4,
@@ -2232,6 +2234,7 @@ const getOpenAIImageRequestTuning = (
 
     if (requestMode === 'official-transfer') {
         return {
+            authStrategy: 'bearer-only' as const,
             timeoutMs: 300000,
             idleTimeoutMs: 300000,
             retries: 4,
@@ -2241,6 +2244,7 @@ const getOpenAIImageRequestTuning = (
     }
 
     return {
+        authStrategy: 'bearer-only' as const,
         timeoutMs: 240000,
         idleTimeoutMs: 240000,
         retries: 3,
