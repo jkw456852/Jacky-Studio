@@ -55,6 +55,7 @@ type UseWorkspaceCanvasElementInteractionOptions = {
   setIsDraggingElement: (dragging: boolean) => void;
   setDragStart: (point: { x: number; y: number }) => void;
   setElementStartPos: (point: { x: number; y: number }) => void;
+  setElementsSynced: React.Dispatch<React.SetStateAction<CanvasElement[]>>;
   groupDragStartRef: MutableRefObject<Record<string, { x: number; y: number }>>;
   setIsResizing: (resizing: boolean) => void;
   setResizeHandle: (handle: string | null) => void;
@@ -112,6 +113,7 @@ export function useWorkspaceCanvasElementInteraction(
     setIsDraggingElement,
     setDragStart,
     setElementStartPos,
+    setElementsSynced,
     groupDragStartRef,
     setIsResizing,
     setResizeHandle,
@@ -201,6 +203,15 @@ export function useWorkspaceCanvasElementInteraction(
       }
 
       const elObj = elementById.get(id);
+      if (elObj?.hasFreshGeneratedGlow) {
+        setElementsSynced((currentElements) =>
+          currentElements.map((element) =>
+            element.id === id
+              ? { ...element, hasFreshGeneratedGlow: false }
+              : element,
+          ),
+        );
+      }
       if (activeTool === "text") {
         e.stopPropagation();
         e.preventDefault();
@@ -447,6 +458,7 @@ export function useWorkspaceCanvasElementInteraction(
       setDragStart,
       setEditingTextId,
       setElementStartPos,
+      setElementsSynced,
       setImageGenUploads,
       setInputBlocks,
       setIsDraggingElement,

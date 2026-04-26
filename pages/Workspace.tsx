@@ -4748,6 +4748,7 @@ const Workspace: React.FC = () => {
     setIsDraggingElement,
     setDragStart,
     setElementStartPos,
+    setElementsSynced,
     groupDragStartRef,
     setIsResizing,
     setResizeHandle,

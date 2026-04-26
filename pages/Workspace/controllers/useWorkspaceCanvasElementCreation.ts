@@ -42,6 +42,7 @@ type AddGenImageOptions = {
   genPrompt?: string;
   genAspectRatio?: string;
   genResolution?: NonNullable<CanvasElement["genResolution"]>;
+  genImageQuality?: NonNullable<CanvasElement["genImageQuality"]>;
   genRefImages?: string[];
   genRefPreviewImages?: string[];
   nodeInteractionMode?: WorkspaceNodeInteractionMode;
@@ -359,6 +360,7 @@ export function useWorkspaceCanvasElementCreation(
         genModel: activeImageModel,
         genAspectRatio: options?.genAspectRatio || "1:1",
         genResolution: options?.genResolution || "1K",
+        genImageQuality: options?.genImageQuality || "medium",
         genPrompt: options?.genPrompt || "",
         genRefImages: refImages,
         genRefImage: refImages[0],

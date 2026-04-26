@@ -70,42 +70,44 @@ export const WorkspaceHeaderBar: React.FC<WorkspaceHeaderBarProps> = ({
             <span>{currentModeMeta.shortLabel}</span>
             <ChevronDown size={12} className="text-gray-400" />
           </button>
-          <div className="pointer-events-none absolute left-0 top-full z-40 mt-2 hidden min-w-[180px] rounded-2xl border border-gray-100 bg-white p-2 shadow-[0_16px_40px_rgba(0,0,0,0.12)] group-hover/mode:block group-hover/mode:pointer-events-auto">
-            {(Object.entries(NODE_INTERACTION_MODE_META) as Array<
-              [WorkspaceNodeInteractionMode, typeof currentModeMeta]
-            >).map(([mode, meta]) => {
-              const Icon = meta.icon;
-              const active = mode === nodeInteractionMode;
-              return (
-                <button
-                  key={mode}
-                  type="button"
-                  onClick={() => setNodeInteractionMode(mode)}
-                  className={`flex w-full items-center gap-3 rounded-xl px-3 py-2.5 text-left transition ${
-                    active
-                      ? "bg-gray-900 text-white"
-                      : "text-gray-700 hover:bg-gray-50"
-                  }`}
-                >
-                  <Icon
-                    size={15}
-                    className={active ? "text-white/90" : "text-gray-400"}
-                  />
-                  <div className="min-w-0">
-                    <div className="text-xs font-semibold">{meta.label}</div>
-                    <div
-                      className={`text-[11px] ${
-                        active ? "text-white/65" : "text-gray-400"
-                      }`}
-                    >
-                      {mode === "branch"
-                        ? "新节点走树状分支交互"
-                        : "新节点保持当前经典交互"}
+          <div className="pointer-events-none absolute left-0 top-full z-40 hidden min-w-[180px] pt-2 group-hover/mode:block group-hover/mode:pointer-events-auto">
+            <div className="rounded-2xl border border-gray-100 bg-white p-2 shadow-[0_16px_40px_rgba(0,0,0,0.12)]">
+              {(Object.entries(NODE_INTERACTION_MODE_META) as Array<
+                [WorkspaceNodeInteractionMode, typeof currentModeMeta]
+              >).map(([mode, meta]) => {
+                const Icon = meta.icon;
+                const active = mode === nodeInteractionMode;
+                return (
+                  <button
+                    key={mode}
+                    type="button"
+                    onClick={() => setNodeInteractionMode(mode)}
+                    className={`flex w-full items-center gap-3 rounded-xl px-3 py-2.5 text-left transition ${
+                      active
+                        ? "bg-gray-900 text-white"
+                        : "text-gray-700 hover:bg-gray-50"
+                    }`}
+                  >
+                    <Icon
+                      size={15}
+                      className={active ? "text-white/90" : "text-gray-400"}
+                    />
+                    <div className="min-w-0">
+                      <div className="text-xs font-semibold">{meta.label}</div>
+                      <div
+                        className={`text-[11px] ${
+                          active ? "text-white/65" : "text-gray-400"
+                        }`}
+                      >
+                        {mode === "branch"
+                          ? "新节点走树状分支交互"
+                          : "新节点保持当前经典交互"}
+                      </div>
                     </div>
-                  </div>
-                </button>
-              );
-            })}
+                  </button>
+                );
+              })}
+            </div>
           </div>
         </div>
       </div>

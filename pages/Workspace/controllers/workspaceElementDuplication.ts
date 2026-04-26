@@ -180,6 +180,7 @@ export const buildDuplicatedCanvasSelection = ({
       isGenerating: false,
       generatingType: undefined,
       genError: undefined,
+      hasFreshGeneratedGlow: false,
       x: sourceElement.x + normalizedOffset.x,
       y: sourceElement.y + normalizedOffset.y,
       zIndex: nextZBase + index,

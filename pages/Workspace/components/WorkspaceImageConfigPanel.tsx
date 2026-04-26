@@ -18,6 +18,8 @@ import type { CanvasElement, ImageModel } from "../../../types";
 import { normalizeMappedModelId } from "../../../services/provider-settings";
 import { isLikelyGeneratedReferencePreview } from "../workspaceShared";
 
+const IMAGE_QUALITY_OPTIONS = ["high", "medium", "low"] as const;
+
 type ImageModelOption = {
   id: string;
   name: string;
@@ -98,10 +100,12 @@ const WorkspaceImageConfigPanelImpl: React.FC<
     element.type === "gen-image" && !element.url && !element.isGenerating;
   const [showCountPicker, setShowCountPicker] = useState(false);
   const [showReferenceThumbnails, setShowReferenceThumbnails] = useState(false);
+  const [showQualityPicker, setShowQualityPicker] = useState(false);
   const panelRef = useRef<HTMLDivElement | null>(null);
 
   useEffect(() => {
     setShowCountPicker(false);
+    setShowQualityPicker(false);
   }, [element.id]);
 
   const toolbarTop = elementY + element.height + 16;
@@ -388,6 +392,7 @@ const WorkspaceImageConfigPanelImpl: React.FC<
                 setShowResPicker(false);
                 setShowRatioPicker(false);
                 setShowCountPicker(false);
+                setShowQualityPicker(false);
               }}
               className="flex items-center gap-2 text-xs font-semibold text-gray-700 hover:text-black transition px-3 py-2 hover:bg-gray-50 rounded-full border border-gray-200 hover:border-gray-300"
             >
@@ -413,6 +418,7 @@ const WorkspaceImageConfigPanelImpl: React.FC<
                         genProviderId: model.providerId || null,
                       });
                       setShowModelPicker(false);
+                      setShowQualityPicker(false);
                     }}
                     className={`w-full text-left px-3 py-2.5 hover:bg-gray-50 rounded-xl text-xs transition flex items-center justify-between ${normalizedCurrentModelId === model.id && (model.providerId || null) === normalizedCurrentProviderId ? "text-blue-600 bg-blue-50/50 font-semibold" : "text-gray-700"}`}
                   >
@@ -466,6 +472,7 @@ const WorkspaceImageConfigPanelImpl: React.FC<
                 setShowModelPicker(false);
                 setShowResPicker(false);
                 setShowRatioPicker(false);
+                setShowQualityPicker(false);
               }}
               className="flex items-center gap-1 text-xs font-medium text-gray-500 hover:text-black transition px-2 py-1.5 hover:bg-gray-50 rounded-lg"
             >
@@ -501,6 +508,7 @@ const WorkspaceImageConfigPanelImpl: React.FC<
                 setShowCountPicker(false);
                 setShowModelPicker(false);
                 setShowRatioPicker(false);
+                setShowQualityPicker(false);
               }}
               className="flex items-center gap-1 text-xs font-medium text-gray-500 hover:text-black transition px-2 py-1.5 hover:bg-gray-50 rounded-lg"
             >
@@ -534,6 +542,7 @@ const WorkspaceImageConfigPanelImpl: React.FC<
                 setShowCountPicker(false);
                 setShowModelPicker(false);
                 setShowResPicker(false);
+                setShowQualityPicker(false);
               }}
               className="flex items-center gap-1 text-xs font-medium text-gray-500 hover:text-black transition px-2 py-1.5 hover:bg-gray-50 rounded-lg"
             >
@@ -572,6 +581,44 @@ const WorkspaceImageConfigPanelImpl: React.FC<
                     </button>
                   );
                 })}
+              </div>
+            )}
+          </div>
+
+          <div className="relative">
+            <button
+              onClick={() => {
+                setShowQualityPicker(!showQualityPicker);
+                setShowCountPicker(false);
+                setShowModelPicker(false);
+                setShowResPicker(false);
+                setShowRatioPicker(false);
+              }}
+              className="flex items-center gap-1 text-xs font-medium text-gray-500 hover:text-black transition px-2 py-1.5 hover:bg-gray-50 rounded-lg"
+            >
+              {element.genImageQuality || "medium"}
+              <ChevronDown size={10} className="opacity-50" />
+            </button>
+            {showQualityPicker && (
+              <div className="absolute bottom-full mb-2 right-0 w-28 bg-white rounded-xl shadow-xl border border-gray-100 p-1 z-[60]">
+                {IMAGE_QUALITY_OPTIONS.map((quality) => (
+                  <button
+                    key={quality}
+                    onClick={() => {
+                      updateSelectedElement({
+                        genImageQuality: quality,
+                      });
+                      setShowQualityPicker(false);
+                    }}
+                    className={`w-full text-left px-3 py-2 hover:bg-gray-50 rounded-lg text-xs transition ${
+                      (element.genImageQuality || "medium") === quality
+                        ? "text-blue-600 font-bold bg-blue-50/30"
+                        : "text-gray-600"
+                    }`}
+                  >
+                    {quality}
+                  </button>
+                ))}
               </div>
             )}
           </div>

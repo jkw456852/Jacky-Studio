@@ -113,10 +113,21 @@ export function useWorkspaceElementImageGeneration(
 
   return useCallback(
     async (elementId: string) => {
-      if (activeRequestsRef.current.has(elementId)) {
+      const requestElement = elementsRef.current.find(
+        (element) => element.id === elementId,
+      );
+      if (!requestElement) return;
+      const isTreePromptRequest =
+        resolveWorkspaceTreeNodeKind(requestElement, nodeInteractionMode) ===
+        "prompt";
+      const requestKey = isTreePromptRequest
+        ? `${elementId}:${Date.now()}:${Math.random().toString(36).slice(2, 8)}`
+        : elementId;
+
+      if (!isTreePromptRequest && activeRequestsRef.current.has(requestKey)) {
         return;
       }
-      activeRequestsRef.current.add(elementId);
+      activeRequestsRef.current.add(requestKey);
       const requestStartedAt = Date.now();
       try {
         const el = elementsRef.current.find((element) => element.id === elementId);
@@ -146,6 +157,7 @@ export function useWorkspaceElementImageGeneration(
           getClosestAspectRatio(sourceElement.width, sourceElement.height);
         const model = sourceElement.genModel || "Nano Banana Pro";
         const imageSize = sourceElement.genResolution || "1K";
+        const imageQuality = sourceElement.genImageQuality || "medium";
         const imageCount = isTreePromptNode
           ? Math.max(1, Math.min(4, sourceElement.genImageCount || 1))
           : 1;
@@ -199,6 +211,7 @@ export function useWorkspaceElementImageGeneration(
           model,
           aspectRatio: currentAspectRatio,
           imageSize,
+          imageQuality,
           manualReferenceCount: manualReferenceImages.length,
           referenceCount: referenceImages.length,
           referenceRoleMode,
@@ -243,6 +256,7 @@ export function useWorkspaceElementImageGeneration(
             providerId: sourceElement.genProviderId,
             aspectRatio: currentAspectRatio,
             imageSize,
+            imageQuality,
             disableTransportRetries: Boolean(sourceElement.genInfiniteRetry),
             referenceImages,
             referencePriority,
@@ -425,7 +439,7 @@ export function useWorkspaceElementImageGeneration(
           timestamp: Date.now(),
         });
       } finally {
-        activeRequestsRef.current.delete(elementId);
+        activeRequestsRef.current.delete(requestKey);
       }
     },
     [

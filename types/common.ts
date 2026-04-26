@@ -83,6 +83,7 @@ export interface CanvasElement {
   genProviderId?: string | null;
   genAspectRatio?: string;
   genResolution?: '1K' | '2K' | '4K';
+  genImageQuality?: 'low' | 'medium' | 'high';
   genImageCount?: 1 | 2 | 3 | 4;
   genInfiniteRetry?: boolean;
   genReferenceRoleMode?: 'none' | 'default' | 'poster-product';
@@ -112,6 +113,7 @@ export interface CanvasElement {
   isGenerating?: boolean;
   generatingType?: 'upscale' | 'vector' | 'remove-bg' | 'gen-image' | 'gen-video' | 'product-swap' | 'text-edit' | 'fast-edit' | 'eraser';
   genError?: string;
+  hasFreshGeneratedGlow?: boolean;
 
   x: number;
   y: number;

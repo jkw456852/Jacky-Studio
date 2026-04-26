@@ -6,6 +6,8 @@ export const WORKSPACE_NODE_OUTLINE_RADIUS = "rounded-[34px]";
 
 export const WORKSPACE_NODE_SELECTION_SHADOW =
   "0 0 0 1px rgba(115,87,255,0.96), 0 0 0 6px rgba(115,87,255,0.20)";
+export const WORKSPACE_NODE_FRESH_GENERATED_GLOW_SHADOW =
+  "0 0 0 1px rgba(74,222,128,0.98), 0 0 0 4px rgba(74,222,128,0.38), 0 0 30px rgba(34,197,94,0.42), 0 0 54px rgba(74,222,128,0.22)";
 export const WORKSPACE_NODE_HANDLE_BORDER = "#7C5CFF";
 
 export const WORKSPACE_NODE_RESIZE_HANDLE_CLASS =

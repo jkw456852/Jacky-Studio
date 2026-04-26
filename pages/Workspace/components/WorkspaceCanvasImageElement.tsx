@@ -14,6 +14,7 @@ import {
   WORKSPACE_IMAGE_NODE_WIDTH,
 } from "../workspaceTreeNode";
 import {
+  WORKSPACE_NODE_FRESH_GENERATED_GLOW_SHADOW,
   WORKSPACE_NODE_EDGE_HANDLE_CLASS,
   WORKSPACE_NODE_CARD_RADIUS,
   WORKSPACE_NODE_HANDLE_BORDER,
@@ -210,31 +211,39 @@ const RoundedImageNode: React.FC<{
   displayUrl?: string;
   timestampLabel: string;
 }> = ({ element, displayUrl, timestampLabel }) => (
-  <button
-    type="button"
-    className={`group/result relative block h-full w-full overflow-hidden bg-[#e9e9e9] text-left shadow-[0_18px_46px_rgba(20,20,20,0.14)] transition duration-200 hover:-translate-y-0.5 hover:shadow-[0_24px_54px_rgba(20,20,20,0.18)] ${WORKSPACE_NODE_CARD_RADIUS}`}
-  >
-    {displayUrl ? (
-      <img
-        src={displayUrl}
-        className="h-full w-full object-cover transition duration-300 group-hover/result:scale-[1.02]"
-        draggable={false}
+  <div className="relative h-full w-full">
+    {element.hasFreshGeneratedGlow ? (
+      <div
+        className={`pointer-events-none absolute -inset-[4px] ${WORKSPACE_NODE_CARD_RADIUS}`}
+        style={{ boxShadow: WORKSPACE_NODE_FRESH_GENERATED_GLOW_SHADOW }}
       />
-    ) : (
-      <div className="flex h-full w-full items-center justify-center bg-[#e9eef5] text-[#98a2b3]">
-        <ImageIcon size={52} strokeWidth={1.5} />
-      </div>
-    )}
-    <ImageCardFooter timestampLabel={timestampLabel} />
-    {element.isGenerating ? (
-      <div className="pointer-events-none absolute inset-0 flex items-center justify-center bg-black/16 backdrop-blur-[1px]">
-        <div className="flex items-center gap-2 rounded-full bg-white/92 px-3 py-2 text-[12px] font-semibold text-[#18181b] shadow-[0_10px_24px_rgba(0,0,0,0.14)]">
-          <Loader2 size={14} className="animate-spin" />
-          <span>Generating</span>
-        </div>
-      </div>
     ) : null}
-  </button>
+    <button
+      type="button"
+      className={`group/result relative block h-full w-full overflow-hidden bg-[#e9e9e9] text-left shadow-[0_18px_46px_rgba(20,20,20,0.14)] transition duration-200 hover:-translate-y-0.5 hover:shadow-[0_24px_54px_rgba(20,20,20,0.18)] ${WORKSPACE_NODE_CARD_RADIUS}`}
+    >
+      {displayUrl ? (
+        <img
+          src={displayUrl}
+          className="h-full w-full object-cover transition duration-300 group-hover/result:scale-[1.02]"
+          draggable={false}
+        />
+      ) : (
+        <div className="flex h-full w-full items-center justify-center bg-[#e9eef5] text-[#98a2b3]">
+          <ImageIcon size={52} strokeWidth={1.5} />
+        </div>
+      )}
+      <ImageCardFooter timestampLabel={timestampLabel} />
+      {element.isGenerating ? (
+        <div className="pointer-events-none absolute inset-0 flex items-center justify-center bg-black/16 backdrop-blur-[1px]">
+          <div className="flex items-center gap-2 rounded-full bg-white/92 px-3 py-2 text-[12px] font-semibold text-[#18181b] shadow-[0_10px_24px_rgba(0,0,0,0.14)]">
+            <Loader2 size={14} className="animate-spin" />
+            <span>Generating</span>
+          </div>
+        </div>
+      ) : null}
+    </button>
+  </div>
 );
 
 const GenerationFailureState: React.FC<{

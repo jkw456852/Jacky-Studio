@@ -143,6 +143,7 @@ const EMPTY_GEN_IMAGE_PANEL_PLACEHOLDER: CanvasElement = {
   genModel: "Nano Banana Pro",
   genAspectRatio: "1:1",
   genResolution: "1K",
+  genImageQuality: "medium",
   genImageCount: 1,
 };
 

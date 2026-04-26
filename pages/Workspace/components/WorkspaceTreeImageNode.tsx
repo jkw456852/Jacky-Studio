@@ -10,6 +10,7 @@ import {
 } from "lucide-react";
 import type { CanvasElement } from "../../../types";
 import {
+  WORKSPACE_NODE_FRESH_GENERATED_GLOW_SHADOW,
   WORKSPACE_NODE_OUTLINE_RADIUS,
   WORKSPACE_NODE_SELECTION_RADIUS,
   WORKSPACE_NODE_SELECTION_SHADOW,
@@ -175,6 +176,15 @@ export const WorkspaceTreeImageNode: React.FC<
           style={{
             borderRadius: WORKSPACE_NODE_SELECTION_RADIUS,
             boxShadow: WORKSPACE_NODE_SELECTION_SHADOW,
+          }}
+        />
+      ) : null}
+      {element.hasFreshGeneratedGlow ? (
+        <div
+          className={`pointer-events-none absolute -inset-[4px] ${WORKSPACE_NODE_OUTLINE_RADIUS}`}
+          style={{
+            borderRadius: WORKSPACE_NODE_SELECTION_RADIUS,
+            boxShadow: WORKSPACE_NODE_FRESH_GENERATED_GLOW_SHADOW,
           }}
         />
       ) : null}

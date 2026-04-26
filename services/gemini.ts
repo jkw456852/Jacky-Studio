@@ -1842,6 +1842,7 @@ export interface ImageGenerationConfig {
         | 'Flux.2 Max';
     aspectRatio: string;
     imageSize?: '1K' | '2K' | '4K';
+    imageQuality?: 'low' | 'medium' | 'high';
     providerId?: string | null;
     disableTransportRetries?: boolean;
     referenceImage?: string; // base64 (legacy)
@@ -1996,6 +1997,163 @@ ${opts.forbiddenChanges.map((item) => `- ${item}`).join('\n')}
     return `${constraints}${referenceInstructions}${approvedContext}${forbiddenSection}${negatives}
 [User Request]
 ${userPrompt}`.trim();
+};
+
+const buildReferenceGroundingPrompt = (
+    userPrompt: string,
+    opts: {
+        referenceCount?: number;
+    },
+): string => {
+    const referenceCount = Math.max(0, opts.referenceCount || 0);
+    const inferredReferenceRoles = inferExplicitReferenceRoleAssignment(
+        userPrompt,
+        referenceCount,
+    );
+    const multiReferenceSection = referenceCount >= 2
+        ? `
+[Multiple Reference Handling]
+- Read all reference images together instead of randomly following only one image.
+- If the user assigns different roles to different references, follow that assignment exactly.
+- Do not swap reference roles or ignore the product identity reference.
+`
+        : '';
+    const explicitRoleSection = inferredReferenceRoles
+        ? `
+[Explicit Reference Role Assignment]
+- The user explicitly assigned different roles to the references.
+- Reference image ${inferredReferenceRoles.layoutReferenceIndex} is the layout/style/composition anchor.
+- Reference image ${inferredReferenceRoles.productReferenceIndex} is the product identity and branding anchor.
+- Keep the overall poster/layout direction from reference image ${inferredReferenceRoles.layoutReferenceIndex}, while preserving the product shape, packaging, brand spelling, logo placement, and key details from reference image ${inferredReferenceRoles.productReferenceIndex}.
+- Do not replace the assigned product brand with unrelated new branding.
+`
+        : '';
+
+    return `
+[Reference Grounding]
+- Do not apply any hidden style-library preset or extra composition template beyond the user's own request.
+- Follow the user's written instruction as the only creative directive.
+- Keep the main product identity faithful to the relevant reference image(s).
+- Preserve visible brand name, logo spelling, packaging layout, silhouette, proportions, materials, colors, and signature details unless the user explicitly asks to change them.
+- Do not invent a new brand, replace the visible logo with another brand, or redesign the product into a different SKU-like object.
+- If exact brand text cannot be rendered perfectly, prefer keeping the original packaging structure and brand placement rather than replacing it with unrelated new branding.
+${multiReferenceSection}${explicitRoleSection}
+[User Request]
+${userPrompt}`.trim();
+};
+
+const normalizePromptForReferenceRoleParsing = (value: string): string =>
+    String(value || '')
+        .toLowerCase()
+        .replace(/\s+/g, ' ')
+        .trim();
+
+const REF1_ALIASES = [
+    '参考图一', '参考图1', '图一', '图1', '第一张', '第1张', '第一幅', '第1幅',
+    'ref1', 'ref 1', 'reference1', 'reference 1', 'image1', 'image 1',
+];
+
+const REF2_ALIASES = [
+    '参考图二', '参考图2', '图二', '图2', '第二张', '第2张', '第二幅', '第2幅',
+    'ref2', 'ref 2', 'reference2', 'reference 2', 'image2', 'image 2',
+];
+
+const LAYOUT_ROLE_CUES = [
+    '海报', '构图', '版式', '排版', '布局', '画面', '风格', '样式', '氛围', 'style', 'layout', 'composition', 'poster',
+];
+
+const PRODUCT_ROLE_CUES = [
+    '产品', '商品', '主体', '包装', '瓶子', '瓶身', '品牌', 'logo', '标志', '主物', 'product', 'brand', 'packaging',
+];
+
+const findOccurrences = (text: string, needles: string[]): number[] => {
+    const hits: number[] = [];
+    for (const needle of needles) {
+        let startIndex = 0;
+        while (startIndex < text.length) {
+            const hitIndex = text.indexOf(needle, startIndex);
+            if (hitIndex === -1) break;
+            hits.push(hitIndex);
+            startIndex = hitIndex + needle.length;
+        }
+    }
+    return hits;
+};
+
+const hasAliasCueProximity = (
+    text: string,
+    aliases: string[],
+    cues: string[],
+    maxDistance = 28,
+): boolean => {
+    const aliasHits = findOccurrences(text, aliases);
+    const cueHits = findOccurrences(text, cues);
+    if (aliasHits.length === 0 || cueHits.length === 0) {
+        return false;
+    }
+    for (const aliasHit of aliasHits) {
+        for (const cueHit of cueHits) {
+            if (Math.abs(aliasHit - cueHit) <= maxDistance) {
+                return true;
+            }
+        }
+    }
+    return false;
+};
+
+const hasAnyAlias = (text: string, aliases: string[]): boolean =>
+    aliases.some((alias) => text.includes(alias));
+
+const inferExplicitReferenceRoleAssignment = (
+    userPrompt: string,
+    referenceCount: number,
+): {
+    layoutReferenceIndex: 1 | 2;
+    productReferenceIndex: 1 | 2;
+} | null => {
+    if (referenceCount < 2) {
+        return null;
+    }
+
+    const prompt = normalizePromptForReferenceRoleParsing(userPrompt);
+    if (!prompt) {
+        return null;
+    }
+
+    const ref1Mentioned = hasAnyAlias(prompt, REF1_ALIASES);
+    const ref2Mentioned = hasAnyAlias(prompt, REF2_ALIASES);
+    if (!ref1Mentioned || !ref2Mentioned) {
+        return null;
+    }
+
+    const ref1Layout = hasAliasCueProximity(prompt, REF1_ALIASES, LAYOUT_ROLE_CUES);
+    const ref1Product = hasAliasCueProximity(prompt, REF1_ALIASES, PRODUCT_ROLE_CUES);
+    const ref2Layout = hasAliasCueProximity(prompt, REF2_ALIASES, LAYOUT_ROLE_CUES);
+    const ref2Product = hasAliasCueProximity(prompt, REF2_ALIASES, PRODUCT_ROLE_CUES);
+
+    const explicitPattern12 =
+        /(?:参考图[一1]|图[一1]|第[一1]张).{0,24}(?:海报|构图|版式|布局|风格|样式|画面|poster|layout|composition|style)/i.test(prompt) ||
+        /(?:用|把|换成|替换成).{0,12}(?:参考图[二2]|图[二2]|第[二2]张|ref ?2|reference ?2).{0,12}(?:产品|商品|主体|包装|品牌|logo|product|brand|packaging)/i.test(prompt);
+
+    const explicitPattern21 =
+        /(?:参考图[二2]|图[二2]|第[二2]张).{0,24}(?:海报|构图|版式|布局|风格|样式|画面|poster|layout|composition|style)/i.test(prompt) ||
+        /(?:用|把|换成|替换成).{0,12}(?:参考图[一1]|图[一1]|第[一1]张|ref ?1|reference ?1).{0,12}(?:产品|商品|主体|包装|品牌|logo|product|brand|packaging)/i.test(prompt);
+
+    if ((ref1Layout && ref2Product) || (explicitPattern12 && !ref2Layout)) {
+        return {
+            layoutReferenceIndex: 1,
+            productReferenceIndex: 2,
+        };
+    }
+
+    if ((ref2Layout && ref1Product) || (explicitPattern21 && !ref1Layout)) {
+        return {
+            layoutReferenceIndex: 2,
+            productReferenceIndex: 1,
+        };
+    }
+
+    return null;
 };
 
 const buildEditPrompt = (prompt: string, hasMask: boolean): string => {
@@ -2322,6 +2480,7 @@ const buildOpenAIImageEditFormData = (opts: {
     model: string;
     prompt: string;
     size: string;
+    quality?: 'low' | 'medium' | 'high';
     referenceImages: string[];
     maskImage?: string | null;
 }): {
@@ -2334,6 +2493,9 @@ const buildOpenAIImageEditFormData = (opts: {
     formData.append('model', opts.model);
     formData.append('prompt', opts.prompt);
     formData.append('size', opts.size);
+    if (opts.quality) {
+        formData.append('quality', opts.quality);
+    }
 
     const imageFieldName = 'image';
     const referenceMimeTypes: string[] = [];
@@ -2367,6 +2529,7 @@ const requestOpenAICompatibleImage = async (opts: {
     prompt: string;
     aspectRatio: string;
     imageSize?: '1K' | '2K' | '4K';
+    imageQuality?: 'low' | 'medium' | 'high';
     disableTransportRetries?: boolean;
     referenceImages?: string[];
     maskImage?: string | null;
@@ -2430,6 +2593,7 @@ const requestOpenAICompatibleImage = async (opts: {
                 model: opts.model,
                 prompt: opts.prompt,
                 size,
+                quality: opts.imageQuality,
                 referenceImages: normalizedReferences,
                 maskImage: normalizedMask,
             })
@@ -2449,6 +2613,7 @@ const requestOpenAICompatibleImage = async (opts: {
         disableTransportRetries: opts.disableTransportRetries === true,
         aspectRatio: opts.aspectRatio,
         imageSize: opts.imageSize || '1K',
+        imageQuality: opts.imageQuality || 'medium',
         size,
         providerId: provider.id || opts.providerId || null,
         requestFingerprint: requestFingerprintMeta.fingerprint,
@@ -2474,6 +2639,7 @@ const requestOpenAICompatibleImage = async (opts: {
             requestFingerprint: requestFingerprintMeta.fingerprint,
             promptHash: requestFingerprintMeta.promptHash,
             referenceHash: requestFingerprintMeta.referenceHash,
+            quality: opts.imageQuality || 'medium',
             imageFieldName: editFormMeta?.imageFieldName || 'image',
             imagePartCount: normalizedReferences.length,
             size,
@@ -2489,6 +2655,7 @@ const requestOpenAICompatibleImage = async (opts: {
                 model: opts.model,
                 prompt: opts.prompt,
                 size,
+                quality: opts.imageQuality,
                 referenceImages: normalizedReferences,
                 maskImage: normalizedMask,
             }).formData,
@@ -2506,6 +2673,7 @@ const requestOpenAICompatibleImage = async (opts: {
             model: opts.model,
             prompt: opts.prompt,
             size,
+            quality: opts.imageQuality,
             aspect_ratio: normalizedAspectRatio,
         },
         opts.contextTag,
@@ -2811,7 +2979,11 @@ export const generateImage = async (config: ImageGenerationConfig): Promise<stri
     const consistencyContext = config.consistencyContext || {};
     const shouldDisableHiddenConstraints = config.referenceRoleMode === 'none';
     const basePrompt = shouldDisableHiddenConstraints
-        ? config.prompt
+        ? hasReferences
+            ? buildReferenceGroundingPrompt(config.prompt, {
+                referenceCount: references.length,
+            })
+            : config.prompt
         : hasReferences || consistencyContext?.forbiddenChanges?.length || consistencyContext?.referenceSummary
         ? buildConstrainedPrompt(config.prompt, {
             strength,
@@ -2859,6 +3031,7 @@ export const generateImage = async (config: ImageGenerationConfig): Promise<stri
             prompt: finalPrompt,
             aspectRatio: validAspectRatio,
             imageSize: config.imageSize,
+            imageQuality: config.imageQuality,
             disableTransportRetries: config.disableTransportRetries,
             referenceImages: references,
             maskImage: config.maskImage,

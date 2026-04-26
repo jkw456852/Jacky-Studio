@@ -24,6 +24,7 @@ export async function imageGenSkill(params: ImageGenSkillParams): Promise<string
       providerId: params.providerId,
       aspectRatio: params.aspectRatio,
       imageSize: params.imageSize || '2K',
+      imageQuality: params.imageQuality,
       disableTransportRetries: params.disableTransportRetries,
       referenceImage: normalizedReferenceImage,
       referenceImages: params.referenceImages,

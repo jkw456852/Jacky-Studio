@@ -14,6 +14,7 @@ export interface ImageGenSkillParams {
   providerId?: string | null;
   aspectRatio: string;
   imageSize?: '1K' | '2K' | '4K';
+  imageQuality?: 'low' | 'medium' | 'high';
   disableTransportRetries?: boolean;
   referenceImage?: string;
   referenceImageUrl?: string;
