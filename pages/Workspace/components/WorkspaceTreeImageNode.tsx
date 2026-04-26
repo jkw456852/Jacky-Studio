@@ -30,6 +30,7 @@ type WorkspaceTreeImageNodeProps = {
   element: CanvasElement;
   isSelected: boolean;
   displayUrl?: string;
+  sourceUrl?: string;
   timestampLabel: string;
   onStartMaskEdit: () => void;
   onDelete: () => void;
@@ -149,20 +150,22 @@ export const WorkspaceTreeImageNode: React.FC<
   element,
   isSelected,
   displayUrl,
+  sourceUrl,
   timestampLabel,
   onStartMaskEdit,
   onDelete,
   onRetry,
 }) => {
   const handleDownload = React.useCallback(() => {
-    if (!displayUrl || typeof document === "undefined") return;
+    const downloadUrl = sourceUrl || displayUrl;
+    if (!downloadUrl || typeof document === "undefined") return;
     const link = document.createElement("a");
-    link.href = displayUrl;
+    link.href = downloadUrl;
     link.download = `tree-image-${element.id}.png`;
     document.body.appendChild(link);
     link.click();
     document.body.removeChild(link);
-  }, [displayUrl, element.id]);
+  }, [displayUrl, element.id, sourceUrl]);
 
   return (
     <div className="relative h-full w-full overflow-visible">

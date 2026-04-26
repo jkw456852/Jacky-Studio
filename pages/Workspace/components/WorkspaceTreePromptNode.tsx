@@ -5,6 +5,7 @@ import {
   ChevronDown,
   ChevronUp,
   Copy,
+  CircleHelp,
   ImagePlus,
   Sparkles,
   Trash2,
@@ -26,6 +27,21 @@ const LABEL_GENERATE = "\u751f\u6210";
 const LABEL_EXPAND = "\u5c55\u5f00\u5b50\u8282\u70b9";
 const LABEL_COLLAPSE = "\u6536\u8d77\u5b50\u8282\u70b9";
 const LABEL_GENERATING = "Generating";
+const LABEL_BERSERK_RETRY = "\u72c2\u66b4\u91cd\u8bd5";
+const LABEL_BERSERK_RETRY_HINT =
+  "\u6253\u5f00\u540e\uff0c\u751f\u56fe\u5931\u8d25\u4f1a\u5728\u539f\u56fe\u7247\u8282\u70b9\u4e0a\u7acb\u5373\u8fdb\u5165\u8f6e\u8be2\u91cd\u8bd5\uff0c\u4e0d\u7b49\u5f85\u3001\u4e0d\u65b0\u5f00\u8282\u70b9\uff0c\u76f4\u5230\u6210\u529f\u6216\u5237\u65b0\u9875\u9762\u3002";
+const LABEL_STYLE_LIBRARY = "\u98ce\u683c\u5e93";
+const LABEL_STYLE_LIBRARY_NONE = "\u65e0\u7ea6\u675f";
+const LABEL_STYLE_LIBRARY_DEFAULT = "\u591a\u89d2\u5ea6\u4e3b\u4f53";
+const LABEL_STYLE_LIBRARY_POSTER = "\u6d77\u62a5\u590d\u523b";
+const LABEL_STYLE_LIBRARY_NONE_HINT =
+  "\u5173\u95ed\u9690\u85cf\u7ea6\u675f\uff0c\u53ea\u53d1\u9001\u4f60\u5199\u7684 prompt \u548c\u53c2\u8003\u56fe\u3002";
+const LABEL_STYLE_LIBRARY_DEFAULT_HINT =
+  "\u628a\u591a\u5f20\u53c2\u8003\u56fe\u7406\u89e3\u6210\u540c\u4e00\u4e3b\u4f53\u7684\u591a\u89d2\u5ea6/\u8865\u5145\u7ec6\u8282\uff0c\u9002\u5408\u540c\u6b3e\u4ea7\u54c1\u6216\u540c\u4e00\u4e3b\u4f53\u7684\u8fd8\u539f\u3002";
+const LABEL_STYLE_LIBRARY_POSTER_HINT =
+  "\u7b2c 1 \u5f20\u53c2\u8003\u56fe\u4f5c\u4e3a\u6d77\u62a5/\u6784\u56fe/\u98ce\u683c\u53c2\u8003\uff0c\u7b2c 2 \u5f20\u53c2\u8003\u56fe\u4f5c\u4e3a\u4ea7\u54c1\u4e3b\u4f53\u53c2\u8003\uff0c\u4f18\u5148\u505a\u51fa\u201c\u7528\u56fe 2 \u4ea7\u54c1\u91cd\u505a\u56fe 1 \u6d77\u62a5\u201d\u7684\u6548\u679c\u3002";
+const LABEL_STYLE_LIBRARY_POSTER_DISABLED_HINT =
+  "\u81f3\u5c11\u9700\u8981 2 \u5f20\u53c2\u8003\u56fe\uff1a\u7b2c 1 \u5f20\u653e\u6d77\u62a5\u53c2\u8003\uff0c\u7b2c 2 \u5f20\u653e\u4ea7\u54c1\u53c2\u8003\u3002";
 
 type WorkspaceTreePromptNodeProps = {
   element: CanvasElement;
@@ -166,16 +182,59 @@ const ReferenceThumbStrip: React.FC<{
 
 const TreePromptToolbar: React.FC<{
   activeTone: string;
+  canUsePosterProductMode: boolean;
   onToneChange: (tone: string) => void;
+  onStyleLibraryChange: (
+    mode: NonNullable<CanvasElement["genReferenceRoleMode"]>,
+  ) => void;
   onCopy: () => void;
   onDelete: () => void;
+  styleLibraryMode?: CanvasElement["genReferenceRoleMode"];
 }> = ({
   activeTone,
+  canUsePosterProductMode,
   onToneChange,
+  onStyleLibraryChange,
   onCopy,
   onDelete,
-}) => (
-  <div className="absolute left-1/2 top-0 z-30 flex -translate-x-1/2 -translate-y-[calc(100%+12px)] items-center gap-1.5 rounded-full border border-[#e7e6ef] bg-white/98 px-2 py-1.5 shadow-[0_10px_24px_rgba(15,23,42,0.12)] backdrop-blur-sm">
+  styleLibraryMode,
+}) => {
+  const [showStyleLibraryPicker, setShowStyleLibraryPicker] = React.useState(false);
+  const normalizedStyleLibraryMode = styleLibraryMode || "default";
+  const styleLibraryLabel =
+    normalizedStyleLibraryMode === "none"
+      ? LABEL_STYLE_LIBRARY_NONE
+      : normalizedStyleLibraryMode === "poster-product"
+        ? LABEL_STYLE_LIBRARY_POSTER
+        : LABEL_STYLE_LIBRARY_DEFAULT;
+  const styleLibraryOptions: Array<{
+    value: NonNullable<CanvasElement["genReferenceRoleMode"]>;
+    label: string;
+    hint: string;
+    disabled?: boolean;
+  }> = [
+    {
+      value: "none",
+      label: LABEL_STYLE_LIBRARY_NONE,
+      hint: LABEL_STYLE_LIBRARY_NONE_HINT,
+    },
+    {
+      value: "default",
+      label: LABEL_STYLE_LIBRARY_DEFAULT,
+      hint: LABEL_STYLE_LIBRARY_DEFAULT_HINT,
+    },
+    {
+      value: "poster-product",
+      label: LABEL_STYLE_LIBRARY_POSTER,
+      hint: canUsePosterProductMode
+        ? LABEL_STYLE_LIBRARY_POSTER_HINT
+        : LABEL_STYLE_LIBRARY_POSTER_DISABLED_HINT,
+      disabled: !canUsePosterProductMode,
+    },
+  ];
+
+  return (
+    <div className="absolute left-1/2 top-0 z-[130] flex -translate-x-1/2 -translate-y-[calc(100%+12px)] items-center gap-1.5 rounded-full border border-[#e7e6ef] bg-white/98 px-2 py-1.5 shadow-[0_10px_24px_rgba(15,23,42,0.12)] backdrop-blur-sm">
     <div className="flex items-center gap-1 rounded-full border border-[#efedf5] bg-[#faf9fc] px-1.5 py-1">
       {TREE_PROMPT_TONES.map((tone) => {
         const active = activeTone === tone.id;
@@ -206,6 +265,65 @@ const TreePromptToolbar: React.FC<{
       })}
     </div>
     <div className="h-5 w-px bg-[#ebe9f1]" />
+    <div className="relative">
+      <button
+        type="button"
+        className="flex h-8 shrink-0 items-center gap-1 rounded-full px-2.5 whitespace-nowrap text-[12px] font-medium text-[#111827] transition hover:bg-[#f5f3ff]"
+        onMouseDown={(event) => event.stopPropagation()}
+        onClick={(event) => {
+          event.stopPropagation();
+          setShowStyleLibraryPicker((value) => !value);
+        }}
+      >
+        <span>{LABEL_STYLE_LIBRARY}</span>
+        <span className="rounded-full bg-[#f3efff] px-2 py-0.5 text-[10px] font-semibold text-[#6b4eff]">
+          {styleLibraryLabel}
+        </span>
+        <ChevronDown size={12} className="opacity-50" />
+      </button>
+      {showStyleLibraryPicker ? (
+        <div
+          className="absolute bottom-full left-0 z-[160] mb-2 w-64 rounded-2xl border border-[#e7e6ef] bg-white p-1.5 shadow-[0_18px_44px_rgba(15,23,42,0.16)]"
+          onMouseDown={(event) => event.stopPropagation()}
+        >
+          <div className="mb-1 border-b border-[#f1f2f7] px-3 py-1.5 text-[10px] font-bold uppercase tracking-[0.16em] text-[#98a2b3]">
+            {LABEL_STYLE_LIBRARY}
+          </div>
+          {styleLibraryOptions.map((option) => {
+            const active = normalizedStyleLibraryMode === option.value;
+            return (
+              <button
+                key={option.value}
+                type="button"
+                disabled={option.disabled}
+                className={`w-full rounded-xl px-3 py-2.5 text-left text-xs transition ${
+                  active
+                    ? "bg-[#f2efff] text-[#6b4eff]"
+                    : "text-[#344054] hover:bg-[#f8f9fc]"
+                } disabled:cursor-not-allowed disabled:opacity-40`}
+                onClick={(event) => {
+                  event.stopPropagation();
+                  if (option.disabled) {
+                    return;
+                  }
+                  onStyleLibraryChange(option.value);
+                  setShowStyleLibraryPicker(false);
+                }}
+              >
+                <div className="flex items-center justify-between gap-3">
+                  <span className="font-medium">{option.label}</span>
+                  {active ? <Check size={12} /> : null}
+                </div>
+                <div className="mt-1 text-[10px] leading-4 text-[#98a2b3]">
+                  {option.hint}
+                </div>
+              </button>
+            );
+          })}
+        </div>
+      ) : null}
+    </div>
+    <div className="h-5 w-px bg-[#ebe9f1]" />
     <button
       type="button"
       className="flex h-8 shrink-0 items-center gap-1 rounded-full px-2.5 whitespace-nowrap text-[12px] font-medium text-[#111827] transition hover:bg-[#f5f3ff]"
@@ -231,7 +349,8 @@ const TreePromptToolbar: React.FC<{
       <span>{LABEL_DELETE}</span>
     </button>
   </div>
-);
+  );
+};
 
 const CONTROL_PILL_CLASS =
   "flex h-9 items-center gap-2 rounded-[16px] border border-white/82 bg-white/76 px-3 text-[11px] font-semibold text-[#374151] shadow-[0_6px_16px_rgba(15,23,42,0.05)] transition hover:border-[#d8dced] hover:bg-white";
@@ -604,6 +723,7 @@ const TreePromptGenerateControls: React.FC<{
           )}
         </button>
       </div>
+
     </div>
   );
 };
@@ -697,6 +817,7 @@ export const WorkspaceTreePromptNode: React.FC<
   }, [promptValue]);
 
   const cardHeight = normalizedCardHeight;
+  const canUsePosterProductMode = sourceRefUrls.length >= 2;
 
   return (
     <div className="relative h-full w-full overflow-visible">
@@ -720,11 +841,56 @@ export const WorkspaceTreePromptNode: React.FC<
         {isSelected ? (
           <TreePromptToolbar
             activeTone={activeTone.id}
+            canUsePosterProductMode={canUsePosterProductMode}
             onToneChange={(tone) => updateSelectedElement({ treeNodeTone: tone })}
+            onStyleLibraryChange={(mode) =>
+              updateSelectedElement({ genReferenceRoleMode: mode })
+            }
             onCopy={() => void handleCopyPrompt()}
             onDelete={onDelete}
+            styleLibraryMode={element.genReferenceRoleMode}
           />
         ) : null}
+        <div
+          className="absolute right-6 top-14 z-[52] flex items-center gap-1.5"
+          onMouseDown={(event) => {
+            activateNode();
+            event.stopPropagation();
+          }}
+        >
+          <div className="group relative flex items-center gap-1">
+            <span className="text-[10px] font-medium text-[#98a2b3]">
+              {LABEL_BERSERK_RETRY}
+            </span>
+            <span className="flex h-4 w-4 items-center justify-center rounded-full bg-white/88 text-[#98a2b3] shadow-[0_4px_10px_rgba(15,23,42,0.08)]">
+              <CircleHelp size={11} />
+            </span>
+            <div className="pointer-events-none absolute right-[-8px] bottom-full z-[120] mb-2 w-44 rounded-xl bg-[#111827] px-3 py-2 text-[10px] leading-4 text-white opacity-0 shadow-[0_12px_30px_rgba(15,23,42,0.26)] transition duration-150 group-hover:opacity-100">
+              {LABEL_BERSERK_RETRY_HINT}
+            </div>
+          </div>
+          <button
+            type="button"
+            aria-label={LABEL_BERSERK_RETRY}
+            aria-pressed={Boolean(element.genInfiniteRetry)}
+            className={`relative h-5 w-9 shrink-0 rounded-full transition ${
+              element.genInfiniteRetry ? "bg-[#111111]" : "bg-[#d7dce5]"
+            }`}
+            onClick={(event) => {
+              activateNode();
+              event.stopPropagation();
+              updateSelectedElement({
+                genInfiniteRetry: !element.genInfiniteRetry,
+              });
+            }}
+          >
+            <span
+              className={`absolute top-[2px] h-4 w-4 rounded-full bg-white shadow-[0_4px_10px_rgba(15,23,42,0.18)] transition ${
+                element.genInfiniteRetry ? "left-[18px]" : "left-[2px]"
+              }`}
+            />
+          </button>
+        </div>
         <div
           className="relative grid h-full w-full grid-rows-[auto_minmax(0,1fr)_auto] border px-8 pb-6 pt-8 text-[#111827] transition-[box-shadow,border-color] duration-200"
           style={{

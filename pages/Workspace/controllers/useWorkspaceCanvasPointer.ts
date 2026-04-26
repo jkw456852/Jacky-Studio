@@ -70,7 +70,14 @@ type UseWorkspaceCanvasPointerOptions = {
   isDraggingElement: boolean;
   dragDidMoveRef: DragDidMoveRef;
   pendingDragElementIdRef: MutableRefObject<string | null>;
+  dragSelectionIdsRef: MutableRefObject<string[]>;
+  pendingAltDragDuplicateRef: MutableRefObject<{
+    anchorId: string;
+    selectionIds: string[];
+  } | null>;
+  didDuplicateOnCurrentDragRef: MutableRefObject<boolean>;
   elementStartPos: Point;
+  setElementStartPos: (point: Point) => void;
   selectedElementIds: string[];
   getCachedDragOthers: (draggingIds: Set<string>) => CanvasElement[];
   setAlignmentGuides: (guides: Guide[]) => void;
@@ -86,6 +93,14 @@ type UseWorkspaceCanvasPointerOptions = {
   setResizeHandle: (value: string | null) => void;
   setPan: (point: Point) => void;
   setIsDraggingElement: (value: boolean) => void;
+  beginAltDragDuplicate: (
+    selectionIds: string[],
+    anchorId: string,
+  ) => {
+    anchorId: string | null;
+    selectionIds: string[];
+    startPositions: Record<string, Point>;
+  } | null;
 };
 
 export function useWorkspaceCanvasPointer(
@@ -130,7 +145,11 @@ export function useWorkspaceCanvasPointer(
     isDraggingElement,
     dragDidMoveRef,
     pendingDragElementIdRef,
+    dragSelectionIdsRef,
+    pendingAltDragDuplicateRef,
+    didDuplicateOnCurrentDragRef,
     elementStartPos,
+    setElementStartPos,
     selectedElementIds,
     getCachedDragOthers,
     setAlignmentGuides,
@@ -146,6 +165,7 @@ export function useWorkspaceCanvasPointer(
     setResizeHandle,
     setPan,
     setIsDraggingElement,
+    beginAltDragDuplicate,
   } = options;
 
   const syncMarqueePreviewHighlight = useCallback(
@@ -199,6 +219,9 @@ export function useWorkspaceCanvasPointer(
       dragDidMoveRef.current = false;
     }
     pendingDragElementIdRef.current = null;
+    dragSelectionIdsRef.current = [];
+    pendingAltDragDuplicateRef.current = null;
+    didDuplicateOnCurrentDragRef.current = false;
     const target = e.target as HTMLElement;
     const clickedNodeGraphBlankArea =
       target instanceof SVGSVGElement &&
@@ -444,12 +467,30 @@ export function useWorkspaceCanvasPointer(
     }
 
     const pendingDragElementId = pendingDragElementIdRef.current;
-    const dragTargetId = pendingDragElementId;
+    let dragTargetId = pendingDragElementId;
     const passedDragThreshold =
       !!pendingDragElementId &&
       Math.hypot(e.clientX - dragStart.x, e.clientY - dragStart.y) >= 4;
 
     if (!isDraggingElement && passedDragThreshold) {
+      const pendingAltDragDuplicate = pendingAltDragDuplicateRef.current;
+      if (pendingAltDragDuplicate && dragTargetId) {
+        const duplicated = beginAltDragDuplicate(
+          pendingAltDragDuplicate.selectionIds,
+          pendingAltDragDuplicate.anchorId,
+        );
+        pendingAltDragDuplicateRef.current = null;
+        if (duplicated?.anchorId) {
+          dragTargetId = duplicated.anchorId;
+          pendingDragElementIdRef.current = duplicated.anchorId;
+          dragSelectionIdsRef.current = duplicated.selectionIds;
+          groupDragStartRef.current = duplicated.startPositions;
+          const anchorStart = duplicated.startPositions[duplicated.anchorId];
+          if (anchorStart) {
+            setElementStartPos(anchorStart);
+          }
+        }
+      }
       if (dragDidMoveRef) {
         dragDidMoveRef.current = true;
       }
@@ -460,9 +501,13 @@ export function useWorkspaceCanvasPointer(
       if (dragDidMoveRef) {
         dragDidMoveRef.current = true;
       }
+      const liveElements = elementsRef.current;
+      const liveElementById = new Map(
+        liveElements.map((element) => [element.id, element] as const),
+      );
       const dx = (e.clientX - dragStart.x) / (zoom / 100);
       const dy = (e.clientY - dragStart.y) / (zoom / 100);
-      const dragEl = elementById.get(dragTargetId);
+      const dragEl = liveElementById.get(dragTargetId);
       if (!dragEl) return;
 
       const baseX = elementStartPos.x + dx;
@@ -471,14 +516,14 @@ export function useWorkspaceCanvasPointer(
       let newY = baseY;
       const SNAP_THRESHOLD = 4;
       const guides: Guide[] = [];
+      const activeSelectionIds = dragSelectionIdsRef.current;
       let draggingIds =
-        selectedElementIds.length > 1 &&
-        selectedElementIds.includes(dragTargetId)
-          ? [...selectedElementIds]
+        activeSelectionIds.length > 1 && activeSelectionIds.includes(dragTargetId)
+          ? [...activeSelectionIds]
           : [dragTargetId];
       const draggingIdSet = new Set(draggingIds);
       for (const did of [...draggingIds]) {
-        const dEl = elementById.get(did);
+        const dEl = liveElementById.get(did);
         if (dEl?.type === "group" && dEl.children) {
           for (const cid of dEl.children) {
             if (!draggingIdSet.has(cid)) {
@@ -488,7 +533,10 @@ export function useWorkspaceCanvasPointer(
           }
         }
       }
-      for (const descendantId of collectNodeDescendantIds(elements, draggingIds)) {
+      for (const descendantId of collectNodeDescendantIds(
+        liveElements,
+        draggingIds,
+      )) {
         if (draggingIdSet.has(descendantId)) {
           continue;
         }
@@ -607,7 +655,7 @@ export function useWorkspaceCanvasPointer(
         for (const [elId, pos] of Object.entries(newOffsets)) {
           const dom = document.getElementById(`canvas-el-${elId}`);
           if (!dom) continue;
-          const current = elementById.get(elId);
+          const current = liveElementById.get(elId);
           if (!current) continue;
           dom.style.transform = `translate3d(${pos.x - current.x}px, ${pos.y - current.y}px, 0)`;
         }
@@ -622,6 +670,8 @@ export function useWorkspaceCanvasPointer(
     elementById,
     elementStartPos,
     elements,
+    elementsRef,
+    beginAltDragDuplicate,
     getCachedDragOthers,
     groupDragStartRef,
     isDraggingElement,
@@ -642,7 +692,9 @@ export function useWorkspaceCanvasPointer(
     resizeRafIdRef,
     resizeStart,
     selectedElementId,
-    selectedElementIds,
+    dragSelectionIdsRef,
+    pendingAltDragDuplicateRef,
+    setElementStartPos,
     pendingDragElementIdRef,
     setAlignmentGuides,
     setMarqueeEndIfChanged,
@@ -655,6 +707,8 @@ export function useWorkspaceCanvasPointer(
   const handleMouseUp = useCallback(() => {
     const pendingDragElementId = pendingDragElementIdRef.current;
     const dragDidMove = dragDidMoveRef?.current ?? isDraggingElement;
+    const dragSelectionIds = dragSelectionIdsRef.current;
+    const didDuplicateOnCurrentDrag = didDuplicateOnCurrentDragRef.current;
     cancelAnimationFrame(rafIdRef.current);
     if (isResizing) {
       cancelAnimationFrame(resizeRafIdRef.current);
@@ -719,7 +773,10 @@ export function useWorkspaceCanvasPointer(
         flushSync(() => {
           setElementsSynced(nextElements);
         });
-        saveToHistory(nextElements, markersRef.current);
+      }
+
+      if ((offsetIds.length > 0 && changed) || didDuplicateOnCurrentDrag) {
+        saveToHistory(changed ? nextElements : previousElements, markersRef.current);
       }
 
       if (offsetIds.length > 0) {
@@ -739,13 +796,15 @@ export function useWorkspaceCanvasPointer(
       if (dragDidMoveRef) {
         dragDidMoveRef.current = false;
       }
+      didDuplicateOnCurrentDragRef.current = false;
+      pendingAltDragDuplicateRef.current = null;
 
       if (
-        selectedElementIds.length > 1 &&
-        selectedElementIds.includes(pendingDragElementId)
+        dragSelectionIds.length > 1 &&
+        dragSelectionIds.includes(pendingDragElementId)
       ) {
         setSelectedElementId(pendingDragElementId);
-        setSelectedElementIdsIfChanged(selectedElementIds);
+        setSelectedElementIdsIfChanged(dragSelectionIds);
       } else {
         setSelectedElementId(pendingDragElementId);
         setSelectedElementIdsIfChanged([pendingDragElementId]);
@@ -805,10 +864,16 @@ export function useWorkspaceCanvasPointer(
     if (dragDidMoveRef) {
       dragDidMoveRef.current = false;
     }
+    dragSelectionIdsRef.current = [];
+    pendingAltDragDuplicateRef.current = null;
+    didDuplicateOnCurrentDragRef.current = false;
     pendingDragElementIdRef.current = null;
   }, [
     dragOffsetsRef,
     dragDidMoveRef,
+    dragSelectionIdsRef,
+    pendingAltDragDuplicateRef,
+    didDuplicateOnCurrentDragRef,
     elementsRef,
     getClosestAspectRatio,
     isDraggingElement,
@@ -826,7 +891,6 @@ export function useWorkspaceCanvasPointer(
     resizePreviewRef,
     resizeRafIdRef,
     saveToHistory,
-    selectedElementId,
     setAlignmentGuides,
     setElementsSynced,
     setIsDraggingElement,

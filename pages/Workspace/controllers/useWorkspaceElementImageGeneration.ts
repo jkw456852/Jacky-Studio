@@ -1,4 +1,4 @@
-import { useCallback, type MutableRefObject } from "react";
+import { useCallback, useRef, type MutableRefObject } from "react";
 import type {
   CanvasElement,
   ChatMessage,
@@ -109,63 +109,89 @@ export function useWorkspaceElementImageGeneration(
     createGeneratingTreeImageChildren,
     getClosestAspectRatio,
   } = options;
+  const activeRequestsRef = useRef(new Set<string>());
 
   return useCallback(
     async (elementId: string) => {
-      const requestStartedAt = Date.now();
-      const el = elementsRef.current.find((element) => element.id === elementId);
-      if (!el) return;
-      const isTreePromptNode =
-        resolveWorkspaceTreeNodeKind(el, nodeInteractionMode) === "prompt";
-      const isTreeImageNode =
-        resolveWorkspaceTreeNodeKind(el, nodeInteractionMode) === "image";
-      const parentPromptElement =
-        isTreeImageNode && el.nodeParentId
-          ? elementsRef.current.find(
-              (element) =>
-                element.id === el.nodeParentId &&
-                resolveWorkspaceTreeNodeKind(element, nodeInteractionMode) ===
-                  "prompt",
-            ) || null
-          : null;
-      const sourceElement = parentPromptElement || el;
-      if (!sourceElement.genPrompt) return;
-      const shouldTrackSourceElementState = !isTreePromptNode;
-      if (shouldTrackSourceElementState) {
-        setElementGeneratingState(elementId, true);
+      if (activeRequestsRef.current.has(elementId)) {
+        return;
       }
-
-      const currentAspectRatio =
-        sourceElement.genAspectRatio ||
-        getClosestAspectRatio(sourceElement.width, sourceElement.height);
-      const model = sourceElement.genModel || "Nano Banana Pro";
-      const imageSize = sourceElement.genResolution || "1K";
-      const imageCount = isTreePromptNode
-        ? Math.max(1, Math.min(4, sourceElement.genImageCount || 1))
-        : 1;
-      const manualReferenceImages =
-        sourceElement.genRefImages ||
-        (sourceElement.genRefImage ? [sourceElement.genRefImage] : []);
-      const referenceImages = mergeConsistencyAnchorIntoReferences(
-        manualReferenceImages,
-      );
-      const consistencyAnchorInjected =
-        referenceImages.length > 0 &&
-        (manualReferenceImages.length === 0 ||
-          referenceImages[0] !== manualReferenceImages[0] ||
-          referenceImages.length !== manualReferenceImages.length);
-
-      addMessage({
-        id: `gen-start-${Date.now()}`,
-        role: "model",
-        text:
-          imageCount > 1
-            ? `Created ${imageCount} generation nodes. Starting image 1/${imageCount}...`
-            : `Generating image: ${sourceElement.genPrompt.slice(0, 40)}${sourceElement.genPrompt.length > 40 ? "..." : ""}`,
-        timestamp: Date.now(),
-      });
-
+      activeRequestsRef.current.add(elementId);
+      const requestStartedAt = Date.now();
       try {
+        const el = elementsRef.current.find((element) => element.id === elementId);
+        if (!el) return;
+        const isTreePromptNode =
+          resolveWorkspaceTreeNodeKind(el, nodeInteractionMode) === "prompt";
+        const isTreeImageNode =
+          resolveWorkspaceTreeNodeKind(el, nodeInteractionMode) === "image";
+        const parentPromptElement =
+          isTreeImageNode && el.nodeParentId
+            ? elementsRef.current.find(
+                (element) =>
+                  element.id === el.nodeParentId &&
+                  resolveWorkspaceTreeNodeKind(element, nodeInteractionMode) ===
+                    "prompt",
+              ) || null
+            : null;
+        const sourceElement = parentPromptElement || el;
+        if (!sourceElement.genPrompt) return;
+        const shouldTrackSourceElementState = !isTreePromptNode;
+        if (shouldTrackSourceElementState) {
+          setElementGeneratingState(elementId, true);
+        }
+
+        const currentAspectRatio =
+          sourceElement.genAspectRatio ||
+          getClosestAspectRatio(sourceElement.width, sourceElement.height);
+        const model = sourceElement.genModel || "Nano Banana Pro";
+        const imageSize = sourceElement.genResolution || "1K";
+        const imageCount = isTreePromptNode
+          ? Math.max(1, Math.min(4, sourceElement.genImageCount || 1))
+          : 1;
+        const manualReferenceImages =
+          sourceElement.genRefImages ||
+          (sourceElement.genRefImage ? [sourceElement.genRefImage] : []);
+        const referenceImages = mergeConsistencyAnchorIntoReferences(
+          manualReferenceImages,
+        );
+        const consistencyAnchorInjected =
+          referenceImages.length > 0 &&
+          (manualReferenceImages.length === 0 ||
+            referenceImages[0] !== manualReferenceImages[0] ||
+            referenceImages.length !== manualReferenceImages.length);
+        const referenceRoleMode =
+          sourceElement.genReferenceRoleMode === "none"
+            ? "none"
+            : sourceElement.genReferenceRoleMode === "poster-product" &&
+                referenceImages.length >= 2
+              ? "poster-product"
+              : "default";
+        const referencePriority =
+          referenceRoleMode === "poster-product"
+            ? "all"
+            : referenceImages.length > 1
+            ? "all"
+            : referenceImages.length === 1
+              ? "first"
+              : undefined;
+        const referenceStrength =
+          referenceRoleMode === "poster-product"
+            ? 0.94
+            : referenceImages.length > 0
+              ? 0.88
+              : undefined;
+
+        addMessage({
+          id: `gen-start-${Date.now()}`,
+          role: "model",
+          text:
+            imageCount > 1
+              ? `Created ${imageCount} generation nodes. Starting image 1/${imageCount}...`
+              : `Generating image: ${sourceElement.genPrompt.slice(0, 40)}${sourceElement.genPrompt.length > 40 ? "..." : ""}`,
+          timestamp: Date.now(),
+        });
+
         const generationContext = {
           elementId,
           sourceElementId: sourceElement.id,
@@ -175,6 +201,9 @@ export function useWorkspaceElementImageGeneration(
           imageSize,
           manualReferenceCount: manualReferenceImages.length,
           referenceCount: referenceImages.length,
+          referenceRoleMode,
+          referencePriority: referencePriority || null,
+          referenceStrength: referenceStrength ?? null,
           consistencyAnchorInjected,
           manualReferenceKinds: manualReferenceImages.map((item) =>
             String(item || "").startsWith("data:") ? "data" : "url",
@@ -214,8 +243,11 @@ export function useWorkspaceElementImageGeneration(
             providerId: sourceElement.genProviderId,
             aspectRatio: currentAspectRatio,
             imageSize,
+            disableTransportRetries: Boolean(sourceElement.genInfiniteRetry),
             referenceImages,
-            referencePriority: referenceImages.length > 0 ? "first" : undefined,
+            referencePriority,
+            referenceStrength,
+            referenceRoleMode,
             promptLanguagePolicy: translatePromptToEnglish
               ? "translate-en"
               : "original-zh",
@@ -229,75 +261,112 @@ export function useWorkspaceElementImageGeneration(
         const failedResults: string[] = [];
 
         for (let index = 0; index < imageCount; index += 1) {
-          const variantStartedAt = Date.now();
           const variantLabel = `${index + 1}/${imageCount}`;
           const targetElementId = targetElementIds[index] || elementId;
-          console.info("[workspace.imggen] variant.start", {
-            ...generationContext,
-            variant: variantLabel,
-            targetElementId,
-          });
+          let attempt = 0;
+          let enteredInfiniteRetry = false;
 
-          if (imageCount > 1) {
-            addMessage({
-              id: `gen-progress-${Date.now()}-${index}`,
-              role: "model",
-              text: `Generating image ${variantLabel}...`,
-              timestamp: Date.now(),
+          while (true) {
+            attempt += 1;
+            const variantStartedAt = Date.now();
+            console.info("[workspace.imggen] variant.start", {
+              ...generationContext,
+              variant: variantLabel,
+              attempt,
+              targetElementId,
             });
-          }
 
-          try {
-            const resultUrl = await runGeneration(index);
-            if (!resultUrl) {
-              failedResults.push(`Image ${index + 1}: no result returned`);
-              setElementGeneratingState(
-                targetElementId,
-                false,
-                "No result returned",
-              );
-              console.warn("[workspace.imggen] variant.empty", {
+            if (attempt === 1 && imageCount > 1) {
+              addMessage({
+                id: `gen-progress-${Date.now()}-${index}`,
+                role: "model",
+                text: `Generating image ${variantLabel}...`,
+                timestamp: Date.now(),
+              });
+            }
+
+            try {
+              const resultUrl = await runGeneration(index);
+              if (!resultUrl) {
+                throw new Error("No result returned");
+              }
+
+              const consistencyAnchor =
+                referenceImages.length > 0 ? referenceImages[0] : undefined;
+              const finalUrl =
+                index === 0
+                  ? await retryWithConsistencyFix(
+                      `Canvas image result ${variantLabel}`,
+                      resultUrl,
+                      (fixPrompt?: string) => runGeneration(index, fixPrompt),
+                      consistencyAnchor,
+                      sourceElement.genPrompt,
+                      referenceImages.length,
+                    )
+                  : resultUrl;
+
+              await applyGeneratedImageToElement(targetElementId, finalUrl, true);
+              successCount += 1;
+              console.info("[workspace.imggen] variant.success", {
                 ...generationContext,
                 variant: variantLabel,
+                attempt,
                 elapsedMs: Date.now() - variantStartedAt,
                 targetElementId,
               });
-              continue;
+              break;
+            } catch (error) {
+              const reason = formatGenerationError(error);
+              const liveTarget = elementsRef.current.find(
+                (element) => element.id === targetElementId,
+              );
+              const liveSource = elementsRef.current.find(
+                (element) => element.id === sourceElement.id,
+              );
+              const shouldInfiniteRetry =
+                Boolean(liveSource?.genInfiniteRetry) &&
+                Boolean(liveTarget);
+
+              if (shouldInfiniteRetry) {
+                if (!enteredInfiniteRetry) {
+                  enteredInfiniteRetry = true;
+                  addMessage({
+                    id: `gen-autoretry-${Date.now()}-${targetElementId}`,
+                    role: "model",
+                    text:
+                      imageCount > 1
+                        ? `Image ${variantLabel} failed once and will now start berserk polling retries on the same node until it succeeds or the page is refreshed.`
+                        : "Image generation failed once and will now start berserk polling retries on the same node until it succeeds or the page is refreshed.",
+                    timestamp: Date.now(),
+                  });
+                }
+
+                setElementGeneratingState(targetElementId, true);
+                console.warn("[workspace.imggen] variant.berserk-retrying", {
+                  ...generationContext,
+                  variant: variantLabel,
+                  attempt,
+                  retryDelayMs: 0,
+                  disableTransportRetries: true,
+                  error: reason,
+                  targetElementId,
+                });
+                await Promise.resolve();
+                continue;
+              }
+
+              failedResults.push(`Image ${index + 1}: ${reason}`);
+              setElementGeneratingState(targetElementId, false, reason);
+              console.error("[workspace.imggen] variant.failed", {
+                ...generationContext,
+                variant: variantLabel,
+                attempt,
+                elapsedMs: Date.now() - variantStartedAt,
+                error: reason,
+                targetElementId,
+              });
+              break;
             }
-
-            const consistencyAnchor =
-              referenceImages.length > 0 ? referenceImages[0] : undefined;
-            const finalUrl =
-              index === 0
-                ? await retryWithConsistencyFix(
-                    `Canvas image result ${variantLabel}`,
-                    resultUrl,
-                    (fixPrompt?: string) => runGeneration(index, fixPrompt),
-                    consistencyAnchor,
-                    sourceElement.genPrompt,
-                    referenceImages.length,
-                  )
-                : resultUrl;
-
-            await applyGeneratedImageToElement(targetElementId, finalUrl, true);
-            successCount += 1;
-            console.info("[workspace.imggen] variant.success", {
-              ...generationContext,
-              variant: variantLabel,
-              elapsedMs: Date.now() - variantStartedAt,
-              targetElementId,
-            });
-          } catch (error) {
-            const reason = formatGenerationError(error);
-            failedResults.push(`Image ${index + 1}: ${reason}`);
-            setElementGeneratingState(targetElementId, false, reason);
-            console.error("[workspace.imggen] variant.failed", {
-              ...generationContext,
-              variant: variantLabel,
-              elapsedMs: Date.now() - variantStartedAt,
-              error: reason,
-              targetElementId,
-            });
           }
         }
 
@@ -355,9 +424,12 @@ export function useWorkspaceElementImageGeneration(
           text: `Image generation failed: ${reason}`,
           timestamp: Date.now(),
         });
+      } finally {
+        activeRequestsRef.current.delete(elementId);
       }
     },
     [
+      activeRequestsRef,
       addMessage,
       applyGeneratedImageToElement,
       elementsRef,

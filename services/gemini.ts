@@ -1843,12 +1843,14 @@ export interface ImageGenerationConfig {
     aspectRatio: string;
     imageSize?: '1K' | '2K' | '4K';
     providerId?: string | null;
+    disableTransportRetries?: boolean;
     referenceImage?: string; // base64 (legacy)
     referenceImages?: string[]; // Multiple base64 images
     maskImage?: string;
     referenceStrength?: number;
     referencePriority?: 'first' | 'all';
     referenceMode?: 'style' | 'product';
+    referenceRoleMode?: 'none' | 'default' | 'poster-product';
     promptLanguagePolicy?: 'original-zh' | 'translate-en';
     textPolicy?: {
         enforceChinese?: boolean;
@@ -1886,6 +1888,7 @@ const buildConstrainedPrompt = (
     opts: {
         strength: number;
         mode: 'style' | 'product';
+        referenceRoleMode?: 'none' | 'default' | 'poster-product';
         referenceCount?: number;
         priority?: 'first' | 'all';
         forbiddenChanges?: string[];
@@ -1895,6 +1898,47 @@ const buildConstrainedPrompt = (
     const hard = opts.strength >= 0.7;
     const referenceCount = Math.max(0, opts.referenceCount || 0);
     const multiReference = referenceCount > 1;
+    const isPosterProductMode =
+        opts.referenceRoleMode === 'poster-product' && referenceCount >= 2;
+
+    if (isPosterProductMode) {
+        const approvedContext = opts.approvedSummary
+            ? `
+[Approved Anchor]
+- Continue from the latest approved result as the current design baseline.
+- Approved summary: ${opts.approvedSummary}
+`
+            : '';
+
+        const forbiddenSection = opts.forbiddenChanges && opts.forbiddenChanges.length > 0
+            ? `
+[Forbidden Changes]
+${opts.forbiddenChanges.map((item) => `- ${item}`).join('\n')}
+`
+            : '';
+
+        return `
+[Poster Reconstruction Mode]
+- Reference image 1 is the poster/layout anchor.
+- Reference image 2 is the product identity anchor.
+- Rebuild the overall poster composition, framing, camera angle, background style, lighting direction, text-safe empty space, and design language from reference image 1 as closely as possible.
+- Replace only the main product/hero subject in reference image 1 with the product from reference image 2.
+- Keep the product from reference image 2 exact in silhouette, structure, proportions, color family, materials, logos, placement, and distinctive details.
+- Do not create a brand-new composition.
+- Do not merge both references into a different scene.
+- If there is any conflict, preserve poster layout/style from reference image 1 and preserve product identity/details from reference image 2.
+- Any additional references beyond the first two are supporting detail only and must not override those role assignments.
+${approvedContext}${forbiddenSection}
+[Do Not]
+- Do not redesign the poster structure.
+- Do not replace the composition with a generic ad layout.
+- Do not change the product type, shape, or key details.
+- Do not drift away from the visual hierarchy of reference image 1.
+
+[User Request]
+${userPrompt}`.trim();
+    }
+
     const constraints = opts.mode === 'product'
         ? `
 [Consistency Requirements]
@@ -2210,47 +2254,68 @@ const extractOpenAIImageResult = (payload: any): string | null => {
 const getOpenAIImageRequestTuning = (
     route: string,
     requestMode: OpenAIImageRequestMode,
+    options?: {
+        disableTransportRetries?: boolean;
+    },
 ) => {
+    const disableTransportRetries = options?.disableTransportRetries === true;
+    const applyRetryMode = <T extends {
+        retries: number;
+        baseDelayMs: number;
+        maxDelayMs: number;
+    }>(tuning: T): T => {
+        if (!disableTransportRetries) {
+            return tuning;
+        }
+
+        return {
+            ...tuning,
+            retries: 0,
+            baseDelayMs: 0,
+            maxDelayMs: 0,
+        };
+    };
+
     if (route === '/v1/images/edits') {
         if (requestMode === 'official-transfer') {
-            return {
+            return applyRetryMode({
                 authStrategy: 'bearer-only' as const,
                 timeoutMs: 480000,
                 idleTimeoutMs: 480000,
                 retries: 5,
                 baseDelayMs: 750,
                 maxDelayMs: 12500,
-            };
+            });
         }
-        return {
+        return applyRetryMode({
             authStrategy: 'bearer-only' as const,
             timeoutMs: 420000,
             idleTimeoutMs: 420000,
             retries: 4,
             baseDelayMs: 600,
             maxDelayMs: 10000,
-        };
+        });
     }
 
     if (requestMode === 'official-transfer') {
-        return {
+        return applyRetryMode({
             authStrategy: 'bearer-only' as const,
             timeoutMs: 300000,
             idleTimeoutMs: 300000,
             retries: 4,
             baseDelayMs: 600,
             maxDelayMs: 10000,
-        };
+        });
     }
 
-    return {
+    return applyRetryMode({
         authStrategy: 'bearer-only' as const,
         timeoutMs: 240000,
         idleTimeoutMs: 240000,
         retries: 3,
         baseDelayMs: 500,
         maxDelayMs: 7500,
-    };
+    });
 };
 
 const buildOpenAIImageEditFormData = (opts: {
@@ -2302,6 +2367,7 @@ const requestOpenAICompatibleImage = async (opts: {
     prompt: string;
     aspectRatio: string;
     imageSize?: '1K' | '2K' | '4K';
+    disableTransportRetries?: boolean;
     referenceImages?: string[];
     maskImage?: string | null;
     providerId?: string | null;
@@ -2339,7 +2405,9 @@ const requestOpenAICompatibleImage = async (opts: {
     const requestMode = getOpenAIImageRequestMode(opts.model, opts.imageSize);
     const size = resolveOpenAIImageSize(opts.model, opts.aspectRatio, opts.imageSize);
     const normalizedAspectRatio = normalizeOpenAIImageAspectRatio(opts.aspectRatio);
-    const requestTuning = getOpenAIImageRequestTuning(route, requestMode);
+    const requestTuning = getOpenAIImageRequestTuning(route, requestMode, {
+        disableTransportRetries: opts.disableTransportRetries,
+    });
     const referenceBytes = normalizedReferences.map((item) => estimateDataUrlBytes(item));
     const totalReferenceBytes = referenceBytes.reduce((sum, item) => sum + item, 0);
     const requestFingerprintMeta = buildImageRequestFingerprint({
@@ -2378,6 +2446,7 @@ const requestOpenAICompatibleImage = async (opts: {
         model: opts.model,
         requestMode,
         reverseCompat: requestMode === 'reverse-compat',
+        disableTransportRetries: opts.disableTransportRetries === true,
         aspectRatio: opts.aspectRatio,
         imageSize: opts.imageSize || '1K',
         size,
@@ -2740,10 +2809,14 @@ export const generateImage = async (config: ImageGenerationConfig): Promise<stri
     }
 
     const consistencyContext = config.consistencyContext || {};
-    const basePrompt = hasReferences || consistencyContext?.forbiddenChanges?.length || consistencyContext?.referenceSummary
+    const shouldDisableHiddenConstraints = config.referenceRoleMode === 'none';
+    const basePrompt = shouldDisableHiddenConstraints
+        ? config.prompt
+        : hasReferences || consistencyContext?.forbiddenChanges?.length || consistencyContext?.referenceSummary
         ? buildConstrainedPrompt(config.prompt, {
             strength,
             mode,
+            referenceRoleMode: config.referenceRoleMode,
             referenceCount: references.length,
             priority,
             forbiddenChanges: consistencyContext?.forbiddenChanges,
@@ -2771,6 +2844,8 @@ export const generateImage = async (config: ImageGenerationConfig): Promise<stri
         providerBaseUrl: provider.baseUrl || null,
         hasReferences,
         referenceCount: references.length,
+        referenceRoleMode: config.referenceRoleMode || 'default',
+        hiddenConstraintsDisabled: shouldDisableHiddenConstraints,
         hasMask: !!config.maskImage,
         imageSize: config.imageSize || '1K',
         aspectRatio: validAspectRatio,
@@ -2784,6 +2859,7 @@ export const generateImage = async (config: ImageGenerationConfig): Promise<stri
             prompt: finalPrompt,
             aspectRatio: validAspectRatio,
             imageSize: config.imageSize,
+            disableTransportRetries: config.disableTransportRetries,
             referenceImages: references,
             maskImage: config.maskImage,
             providerId: config.providerId,

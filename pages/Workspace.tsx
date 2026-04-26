@@ -138,6 +138,11 @@ import { useWorkspacePageShellProps } from "./Workspace/controllers/useWorkspace
 import { useWorkspaceProjectLoader } from "./Workspace/controllers/useWorkspaceProjectLoader";
 import { useWorkspaceSend } from "./Workspace/controllers/useWorkspaceSend";
 import { useWorkspaceSmartGenerate } from "./Workspace/controllers/useWorkspaceSmartGenerate";
+import {
+  buildDuplicatedCanvasSelection,
+  createCanvasElementClipboardSnapshot,
+  type CanvasElementClipboardSnapshot,
+} from "./Workspace/controllers/workspaceElementDuplication";
 import { useWorkspaceTouchEditActions } from "./Workspace/controllers/useWorkspaceTouchEditActions";
 import { useWorkspaceTextToolbarUi } from "./Workspace/controllers/useWorkspaceTextToolbarUi";
 import { useAgentOrchestrator } from "../hooks/useAgentOrchestrator";
@@ -1330,10 +1335,19 @@ const Workspace: React.FC = () => {
   const [elementStartPos, setElementStartPos] = useState({ x: 0, y: 0 });
   const pendingDragElementIdRef = useRef<string | null>(null);
   const dragDidMoveRef = useRef(false);
+  const dragSelectionIdsRef = useRef<string[]>([]);
+  const pendingAltDragDuplicateRef = useRef<{
+    anchorId: string;
+    selectionIds: string[];
+  } | null>(null);
+  const didDuplicateOnCurrentDragRef = useRef(false);
   const alignmentGuideVRef = useRef<HTMLDivElement | null>(null);
   const alignmentGuideHRef = useRef<HTMLDivElement | null>(null);
   const groupDragStartRef = useRef<Record<string, { x: number; y: number }>>(
     {},
+  );
+  const elementClipboardRef = useRef<CanvasElementClipboardSnapshot | null>(
+    null,
   );
   // Marquee selection state
   const [isMarqueeSelecting, setIsMarqueeSelecting] = useState(false);
@@ -4370,219 +4384,123 @@ const Workspace: React.FC = () => {
     };
   }, []);
 
-  useEffect(() => {
-    const handleKeyDown = (e: KeyboardEvent) => {
-      const ae = document.activeElement as HTMLElement | null;
-      const isInTextInput =
-        ae?.tagName === "TEXTAREA" ||
-        ae?.tagName === "INPUT" ||
-        ae?.getAttribute("contenteditable") === "true";
+  const resolveCurrentCanvasSelectionIds = useCallback(() => {
+    const rawIds =
+      selectedElementIds.length > 0
+        ? selectedElementIds
+        : selectedElementId
+          ? [selectedElementId]
+          : [];
 
-      if (editingTextId && e.key === "Escape") {
-        e.preventDefault();
-        setEditingTextId(null);
-        return;
-      }
+    return Array.from(new Set(rawIds));
+  }, [selectedElementId, selectedElementIds]);
 
-      if (isInTextInput) {
-        return;
-      }
+  const duplicateCanvasSelection = useCallback(
+    ({
+      anchorId,
+      offset,
+      persistHistory = true,
+      selectionIds,
+      sourceElements,
+    }: {
+      anchorId?: string | null;
+      offset?: { x: number; y: number };
+      persistHistory?: boolean;
+      selectionIds: string[];
+      sourceElements?: CanvasElement[];
+    }) => {
+      const duplication = buildDuplicatedCanvasSelection({
+        anchorId,
+        offset,
+        selectionIds,
+        sourceElements: sourceElements || elementsRef.current,
+        targetElements: elementsRef.current,
+      });
 
-      if ((e.metaKey || e.ctrlKey) && e.key === "z") {
-        e.preventDefault();
-        if (e.shiftKey) redo();
-        else undo();
-        return;
-      }
-      if ((e.metaKey || e.ctrlKey) && e.key === "y") {
-        e.preventDefault();
-        redo();
-        return;
-      }
-      if ((e.metaKey || e.ctrlKey) && (e.key === "=" || e.key === "+")) {
-        e.preventDefault();
-        setZoom((z) => Math.min(200, z + 10));
-        return;
-      }
-      if ((e.metaKey || e.ctrlKey) && e.key === "-") {
-        e.preventDefault();
-        setZoom((z) => Math.max(10, z - 10));
-        return;
-      }
-      if ((e.metaKey || e.ctrlKey) && e.key === "0") {
-        e.preventDefault();
-        setZoom(100);
-        return;
-      }
-      if (e.shiftKey && e.key === "1") {
-        e.preventDefault();
-        fitToScreen();
-        return;
-      }
-      if (e.code === "Space" && !e.repeat) {
-        const isTyping =
-          ae?.tagName === "TEXTAREA" ||
-          ae?.tagName === "INPUT" ||
-          ae?.getAttribute("contenteditable") === "true";
-        if (!isTyping) {
-          e.preventDefault();
-          if (ae?.tagName === "BUTTON") ae.blur();
-          isSpacePressedRef.current = true;
-        }
+      if (!duplication) {
+        return null;
       }
 
-      if (e.key === "Tab") {
-        e.preventDefault();
-        if (createReferencedGenImageFromSelection()) {
-          return;
-        }
-        if (selectedElementId) {
-          const el = elements.find((e) => e.id === selectedElementId);
-          if (
-            el &&
-            (el.type === "gen-image" || el.type === "image") &&
-            el.url
-          ) {
-            setShowFastEdit((prev) => !prev);
-            return;
-          }
-        }
-        textareaRef.current?.focus();
+      setElementsSynced(duplication.nextElements);
+      setSelectedElementId(duplication.duplicatedAnchorId);
+      setSelectedElementIds(duplication.duplicatedSelectionIds);
+
+      if (persistHistory) {
+        saveToHistory(duplication.nextElements, markersRef.current);
       }
 
-      // Check for selected Chip deletion first to avoid deleting canvas elements
-      if ((e.key === "Backspace" || e.key === "Delete") && selectedChipId) {
-        e.preventDefault();
-        e.stopPropagation();
-        removeInputBlock(selectedChipId);
-        setSelectedChipId(null);
-        return;
-      }
+      return duplication;
+    },
+    [elementsRef, markersRef, saveToHistory, setElementsSynced],
+  );
 
-      // Allow Delete/Backspace when focused textarea is empty (e.g. gen-node prompt)
-      if (
-        isInTextInput &&
-        (e.key === "Backspace" || e.key === "Delete") &&
-        selectedElementId
-      ) {
-        const textContent =
-          (ae as HTMLTextAreaElement | HTMLInputElement)?.value ??
-          ae?.textContent ??
-          "";
-        if (!textContent) {
-          e.preventDefault();
-          (ae as HTMLElement)?.blur();
-          deleteSelectedElement();
-        }
-        return;
-      }
-      if (!isInTextInput) {
-        // Multi-select alignment shortcuts (Alt + key)
-        if (e.altKey && selectedElementIds.length > 1) {
-          const k = e.key.toLowerCase();
-          if (k === "a") {
-            e.preventDefault();
-            alignSelectedElements("left");
-            return;
-          }
-          if (k === "d") {
-            e.preventDefault();
-            alignSelectedElements("right");
-            return;
-          }
-          if (k === "h") {
-            e.preventDefault();
-            alignSelectedElements("center");
-            return;
-          }
-          if (k === "w") {
-            e.preventDefault();
-            alignSelectedElements("top");
-            return;
-          }
-          if (k === "s") {
-            e.preventDefault();
-            alignSelectedElements("bottom");
-            return;
-          }
-          if (k === "v") {
-            e.preventDefault();
-            alignSelectedElements("middle");
-            return;
-          }
-        }
-        // Multi-select spacing shortcuts (Shift + key, not ctrl/meta)
-        if (
-          e.shiftKey &&
-          !e.ctrlKey &&
-          !e.metaKey &&
-          selectedElementIds.length > 1
-        ) {
-          const k = e.key.toUpperCase();
-          if (k === "H") {
-            e.preventDefault();
-            distributeSelectedElements("horizontal");
-            return;
-          }
-          if (k === "V") {
-            e.preventDefault();
-            distributeSelectedElements("vertical");
-            return;
-          }
-          if (k === "A") {
-            e.preventDefault();
-            distributeSelectedElements("auto");
-            return;
-          }
-        }
-        // Group / Merge / Ungroup shortcuts
-        if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "g") {
-          e.preventDefault();
-          if (e.shiftKey) {
-            // Ctrl+Shift+G: merge or ungroup
-            const sel = elements.find((el) => el.id === selectedElementId);
-            if (sel?.type === "group") {
-              handleUngroupSelected();
-            } else if (selectedElementIds.length > 1) {
-              handleMergeSelected();
-            }
-          } else {
-            // Ctrl+G: group
-            if (selectedElementIds.length > 1) {
-              handleGroupSelected();
-            }
-          }
-          return;
-        }
-        if (e.key.toLowerCase() === "v" && !(e.metaKey || e.ctrlKey))
-          setActiveTool("select");
-        if (e.key.toLowerCase() === "h" && !e.altKey) setActiveTool("hand");
-        if (e.key.toLowerCase() === "m") setActiveTool("mark");
-        if (e.key.toLowerCase() === "t" && !e.altKey) setActiveTool("text");
-        if (e.key === "Backspace" || e.key === "Delete")
-          deleteSelectedElement();
-      }
+  const copyCanvasSelectionToClipboard = useCallback(() => {
+    const selectionIds = resolveCurrentCanvasSelectionIds();
+    const clipboardSnapshot = createCanvasElementClipboardSnapshot({
+      anchorId: selectedElementId || selectionIds[0] || null,
+      selectionIds,
+      sourceElements: elementsRef.current,
+    });
+
+    if (!clipboardSnapshot) {
+      return false;
+    }
+
+    elementClipboardRef.current = clipboardSnapshot;
+    return true;
+  }, [elementsRef, resolveCurrentCanvasSelectionIds, selectedElementId]);
+
+  const pasteCanvasSelectionFromClipboard = useCallback(() => {
+    const clipboardSnapshot = elementClipboardRef.current;
+    if (!clipboardSnapshot) {
+      return false;
+    }
+
+    const nextPasteCount = clipboardSnapshot.pasteCount + 1;
+    const duplication = duplicateCanvasSelection({
+      anchorId: clipboardSnapshot.anchorId,
+      offset: {
+        x: 32 * nextPasteCount,
+        y: 32 * nextPasteCount,
+      },
+      persistHistory: true,
+      selectionIds: clipboardSnapshot.selectionIds,
+      sourceElements: clipboardSnapshot.elements,
+    });
+
+    if (!duplication) {
+      return false;
+    }
+
+    elementClipboardRef.current = {
+      ...clipboardSnapshot,
+      pasteCount: nextPasteCount,
     };
-    const handleKeyUp = (e: KeyboardEvent) => {
-      if (e.code === "Space") isSpacePressedRef.current = false;
-    };
-    window.addEventListener("keydown", handleKeyDown);
-    window.addEventListener("keyup", handleKeyUp);
-    return () => {
-      window.removeEventListener("keydown", handleKeyDown);
-      window.removeEventListener("keyup", handleKeyUp);
-    };
-  }, [
-    selectedElementId,
-    selectedElementIds,
-    history,
-    historyStep,
-    elements,
-    markers,
-    selectedChipId,
-    editingTextId,
-    createReferencedGenImageFromSelection,
-  ]);
+    return true;
+  }, [duplicateCanvasSelection]);
+
+  const beginAltDragDuplicate = useCallback(
+    (selectionIds: string[], anchorId: string) => {
+      const duplication = duplicateCanvasSelection({
+        anchorId,
+        offset: { x: 0, y: 0 },
+        persistHistory: false,
+        selectionIds,
+      });
+
+      if (!duplication) {
+        return null;
+      }
+
+      didDuplicateOnCurrentDragRef.current = true;
+      return {
+        anchorId: duplication.duplicatedAnchorId,
+        selectionIds: duplication.duplicatedSelectionIds,
+        startPositions: duplication.duplicatedStartPositions,
+      };
+    },
+    [duplicateCanvasSelection],
+  );
 
   const handleGenImage = useWorkspaceElementImageGeneration({
     elementsRef,
@@ -4740,7 +4658,11 @@ const Workspace: React.FC = () => {
     isDraggingElement,
     dragDidMoveRef,
     pendingDragElementIdRef,
+    dragSelectionIdsRef,
+    pendingAltDragDuplicateRef,
+    didDuplicateOnCurrentDragRef,
     elementStartPos,
+    setElementStartPos,
     selectedElementIds,
     getCachedDragOthers,
     setAlignmentGuides,
@@ -4756,6 +4678,7 @@ const Workspace: React.FC = () => {
     setResizeHandle,
     setPan,
     setIsDraggingElement,
+    beginAltDragDuplicate,
   });
 
   const handleCanvasMouseMove = useCallback(
@@ -4820,6 +4743,8 @@ const Workspace: React.FC = () => {
     selectedElementId,
     selectedElementIds,
     pendingDragElementIdRef,
+    dragSelectionIdsRef,
+    pendingAltDragDuplicateRef,
     setIsDraggingElement,
     setDragStart,
     setElementStartPos,
@@ -4850,6 +4775,240 @@ const Workspace: React.FC = () => {
     setSelectedElementIds,
     saveToHistory,
   });
+
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      const ae = document.activeElement as HTMLElement | null;
+      const isInTextInput =
+        ae?.tagName === "TEXTAREA" ||
+        ae?.tagName === "INPUT" ||
+        ae?.getAttribute("contenteditable") === "true";
+
+      if (editingTextId && e.key === "Escape") {
+        e.preventDefault();
+        setEditingTextId(null);
+        return;
+      }
+
+      if (isInTextInput) {
+        return;
+      }
+
+      if ((e.metaKey || e.ctrlKey) && e.key === "z") {
+        e.preventDefault();
+        if (e.shiftKey) redo();
+        else undo();
+        return;
+      }
+      if ((e.metaKey || e.ctrlKey) && e.key === "y") {
+        e.preventDefault();
+        redo();
+        return;
+      }
+      if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "c") {
+        if (copyCanvasSelectionToClipboard()) {
+          e.preventDefault();
+        }
+        return;
+      }
+      if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "v") {
+        if (pasteCanvasSelectionFromClipboard()) {
+          e.preventDefault();
+        }
+        return;
+      }
+      if ((e.metaKey || e.ctrlKey) && (e.key === "=" || e.key === "+")) {
+        e.preventDefault();
+        setZoom((z) => Math.min(200, z + 10));
+        return;
+      }
+      if ((e.metaKey || e.ctrlKey) && e.key === "-") {
+        e.preventDefault();
+        setZoom((z) => Math.max(10, z - 10));
+        return;
+      }
+      if ((e.metaKey || e.ctrlKey) && e.key === "0") {
+        e.preventDefault();
+        setZoom(100);
+        return;
+      }
+      if (e.shiftKey && e.key === "1") {
+        e.preventDefault();
+        fitToScreen();
+        return;
+      }
+      if (e.code === "Space" && !e.repeat) {
+        const isTyping =
+          ae?.tagName === "TEXTAREA" ||
+          ae?.tagName === "INPUT" ||
+          ae?.getAttribute("contenteditable") === "true";
+        if (!isTyping) {
+          e.preventDefault();
+          if (ae?.tagName === "BUTTON") ae.blur();
+          isSpacePressedRef.current = true;
+        }
+      }
+
+      if (e.key === "Tab") {
+        e.preventDefault();
+        if (createReferencedGenImageFromSelection()) {
+          return;
+        }
+        if (selectedElementId) {
+          const el = elements.find((item) => item.id === selectedElementId);
+          if (
+            el &&
+            (el.type === "gen-image" || el.type === "image") &&
+            el.url
+          ) {
+            setShowFastEdit((prev) => !prev);
+            return;
+          }
+        }
+        textareaRef.current?.focus();
+      }
+
+      if ((e.key === "Backspace" || e.key === "Delete") && selectedChipId) {
+        e.preventDefault();
+        e.stopPropagation();
+        removeInputBlock(selectedChipId);
+        setSelectedChipId(null);
+        return;
+      }
+
+      if (
+        isInTextInput &&
+        (e.key === "Backspace" || e.key === "Delete") &&
+        selectedElementId
+      ) {
+        const textContent =
+          (ae as HTMLTextAreaElement | HTMLInputElement)?.value ??
+          ae?.textContent ??
+          "";
+        if (!textContent) {
+          e.preventDefault();
+          (ae as HTMLElement)?.blur();
+          deleteSelectedElement();
+        }
+        return;
+      }
+
+      if (!isInTextInput) {
+        if (e.altKey && selectedElementIds.length > 1) {
+          const k = e.key.toLowerCase();
+          if (k === "a") {
+            e.preventDefault();
+            alignSelectedElements("left");
+            return;
+          }
+          if (k === "d") {
+            e.preventDefault();
+            alignSelectedElements("right");
+            return;
+          }
+          if (k === "h") {
+            e.preventDefault();
+            alignSelectedElements("center");
+            return;
+          }
+          if (k === "w") {
+            e.preventDefault();
+            alignSelectedElements("top");
+            return;
+          }
+          if (k === "s") {
+            e.preventDefault();
+            alignSelectedElements("bottom");
+            return;
+          }
+          if (k === "v") {
+            e.preventDefault();
+            alignSelectedElements("middle");
+            return;
+          }
+        }
+
+        if (
+          e.shiftKey &&
+          !e.ctrlKey &&
+          !e.metaKey &&
+          selectedElementIds.length > 1
+        ) {
+          const k = e.key.toUpperCase();
+          if (k === "H") {
+            e.preventDefault();
+            distributeSelectedElements("horizontal");
+            return;
+          }
+          if (k === "V") {
+            e.preventDefault();
+            distributeSelectedElements("vertical");
+            return;
+          }
+          if (k === "A") {
+            e.preventDefault();
+            distributeSelectedElements("auto");
+            return;
+          }
+        }
+
+        if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "g") {
+          e.preventDefault();
+          if (e.shiftKey) {
+            const sel = elements.find((el) => el.id === selectedElementId);
+            if (sel?.type === "group") {
+              handleUngroupSelected();
+            } else if (selectedElementIds.length > 1) {
+              handleMergeSelected();
+            }
+          } else if (selectedElementIds.length > 1) {
+            handleGroupSelected();
+          }
+          return;
+        }
+
+        if (e.key.toLowerCase() === "v" && !(e.metaKey || e.ctrlKey)) {
+          setActiveTool("select");
+        }
+        if (e.key.toLowerCase() === "h" && !e.altKey) setActiveTool("hand");
+        if (e.key.toLowerCase() === "m") setActiveTool("mark");
+        if (e.key.toLowerCase() === "t" && !e.altKey) setActiveTool("text");
+        if (e.key === "Backspace" || e.key === "Delete") {
+          deleteSelectedElement();
+        }
+      }
+    };
+
+    const handleKeyUp = (e: KeyboardEvent) => {
+      if (e.code === "Space") isSpacePressedRef.current = false;
+    };
+
+    window.addEventListener("keydown", handleKeyDown);
+    window.addEventListener("keyup", handleKeyUp);
+    return () => {
+      window.removeEventListener("keydown", handleKeyDown);
+      window.removeEventListener("keyup", handleKeyUp);
+    };
+  }, [
+    selectedElementId,
+    selectedElementIds,
+    history,
+    historyStep,
+    elements,
+    markers,
+    selectedChipId,
+    editingTextId,
+    copyCanvasSelectionToClipboard,
+    createReferencedGenImageFromSelection,
+    pasteCanvasSelectionFromClipboard,
+    alignSelectedElements,
+    distributeSelectedElements,
+    handleGroupSelected,
+    handleMergeSelected,
+    handleUngroupSelected,
+    fitToScreen,
+    deleteSelectedElement,
+  ]);
 
   const { workspaceLeftPanelProps, assistantSidebarProps } =
     useWorkspaceSidebarProps({

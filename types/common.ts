@@ -84,6 +84,8 @@ export interface CanvasElement {
   genAspectRatio?: string;
   genResolution?: '1K' | '2K' | '4K';
   genImageCount?: 1 | 2 | 3 | 4;
+  genInfiniteRetry?: boolean;
+  genReferenceRoleMode?: 'none' | 'default' | 'poster-product';
   detectedTexts?: { original: string, edited?: string }[];
 
   // Image Gen Reference

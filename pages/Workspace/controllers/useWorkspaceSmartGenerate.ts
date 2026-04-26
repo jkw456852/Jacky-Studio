@@ -244,6 +244,14 @@ export function useWorkspaceSmartGenerate(
         }
 
         referenceImages = mergeConsistencyAnchorIntoReferences(referenceImages);
+        const referencePriority =
+          referenceImages.length > 1
+            ? "all"
+            : referenceImages.length === 1
+              ? "first"
+              : undefined;
+        const referenceStrength =
+          referenceImages.length > 0 ? 0.88 : undefined;
 
         const runImageGeneration = (fixPrompt?: string) =>
           imageGenSkill({
@@ -254,8 +262,8 @@ export function useWorkspaceSmartGenerate(
             aspectRatio: newEl.genAspectRatio || "1:1",
             referenceImages:
               referenceImages.length > 0 ? referenceImages : undefined,
-            referencePriority:
-              referenceImages.length > 0 ? "first" : undefined,
+            referencePriority,
+            referenceStrength,
             promptLanguagePolicy: translatePromptToEnglish
               ? "translate-en"
               : "original-zh",

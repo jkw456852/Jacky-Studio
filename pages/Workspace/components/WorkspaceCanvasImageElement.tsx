@@ -477,6 +477,7 @@ const WorkspaceCanvasImageElementImpl: React.FC<
   const isTreeImageNode = treeNodeKind === "image";
   const isTreeNode = isTreePromptNode || isTreeImageNode;
   const displayUrl = hasUrl ? getElementDisplayUrl(element) : undefined;
+  const sourceUrl = element.originalUrl || element.url || undefined;
   const sourceRefUrls =
     element.genRefImages || (element.genRefImage ? [element.genRefImage] : []);
   const previewRefUrls =
@@ -543,6 +544,7 @@ const WorkspaceCanvasImageElementImpl: React.FC<
               element={element}
               isSelected={isSelected}
               displayUrl={displayUrl}
+              sourceUrl={sourceUrl}
               timestampLabel={timestampLabel}
               onStartMaskEdit={() => setEraserMode(true)}
               onDelete={deleteSelectedElement}

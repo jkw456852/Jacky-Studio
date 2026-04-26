@@ -1,4 +1,5 @@
 export type PromptLanguagePolicy = 'original-zh' | 'translate-en';
+export type ImageReferenceRoleMode = 'none' | 'default' | 'poster-product';
 
 export interface ImageTextPolicy {
   enforceChinese?: boolean;
@@ -10,12 +11,14 @@ export interface ImageGenerationRequest {
   providerId?: string | null;
   aspectRatio: string;
   imageSize?: '1K' | '2K' | '4K';
+  disableTransportRetries?: boolean;
   referenceImage?: string; // base64
   referenceImages?: string[];
   maskImage?: string;
   referenceStrength?: number;
   referencePriority?: 'first' | 'all';
   referenceMode?: 'style' | 'product';
+  referenceRoleMode?: ImageReferenceRoleMode;
   promptLanguagePolicy?: PromptLanguagePolicy;
   textPolicy?: ImageTextPolicy;
   consistencyContext?: {

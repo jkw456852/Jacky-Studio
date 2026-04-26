@@ -69,23 +69,6 @@ export const WorkspacePreviewModal: React.FC<WorkspacePreviewModalProps> = ({
     return () => window.removeEventListener("keydown", handleKeyDown);
   }, [onClose, previewUrl]);
 
-  if (!previewUrl) return null;
-
-  const resetView = () => {
-    setScale(1);
-    setOffset({ x: 0, y: 0 });
-    setIsDragging(false);
-  };
-
-  const updateScale = (nextScale: number) => {
-    const clamped = clampScale(nextScale);
-    setScale(clamped);
-    if (clamped === 1) {
-      setOffset({ x: 0, y: 0 });
-      setIsDragging(false);
-    }
-  };
-
   useEffect(() => {
     const viewport = viewportRef.current;
     if (!previewUrl || !viewport) return undefined;
@@ -103,6 +86,23 @@ export const WorkspacePreviewModal: React.FC<WorkspacePreviewModalProps> = ({
       viewport.removeEventListener("wheel", handleWheel);
     };
   }, [previewUrl]);
+
+  const resetView = () => {
+    setScale(1);
+    setOffset({ x: 0, y: 0 });
+    setIsDragging(false);
+  };
+
+  const updateScale = (nextScale: number) => {
+    const clamped = clampScale(nextScale);
+    setScale(clamped);
+    if (clamped === 1) {
+      setOffset({ x: 0, y: 0 });
+      setIsDragging(false);
+    }
+  };
+
+  if (!previewUrl) return null;
 
   const handleMouseDown: React.MouseEventHandler<HTMLDivElement> = (event) => {
     event.stopPropagation();

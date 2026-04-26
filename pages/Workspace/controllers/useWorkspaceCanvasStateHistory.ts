@@ -51,30 +51,26 @@ export function useWorkspaceCanvasStateHistory(
         | CanvasElement[]
         | ((prev: CanvasElement[]) => CanvasElement[]),
     ) => {
-      setElements((previous) => {
-        const resolved =
-          typeof nextElements === "function"
-            ? (nextElements as (prev: CanvasElement[]) => CanvasElement[])(
-                previous,
-              )
-            : nextElements;
-        elementsRef.current = resolved;
-        return resolved;
-      });
+      const resolved =
+        typeof nextElements === "function"
+          ? (nextElements as (prev: CanvasElement[]) => CanvasElement[])(
+              elementsRef.current,
+            )
+          : nextElements;
+      elementsRef.current = resolved;
+      setElements(resolved);
     },
     [elementsRef, setElements],
   );
 
   const setMarkersSynced = useCallback(
     (nextMarkers: Marker[] | ((prev: Marker[]) => Marker[])) => {
-      setMarkers((previous) => {
-        const resolved =
-          typeof nextMarkers === "function"
-            ? (nextMarkers as (prev: Marker[]) => Marker[])(previous)
-            : nextMarkers;
-        markersRef.current = resolved;
-        return resolved;
-      });
+      const resolved =
+        typeof nextMarkers === "function"
+          ? (nextMarkers as (prev: Marker[]) => Marker[])(markersRef.current)
+          : nextMarkers;
+      markersRef.current = resolved;
+      setMarkers(resolved);
     },
     [markersRef, setMarkers],
   );

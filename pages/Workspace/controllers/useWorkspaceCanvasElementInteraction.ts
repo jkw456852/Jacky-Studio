@@ -47,6 +47,11 @@ type UseWorkspaceCanvasElementInteractionOptions = {
   selectedElementId: string | null;
   selectedElementIds: string[];
   pendingDragElementIdRef: MutableRefObject<string | null>;
+  dragSelectionIdsRef: MutableRefObject<string[]>;
+  pendingAltDragDuplicateRef: MutableRefObject<{
+    anchorId: string;
+    selectionIds: string[];
+  } | null>;
   setIsDraggingElement: (dragging: boolean) => void;
   setDragStart: (point: { x: number; y: number }) => void;
   setElementStartPos: (point: { x: number; y: number }) => void;
@@ -102,6 +107,8 @@ export function useWorkspaceCanvasElementInteraction(
     selectedElementId,
     selectedElementIds,
     pendingDragElementIdRef,
+    dragSelectionIdsRef,
+    pendingAltDragDuplicateRef,
     setIsDraggingElement,
     setDragStart,
     setElementStartPos,
@@ -162,6 +169,7 @@ export function useWorkspaceCanvasElementInteraction(
   const handleElementMouseDown = useCallback(
     async (e: React.MouseEvent, id: string) => {
       if (isSpacePressedRef.current || activeTool === "hand") return;
+      pendingAltDragDuplicateRef.current = null;
 
       if (creationMode === "image" && isPickingFromCanvas) {
         const pickedEl = elementById.get(id);
@@ -353,6 +361,10 @@ export function useWorkspaceCanvasElementInteraction(
       const isAlreadySelected =
         selectedElementId === effectiveId ||
         selectedElementIds.includes(effectiveId);
+      const baseDragSelectionIds =
+        selectedElementIds.length > 1 && selectedElementIds.includes(effectiveId)
+          ? [...selectedElementIds]
+          : [effectiveId];
       if (isAlreadySelected) {
         if (
           selectedElementIds.length > 1 &&
@@ -367,15 +379,20 @@ export function useWorkspaceCanvasElementInteraction(
         }
       }
       pendingDragElementIdRef.current = effectiveId;
+      dragSelectionIdsRef.current = baseDragSelectionIds;
+      pendingAltDragDuplicateRef.current = e.altKey
+        ? {
+            anchorId: effectiveId,
+            selectionIds: baseDragSelectionIds,
+          }
+        : null;
       setIsDraggingElement(false);
       setDragStart({ x: e.clientX, y: e.clientY });
       const el = elementById.get(effectiveId);
       if (el) setElementStartPos({ x: el.x, y: el.y });
 
       let draggingIds =
-        selectedElementIds.length > 1 && selectedElementIds.includes(effectiveId)
-          ? [...selectedElementIds]
-          : [effectiveId];
+        baseDragSelectionIds.length > 0 ? [...baseDragSelectionIds] : [effectiveId];
       const draggingIdSet = new Set(draggingIds);
       for (const did of [...draggingIds]) {
         const dEl = elementById.get(did);
@@ -424,6 +441,8 @@ export function useWorkspaceCanvasElementInteraction(
       pendingSelectAllTextIdRef,
       selectedElementId,
       selectedElementIds,
+      dragSelectionIdsRef,
+      pendingAltDragDuplicateRef,
       setActiveTool,
       setDragStart,
       setEditingTextId,
