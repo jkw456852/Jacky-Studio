@@ -25,6 +25,62 @@ const blobToDataUrl = async (blob: Blob): Promise<string> => {
   });
 };
 
+const loadImageFromDataUrl = async (dataUrl: string): Promise<HTMLImageElement> => {
+  return new Promise((resolve, reject) => {
+    const image = new Image();
+    image.onload = () => resolve(image);
+    image.onerror = () => reject(new Error('reference image decode failed'));
+    image.src = dataUrl;
+  });
+};
+
+const flattenTransparentReferenceToWhiteJpeg = async (
+  dataUrl: string,
+  quality = 0.95,
+): Promise<string> => {
+  if (typeof document === 'undefined') {
+    return dataUrl;
+  }
+
+  const image = await loadImageFromDataUrl(dataUrl);
+  const width = Math.max(1, image.naturalWidth || image.width || 1);
+  const height = Math.max(1, image.naturalHeight || image.height || 1);
+  const canvas = document.createElement('canvas');
+  canvas.width = width;
+  canvas.height = height;
+  const context = canvas.getContext('2d');
+  if (!context) {
+    return dataUrl;
+  }
+
+  context.fillStyle = '#ffffff';
+  context.fillRect(0, 0, width, height);
+  context.drawImage(image, 0, 0, width, height);
+  return canvas.toDataURL('image/jpeg', quality);
+};
+
+const inferSafeCanvasExportMimeType = (
+  imageUrl: string,
+  naturalWidth: number,
+  naturalHeight: number,
+): 'image/png' | 'image/jpeg' => {
+  const normalized = String(imageUrl || '').toLowerCase();
+  if (
+    normalized.includes('.png') ||
+    normalized.includes('image/png') ||
+    normalized.includes('.webp') ||
+    normalized.includes('image/webp')
+  ) {
+    return 'image/png';
+  }
+
+  if (naturalWidth <= 0 || naturalHeight <= 0) {
+    return 'image/png';
+  }
+
+  return 'image/jpeg';
+};
+
 const fetchReferenceViaServer = async (imageUrl: string): Promise<string | null> => {
   console.log('[reference-resolver] Using CORS fallback strategies for:', imageUrl);
   
@@ -41,7 +97,16 @@ const fetchReferenceViaServer = async (imageUrl: string): Promise<string | null>
           const ctx = canvas.getContext('2d');
           if (!ctx) throw new Error('No 2d context available');
           ctx.drawImage(img, 0, 0);
-          resolve(canvas.toDataURL('image/jpeg', 0.95));
+          const exportMimeType = inferSafeCanvasExportMimeType(
+            imageUrl,
+            img.naturalWidth || img.width,
+            img.naturalHeight || img.height,
+          );
+          resolve(
+            exportMimeType === 'image/png'
+              ? canvas.toDataURL('image/png')
+              : canvas.toDataURL('image/jpeg', 0.95),
+          );
         } catch (e) {
           reject(e);
         }
@@ -156,4 +221,22 @@ export const normalizeReferenceToDataUrl = async (input: string): Promise<string
   }
 
   return null;
+};
+
+export const normalizeReferenceToModelInputDataUrl = async (
+  input: string,
+): Promise<string | null> => {
+  const normalized = await normalizeReferenceToDataUrl(input);
+  if (!normalized) return null;
+
+  if (/^data:image\/png;base64,/i.test(normalized)) {
+    try {
+      return await flattenTransparentReferenceToWhiteJpeg(normalized);
+    } catch (error) {
+      console.warn('[reference-resolver] png flatten failed, keeping original reference:', error);
+      return normalized;
+    }
+  }
+
+  return normalized;
 };

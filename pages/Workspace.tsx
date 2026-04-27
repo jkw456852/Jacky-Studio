@@ -1336,6 +1336,9 @@ const Workspace: React.FC = () => {
   const [elementStartPos, setElementStartPos] = useState({ x: 0, y: 0 });
   const pendingDragElementIdRef = useRef<string | null>(null);
   const dragDidMoveRef = useRef(false);
+  const cutterTrailGlowRef = useRef<SVGPathElement | null>(null);
+  const cutterTrailPathRef = useRef<SVGPathElement | null>(null);
+  const cutterTrailTipRef = useRef<SVGCircleElement | null>(null);
   const dragSelectionIdsRef = useRef<string[]>([]);
   const pendingAltDragDuplicateRef = useRef<{
     anchorId: string;
@@ -1392,6 +1395,7 @@ const Workspace: React.FC = () => {
     x: number;
     y: number;
   } | null>(null);
+  const suppressNextCanvasContextMenuRef = useRef(false);
   const [showModelPicker, setShowModelPicker] = useState(false);
   const [showRatioPicker, setShowRatioPicker] = useState(false);
   const [showResPicker, setShowResPicker] = useState(false);
@@ -2324,6 +2328,7 @@ const Workspace: React.FC = () => {
         target.closest(".file-list-modal") ||
         target.closest(".settings-modal") ||
         target.closest(".dialog-overlay") ||
+        target.closest("[data-tree-prompt-toolbar='true']") ||
         target.closest('[class*="Modal"]') ||
         target.closest('[class*="Dialog"]');
 
@@ -3847,6 +3852,7 @@ const Workspace: React.FC = () => {
       selectedElementId,
       setContextMenu,
       getElementSourceUrl,
+      suppressNextContextMenuRef: suppressNextCanvasContextMenuRef,
     });
 
   const showFeatureComingSoon = (name: string) => {
@@ -4667,6 +4673,10 @@ const Workspace: React.FC = () => {
   } = useWorkspaceCanvasPointer({
     contextMenu,
     setContextMenu,
+    suppressNextContextMenuRef: suppressNextCanvasContextMenuRef,
+    cutterTrailGlowRef,
+    cutterTrailPathRef,
+    cutterTrailTipRef,
     activeTool,
     isSpacePressedRef,
     setIsPanning,
@@ -4724,6 +4734,7 @@ const Workspace: React.FC = () => {
     setPan,
     setIsDraggingElement,
     beginAltDragDuplicate,
+    onDisconnectEdge: handleTreeConnectionDisconnect,
   });
 
   const handleCanvasMouseMove = useCallback(
@@ -5344,6 +5355,9 @@ const Workspace: React.FC = () => {
     containerRef,
     canvasLayerRef,
     marqueeBoxRef,
+    cutterTrailGlowRef,
+    cutterTrailPathRef,
+    cutterTrailTipRef,
     creationMode,
     isPickingFromCanvas,
     activeTool,

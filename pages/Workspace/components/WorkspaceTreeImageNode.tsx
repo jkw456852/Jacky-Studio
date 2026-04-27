@@ -8,6 +8,10 @@ import {
   Trash2,
 } from "lucide-react";
 import type { CanvasElement } from "../../../types";
+import {
+  getModelDisplayLabel,
+  getProviderDisplayLabel,
+} from "../../../services/provider-settings";
 import { downloadFromUrls } from "../../../utils/download";
 import { WorkspaceGenerationStatusCard } from "./WorkspaceGenerationStatusCard";
 import {
@@ -18,7 +22,6 @@ import {
   WORKSPACE_NODE_SELECTION_SHADOW,
 } from "./workspaceNodeStyles";
 
-const LABEL_ME = "\u6211";
 const LABEL_EDIT = "\u7f16\u8f91";
 const LABEL_DOWNLOAD = "\u4e0b\u8f7d";
 const LABEL_DELETE = "\u5220\u9664\u8282\u70b9";
@@ -29,6 +32,18 @@ const LABEL_GENERATION_FAILED = "\u751f\u56fe\u5931\u8d25";
 const LABEL_RETRY = "\u91cd\u8bd5";
 const LABEL_UNKNOWN_ERROR = "\u751f\u6210\u5931\u8d25\uff0c\u8bf7\u7a0d\u540e\u518d\u8bd5";
 const LABEL_BERSERK = "\u72c2\u66b4";
+
+const formatGenerationSourceLabel = (element: CanvasElement): string => {
+  const providerLabel = getProviderDisplayLabel(element.genProviderId);
+  const modelLabel = String(element.genModel || "").trim()
+    ? getModelDisplayLabel(String(element.genModel || "").trim())
+    : "";
+
+  if (providerLabel && modelLabel) {
+    return `${providerLabel} · ${modelLabel}`;
+  }
+  return providerLabel || modelLabel || "未记录模型";
+};
 
 type WorkspaceTreeImageNodeProps = {
   element: CanvasElement;
@@ -42,14 +57,18 @@ type WorkspaceTreeImageNodeProps = {
 };
 
 const ImageCardFooter: React.FC<{
+  sourceLabel: string;
   timestampLabel: string;
-}> = ({ timestampLabel }) => (
+}> = ({ sourceLabel, timestampLabel }) => (
   <div className="pointer-events-none absolute inset-x-0 bottom-0 flex items-end justify-between bg-gradient-to-t from-black/82 via-black/28 to-transparent px-4 pb-3 pt-12 text-white">
-    <div className="flex items-center gap-1.5 text-[11px] font-medium tracking-[0.01em]">
+    <div
+      className="flex min-w-0 items-center gap-1.5 text-[11px] font-medium tracking-[0.01em]"
+      title={sourceLabel}
+    >
       <span className="inline-block h-2 w-2 rounded-full bg-[#8BC34A] shadow-[0_0_0_3px_rgba(139,195,74,0.18)]" />
-      <span>{LABEL_ME}</span>
+      <span className="truncate">{sourceLabel}</span>
     </div>
-    <span className="text-[11px] font-medium text-white/86">{timestampLabel}</span>
+    <span className="pl-3 text-[11px] font-medium text-white/86">{timestampLabel}</span>
   </div>
 );
 
@@ -167,6 +186,7 @@ export const WorkspaceTreeImageNode: React.FC<
     ? element.genStatusLines.filter(Boolean).slice(0, 5)
     : [];
   const statusTone = showBerserkVisualState ? "berserk" : "default";
+  const sourceLabel = formatGenerationSourceLabel(element);
   const handleDownload = React.useCallback(async () => {
     try {
       await downloadFromUrls(
@@ -246,7 +266,7 @@ export const WorkspaceTreeImageNode: React.FC<
         {isSelected ? (
           <div className="pointer-events-none absolute inset-0 z-[3] rounded-[30px] bg-[radial-gradient(circle_at_top,rgba(255,255,255,0.12),transparent_42%)]" />
         ) : null}
-        <ImageCardFooter timestampLabel={timestampLabel} />
+        <ImageCardFooter sourceLabel={sourceLabel} timestampLabel={timestampLabel} />
         {element.isGenerating ? (
           <div
             className={`pointer-events-none absolute inset-0 flex items-center justify-center backdrop-blur-[1.5px] ${

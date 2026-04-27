@@ -1,4 +1,4 @@
-import { useCallback, type MouseEvent } from "react";
+import { useCallback, type MouseEvent, type MutableRefObject } from "react";
 import type { CanvasElement } from "../../../types";
 import { downloadFromUrls } from "../../../utils/download";
 import { getCanvasViewportSize } from "../workspaceShared";
@@ -16,6 +16,7 @@ type UseWorkspaceCanvasViewActionsOptions = {
   selectedElementId: string | null;
   setContextMenu: (menu: { x: number; y: number } | null) => void;
   getElementSourceUrl: (element: CanvasElement) => string | undefined;
+  suppressNextContextMenuRef: MutableRefObject<boolean>;
 };
 
 const PASTE_MAX_DIM = 800;
@@ -33,6 +34,7 @@ export function useWorkspaceCanvasViewActions(
     selectedElementId,
     setContextMenu,
     getElementSourceUrl,
+    suppressNextContextMenuRef,
   } = options;
 
   const fitToScreen = useCallback(() => {
@@ -147,9 +149,16 @@ export function useWorkspaceCanvasViewActions(
   const handleContextMenu = useCallback(
     (event: MouseEvent) => {
       event.preventDefault();
+
+      if (suppressNextContextMenuRef.current) {
+        suppressNextContextMenuRef.current = false;
+        setContextMenu(null);
+        return;
+      }
+
       setContextMenu({ x: event.clientX, y: event.clientY });
     },
-    [setContextMenu],
+    [setContextMenu, suppressNextContextMenuRef],
   );
 
   return {

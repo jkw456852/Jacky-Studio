@@ -430,8 +430,8 @@ export function useWorkspaceElementImageGeneration(
           role: "model",
           text:
             imageCount > 1
-              ? `Created ${imageCount} generation nodes. Starting image 1/${imageCount}...`
-              : `Generating image: ${sourceElement.genPrompt.slice(0, 40)}${sourceElement.genPrompt.length > 40 ? "..." : ""}`,
+              ? `已完成视觉编排，开始生成 ${imageCount} 张图。\n编排后关键词：${composedPrompt}`
+              : `编排后关键词：${composedPrompt}`,
           timestamp: Date.now(),
         });
 

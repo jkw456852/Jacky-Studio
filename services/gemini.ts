@@ -4,7 +4,11 @@ import { ProviderError } from '../utils/provider-error';
 import { fetchWithResilience } from './http/api-client';
 import { safeLocalStorageSetItem } from '../utils/safe-storage';
 import { getApiKey, getApiKeyByProviderId, getProviderConfig, getProviderConfigById } from './provider-config';
-import { normalizeReferenceToDataUrl } from './image-reference-resolver';
+import {
+    normalizeReferenceToDataUrl,
+    normalizeReferenceToModelInputDataUrl,
+} from './image-reference-resolver';
+import { resolveImageModelPostPath } from './provider-settings';
 
 const isNetworkFetchError = (error: unknown): boolean => {
     const msg = ((error as any)?.message || '').toLowerCase();
@@ -1446,27 +1450,32 @@ const retryWithBackoff = async <T>(
     } catch (error: any) {
         const statusCode = error.status || error.code || error.httpCode;
         const msg = error.message || '';
+        const normalizedMsg = String(msg).toLowerCase();
 
         // 可重试的错误：503（过载）、500（服务器错误）、429（限流）、网络错误
         const isRetryable =
             statusCode === 503 ||
             statusCode === 500 ||
             statusCode === 429 ||
-            msg.includes('overloaded') ||
-            msg.includes('UNAVAILABLE') ||
-            msg.includes('503') ||
-            msg.includes('500') ||
-            msg.includes('429') ||
-            msg.includes('RESOURCE_EXHAUSTED') ||
-            msg.includes('rate limit') ||
-            msg.includes('Too Many Requests') ||
-            msg.includes('Internal Server Error') ||
-            msg.includes('fetch failed') ||
-            msg.includes('network');
+            normalizedMsg.includes('overloaded') ||
+            normalizedMsg.includes('unavailable') ||
+            normalizedMsg.includes('503') ||
+            normalizedMsg.includes('500') ||
+            normalizedMsg.includes('429') ||
+            normalizedMsg.includes('resource_exhausted') ||
+            normalizedMsg.includes('rate limit') ||
+            normalizedMsg.includes('too many requests') ||
+            normalizedMsg.includes('internal server error') ||
+            normalizedMsg.includes('fetch failed') ||
+            normalizedMsg.includes('failed to fetch') ||
+            normalizedMsg.includes('err_connection_reset') ||
+            normalizedMsg.includes('connection reset') ||
+            normalizedMsg.includes('network') ||
+            normalizedMsg.includes('load failed');
 
         if (retries > 0 && isRetryable) {
             // 429 限流时使用更长的延迟
-            const actualDelay = (statusCode === 429 || msg.includes('429') || msg.includes('rate limit'))
+            const actualDelay = (statusCode === 429 || normalizedMsg.includes('429') || normalizedMsg.includes('rate limit'))
                 ? Math.max(delay, 3000)
                 : delay;
             console.warn(`[API重试] 错误码=${statusCode || 'unknown'}, ${actualDelay}ms 后重试... (剩余 ${retries} 次)`);
@@ -2412,7 +2421,7 @@ const extractOpenAIImageResult = (payload: any): string | null => {
 };
 
 const getOpenAIImageRequestTuning = (
-    route: string,
+    requestKind: 'edit' | 'generate',
     requestMode: OpenAIImageRequestMode,
     options?: {
         disableTransportRetries?: boolean;
@@ -2436,7 +2445,7 @@ const getOpenAIImageRequestTuning = (
         };
     };
 
-    if (route === '/v1/images/edits') {
+    if (requestKind === 'edit') {
         if (requestMode === 'official-transfer') {
             return applyRetryMode({
                 authStrategy: 'bearer-only' as const,
@@ -2555,7 +2564,7 @@ const requestOpenAICompatibleImage = async (opts: {
 
     const normalizedReferences: string[] = [];
     for (const input of opts.referenceImages || []) {
-        const normalized = await normalizeReferenceToDataUrl(input);
+        const normalized = await normalizeReferenceToModelInputDataUrl(input);
         if (normalized) normalizedReferences.push(normalized);
     }
 
@@ -2567,17 +2576,24 @@ const requestOpenAICompatibleImage = async (opts: {
         normalizedReferences.length > 0 || normalizedMask
             ? '/v1/images/edits'
             : '/v1/images/generations';
+    const isEditRequest = normalizedReferences.length > 0 || !!normalizedMask;
+    const effectiveRoute =
+        resolveImageModelPostPath({
+            providerId: provider.id || opts.providerId || null,
+            modelId: opts.model,
+            hasReferences: isEditRequest,
+        });
     const requestMode = getOpenAIImageRequestMode(opts.model, opts.imageSize);
     const size = resolveOpenAIImageSize(opts.model, opts.aspectRatio, opts.imageSize);
     const normalizedAspectRatio = normalizeOpenAIImageAspectRatio(opts.aspectRatio);
-    const requestTuning = getOpenAIImageRequestTuning(route, requestMode, {
+    const requestTuning = getOpenAIImageRequestTuning(isEditRequest ? 'edit' : 'generate', requestMode, {
         disableTransportRetries: opts.disableTransportRetries,
     });
     const referenceBytes = normalizedReferences.map((item) => estimateDataUrlBytes(item));
     const totalReferenceBytes = referenceBytes.reduce((sum, item) => sum + item, 0);
     const requestFingerprintMeta = buildImageRequestFingerprint({
         model: opts.model,
-        route,
+        route: effectiveRoute,
         size,
         aspectRatio: opts.aspectRatio,
         prompt: opts.prompt,
@@ -2590,7 +2606,7 @@ const requestOpenAICompatibleImage = async (opts: {
         requestFingerprint: requestFingerprintMeta.fingerprint,
     };
     const editFormMeta =
-        route === '/v1/images/edits'
+        isEditRequest
             ? buildOpenAIImageEditFormData({
                 model: opts.model,
                 prompt: opts.prompt,
@@ -2601,14 +2617,15 @@ const requestOpenAICompatibleImage = async (opts: {
             })
             : null;
     const imageFieldMode =
-        route === '/v1/images/edits'
+        isEditRequest
             ? normalizedReferences.length > 1
                 ? 'multi-file-repeated-field'
                 : 'single-file'
             : 'json';
 
     console.info(`[${opts.contextTag}] request summary`, {
-        route,
+        route: effectiveRoute,
+        defaultRoute: route,
         model: opts.model,
         requestMode,
         reverseCompat: requestMode === 'reverse-compat',
@@ -2633,7 +2650,7 @@ const requestOpenAICompatibleImage = async (opts: {
         maskMimeType: editFormMeta?.maskMimeType || null,
     });
 
-    if (route === '/v1/images/edits') {
+    if (isEditRequest) {
         console.info(`[${opts.contextTag}] form payload`, {
             model: opts.model,
             requestMode,
@@ -2651,7 +2668,7 @@ const requestOpenAICompatibleImage = async (opts: {
         });
         const payload = await fetchOpenAIFormWithFallback<any>(
             baseUrl,
-            route,
+            effectiveRoute,
             apiKeys,
             () => buildOpenAIImageEditFormData({
                 model: opts.model,
@@ -2669,7 +2686,7 @@ const requestOpenAICompatibleImage = async (opts: {
 
     const payload = await fetchOpenAIJsonWithFallback<any>(
         baseUrl,
-        route,
+        effectiveRoute,
         apiKeys,
         {
             model: opts.model,
@@ -2697,7 +2714,7 @@ export const editImage = async (config: ImageEditConfig): Promise<string | null>
 
     const refs: string[] = [];
     for (const input of config.referenceImages || []) {
-        const normalized = await normalizeReferenceToDataUrl(input);
+        const normalized = await normalizeReferenceToModelInputDataUrl(input);
         if (normalized) refs.push(normalized);
     }
 
@@ -2809,6 +2826,11 @@ const generateImageDallE3 = async (
 ): Promise<string | null> => {
     const baseUrl = normalizeUrl(getApiUrl(providerId) || 'https://yunwu.ai');
     const apiKey = requireApiKey('generateImageDallE3', providerId);
+    const route = resolveImageModelPostPath({
+        providerId,
+        modelId: model,
+        hasReferences: false,
+    });
 
     // 将宽高比转换为 dall-e-3 支持的尺寸
     let size = '1024x1024';
@@ -2824,7 +2846,7 @@ const generateImageDallE3 = async (
         response = await retryWithBackoff(async () => {
             return fetchOpenAIJsonWithFallback<any>(
                 baseUrl,
-                '/v1/images/generations',
+                route,
                 apiKey,
                 {
                     model,
@@ -2965,7 +2987,7 @@ export const generateImage = async (config: ImageGenerationConfig): Promise<stri
     }
 
     for (const imageInput of referencesToInject) {
-        const normalizedDataUrl = await normalizeReferenceToDataUrl(imageInput);
+        const normalizedDataUrl = await normalizeReferenceToModelInputDataUrl(imageInput);
         if (!normalizedDataUrl) continue;
         const matches = normalizedDataUrl.match(/^data:(.+);base64,(.+)$/);
         if (matches) {

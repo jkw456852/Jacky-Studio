@@ -1,8 +1,13 @@
-import { useCallback, type MutableRefObject } from "react";
+import { useCallback, useRef, type MutableRefObject } from "react";
 import type React from "react";
 import { flushSync } from "react-dom";
 import type { CanvasElement, Marker } from "../../../types";
-import { collectNodeDescendantIds } from "../workspaceNodeGraph";
+import {
+  canUseNodeGraphParent,
+  collectNodeDescendantIds,
+  getNodeGraphEdgePoints,
+} from "../workspaceNodeGraph";
+import { getAllNodeParentIds } from "../workspaceTreeNode";
 
 type Point = { x: number; y: number };
 type Guide = { type: "h" | "v"; pos: number };
@@ -26,10 +31,219 @@ type ResizePreview = {
 type MarqueePreviewIdsRef = MutableRefObject<string[]>;
 type DragDidMoveRef = MutableRefObject<boolean>;
 type ToolType = "select" | "hand" | "mark" | "insert" | "shape" | "text" | "brush" | "eraser";
+type EdgePoints = ReturnType<typeof getNodeGraphEdgePoints>;
+
+const RIGHT_DRAG_THRESHOLD = 4;
+const EDGE_CUT_SAMPLE_STEPS = 18;
+const EDGE_CUT_HIT_RADIUS = 12;
+
+const getCanvasPointFromClient = (
+  clientX: number,
+  clientY: number,
+  container: HTMLDivElement | null,
+  pan: Point,
+  zoom: number,
+): Point | null => {
+  const rect = container?.getBoundingClientRect();
+  if (!rect) {
+    return null;
+  }
+
+  return {
+    x: (clientX - rect.left - pan.x) / (zoom / 100),
+    y: (clientY - rect.top - pan.y) / (zoom / 100),
+  };
+};
+
+const getContainerPointFromClient = (
+  clientX: number,
+  clientY: number,
+  container: HTMLDivElement | null,
+): Point | null => {
+  const rect = container?.getBoundingClientRect();
+  if (!rect) {
+    return null;
+  }
+
+  return {
+    x: clientX - rect.left,
+    y: clientY - rect.top,
+  };
+};
+
+const cubicBezierPointAt = (
+  t: number,
+  start: Point,
+  control1: Point,
+  control2: Point,
+  end: Point,
+): Point => {
+  const inverse = 1 - t;
+  const inverse2 = inverse * inverse;
+  const inverse3 = inverse2 * inverse;
+  const t2 = t * t;
+  const t3 = t2 * t;
+
+  return {
+    x:
+      inverse3 * start.x +
+      3 * inverse2 * t * control1.x +
+      3 * inverse * t2 * control2.x +
+      t3 * end.x,
+    y:
+      inverse3 * start.y +
+      3 * inverse2 * t * control1.y +
+      3 * inverse * t2 * control2.y +
+      t3 * end.y,
+  };
+};
+
+const distanceSquared = (a: Point, b: Point) => {
+  const dx = a.x - b.x;
+  const dy = a.y - b.y;
+  return dx * dx + dy * dy;
+};
+
+const distancePointToSegmentSquared = (
+  point: Point,
+  segmentStart: Point,
+  segmentEnd: Point,
+) => {
+  const dx = segmentEnd.x - segmentStart.x;
+  const dy = segmentEnd.y - segmentStart.y;
+  const lengthSquared = dx * dx + dy * dy;
+
+  if (lengthSquared === 0) {
+    return distanceSquared(point, segmentStart);
+  }
+
+  const t = Math.max(
+    0,
+    Math.min(
+      1,
+      ((point.x - segmentStart.x) * dx + (point.y - segmentStart.y) * dy) /
+        lengthSquared,
+    ),
+  );
+
+  return distanceSquared(point, {
+    x: segmentStart.x + dx * t,
+    y: segmentStart.y + dy * t,
+  });
+};
+
+const orientation = (a: Point, b: Point, c: Point) => {
+  const value = (b.y - a.y) * (c.x - b.x) - (b.x - a.x) * (c.y - b.y);
+  if (Math.abs(value) < 0.0001) {
+    return 0;
+  }
+  return value > 0 ? 1 : 2;
+};
+
+const onSegment = (a: Point, b: Point, c: Point) =>
+  b.x <= Math.max(a.x, c.x) + 0.0001 &&
+  b.x + 0.0001 >= Math.min(a.x, c.x) &&
+  b.y <= Math.max(a.y, c.y) + 0.0001 &&
+  b.y + 0.0001 >= Math.min(a.y, c.y);
+
+const segmentsIntersect = (
+  aStart: Point,
+  aEnd: Point,
+  bStart: Point,
+  bEnd: Point,
+) => {
+  const o1 = orientation(aStart, aEnd, bStart);
+  const o2 = orientation(aStart, aEnd, bEnd);
+  const o3 = orientation(bStart, bEnd, aStart);
+  const o4 = orientation(bStart, bEnd, aEnd);
+
+  if (o1 !== o2 && o3 !== o4) {
+    return true;
+  }
+
+  if (o1 === 0 && onSegment(aStart, bStart, aEnd)) return true;
+  if (o2 === 0 && onSegment(aStart, bEnd, aEnd)) return true;
+  if (o3 === 0 && onSegment(bStart, aStart, bEnd)) return true;
+  if (o4 === 0 && onSegment(bStart, aEnd, bEnd)) return true;
+
+  return false;
+};
+
+const segmentDistanceSquared = (
+  aStart: Point,
+  aEnd: Point,
+  bStart: Point,
+  bEnd: Point,
+) => {
+  if (segmentsIntersect(aStart, aEnd, bStart, bEnd)) {
+    return 0;
+  }
+
+  return Math.min(
+    distancePointToSegmentSquared(aStart, bStart, bEnd),
+    distancePointToSegmentSquared(aEnd, bStart, bEnd),
+    distancePointToSegmentSquared(bStart, aStart, aEnd),
+    distancePointToSegmentSquared(bEnd, aStart, aEnd),
+  );
+};
+
+const doesCutSegmentHitEdge = (
+  cutStart: Point,
+  cutEnd: Point,
+  edgePoints: EdgePoints,
+) => {
+  const start = { x: edgePoints.startX, y: edgePoints.startY };
+  const control1 = { x: edgePoints.control1X, y: edgePoints.control1Y };
+  const control2 = { x: edgePoints.control2X, y: edgePoints.control2Y };
+  const end = { x: edgePoints.endX, y: edgePoints.endY };
+  const hitRadiusSquared = EDGE_CUT_HIT_RADIUS * EDGE_CUT_HIT_RADIUS;
+
+  let previous = start;
+  for (let step = 1; step <= EDGE_CUT_SAMPLE_STEPS; step += 1) {
+    const current = cubicBezierPointAt(
+      step / EDGE_CUT_SAMPLE_STEPS,
+      start,
+      control1,
+      control2,
+      end,
+    );
+
+    if (
+      segmentDistanceSquared(cutStart, cutEnd, previous, current) <=
+      hitRadiusSquared
+    ) {
+      return true;
+    }
+
+    previous = current;
+  }
+
+  return false;
+};
+
+const buildCutterTrailPath = (points: Point[]) => {
+  if (points.length === 0) {
+    return "";
+  }
+
+  if (points.length === 1) {
+    return `M ${points[0].x} ${points[0].y}`;
+  }
+
+  return points
+    .map((point, index) =>
+      `${index === 0 ? "M" : "L"} ${point.x.toFixed(1)} ${point.y.toFixed(1)}`,
+    )
+    .join(" ");
+};
 
 type UseWorkspaceCanvasPointerOptions = {
   contextMenu: { x: number; y: number } | null;
   setContextMenu: (value: { x: number; y: number } | null) => void;
+  suppressNextContextMenuRef: MutableRefObject<boolean>;
+  cutterTrailGlowRef: MutableRefObject<SVGPathElement | null>;
+  cutterTrailPathRef: MutableRefObject<SVGPathElement | null>;
+  cutterTrailTipRef: MutableRefObject<SVGCircleElement | null>;
   activeTool: ToolType;
   isSpacePressedRef: MutableRefObject<boolean>;
   setIsPanning: (value: boolean) => void;
@@ -101,6 +315,7 @@ type UseWorkspaceCanvasPointerOptions = {
     selectionIds: string[];
     startPositions: Record<string, Point>;
   } | null;
+  onDisconnectEdge?: (parentId: string, childId: string) => void;
 };
 
 export function useWorkspaceCanvasPointer(
@@ -109,6 +324,10 @@ export function useWorkspaceCanvasPointer(
   const {
     contextMenu,
     setContextMenu,
+    suppressNextContextMenuRef,
+    cutterTrailGlowRef,
+    cutterTrailPathRef,
+    cutterTrailTipRef,
     activeTool,
     isSpacePressedRef,
     setIsPanning,
@@ -166,7 +385,16 @@ export function useWorkspaceCanvasPointer(
     setPan,
     setIsDraggingElement,
     beginAltDragDuplicate,
+    onDisconnectEdge,
   } = options;
+
+  const rightPointerDownRef = useRef(false);
+  const rightPointerDownClientRef = useRef<Point | null>(null);
+  const rightPointerDownLocalRef = useRef<Point | null>(null);
+  const rightDragDidMoveRef = useRef(false);
+  const cutterLastCanvasPointRef = useRef<Point | null>(null);
+  const cutterTrailPointsRef = useRef<Point[]>([]);
+  const cutEdgeKeysRef = useRef<Set<string>>(new Set());
 
   const syncMarqueePreviewHighlight = useCallback(
     (nextIds: string[]) => {
@@ -212,6 +440,96 @@ export function useWorkspaceCanvasPointer(
     [zoom],
   );
 
+  const cutIntersectingEdges = useCallback(
+    (cutStart: Point, cutEnd: Point) => {
+      if (!onDisconnectEdge) {
+        return;
+      }
+
+      const baseElements = elementsRef.current;
+      if (baseElements.length === 0) {
+        return;
+      }
+
+      const elementMap = new Map(
+        baseElements.map((element) => [element.id, element] as const),
+      );
+
+      for (const child of baseElements) {
+        if (child.type === "group") {
+          continue;
+        }
+
+        const parentIds = getAllNodeParentIds(child);
+        for (const parentId of parentIds) {
+          const parent = elementMap.get(parentId);
+          if (!canUseNodeGraphParent(parent)) {
+            continue;
+          }
+
+          const edgeKey = `${parent.id}=>${child.id}`;
+          if (cutEdgeKeysRef.current.has(edgeKey)) {
+            continue;
+          }
+
+          const edgePoints = getNodeGraphEdgePoints(parent, child);
+          if (!doesCutSegmentHitEdge(cutStart, cutEnd, edgePoints)) {
+            continue;
+          }
+
+          cutEdgeKeysRef.current.add(edgeKey);
+          onDisconnectEdge(parent.id, child.id);
+        }
+      }
+    },
+    [elementsRef, onDisconnectEdge],
+  );
+
+  const clearCutterTrail = useCallback(() => {
+    cutterTrailPointsRef.current = [];
+
+    if (cutterTrailGlowRef.current) {
+      cutterTrailGlowRef.current.setAttribute("d", "");
+      cutterTrailGlowRef.current.style.opacity = "0";
+    }
+
+    if (cutterTrailPathRef.current) {
+      cutterTrailPathRef.current.setAttribute("d", "");
+      cutterTrailPathRef.current.style.opacity = "0";
+    }
+
+    if (cutterTrailTipRef.current) {
+      cutterTrailTipRef.current.style.opacity = "0";
+    }
+  }, [cutterTrailGlowRef, cutterTrailPathRef, cutterTrailTipRef]);
+
+  const renderCutterTrail = useCallback(
+    (points: Point[]) => {
+      cutterTrailPointsRef.current = points;
+      const d = buildCutterTrailPath(points);
+      const lastPoint = points[points.length - 1];
+
+      if (cutterTrailGlowRef.current) {
+        cutterTrailGlowRef.current.setAttribute("d", d);
+        cutterTrailGlowRef.current.style.opacity = points.length >= 2 ? "1" : "0";
+      }
+
+      if (cutterTrailPathRef.current) {
+        cutterTrailPathRef.current.setAttribute("d", d);
+        cutterTrailPathRef.current.style.opacity = points.length >= 2 ? "1" : "0";
+      }
+
+      if (cutterTrailTipRef.current && lastPoint && points.length >= 2) {
+        cutterTrailTipRef.current.setAttribute("cx", lastPoint.x.toFixed(1));
+        cutterTrailTipRef.current.setAttribute("cy", lastPoint.y.toFixed(1));
+        cutterTrailTipRef.current.style.opacity = "1";
+      } else if (cutterTrailTipRef.current) {
+        cutterTrailTipRef.current.style.opacity = "0";
+      }
+    },
+    [cutterTrailGlowRef, cutterTrailPathRef, cutterTrailTipRef],
+  );
+
   const handleMouseDown = useCallback((e: React.MouseEvent) => {
     if (contextMenu) setContextMenu(null);
     cancelAnimationFrame(rafIdRef.current);
@@ -229,6 +547,29 @@ export function useWorkspaceCanvasPointer(
     const clickedNodeGraphHitArea = Boolean(
       target.closest?.("[data-node-graph-hit='true']"),
     );
+
+    if (e.button === 2) {
+      e.preventDefault();
+      suppressNextContextMenuRef.current = false;
+      rightPointerDownRef.current = true;
+      rightPointerDownClientRef.current = { x: e.clientX, y: e.clientY };
+      rightPointerDownLocalRef.current = getContainerPointFromClient(
+        e.clientX,
+        e.clientY,
+        containerRef.current,
+      );
+      rightDragDidMoveRef.current = false;
+      cutEdgeKeysRef.current = new Set();
+      cutterLastCanvasPointRef.current = getCanvasPointFromClient(
+        e.clientX,
+        e.clientY,
+        containerRef.current,
+        panRef.current,
+        zoom,
+      );
+      clearCutterTrail();
+      return;
+    }
 
     if (
       activeTool === "hand" ||
@@ -299,9 +640,68 @@ export function useWorkspaceCanvasPointer(
     syncMarqueePreviewHighlight,
     pendingDragElementIdRef,
     rafIdRef,
+    clearCutterTrail,
+    suppressNextContextMenuRef,
+    zoom,
   ]);
 
   const handleMouseMove = useCallback((e: React.MouseEvent) => {
+    if (rightPointerDownRef.current) {
+      e.preventDefault();
+
+      const downPoint = rightPointerDownClientRef.current;
+      const downLocalPoint = rightPointerDownLocalRef.current;
+      const currentLocalPoint = getContainerPointFromClient(
+        e.clientX,
+        e.clientY,
+        containerRef.current,
+      );
+      const currentCanvasPoint = getCanvasPointFromClient(
+        e.clientX,
+        e.clientY,
+        containerRef.current,
+        panRef.current,
+        zoom,
+      );
+
+      if (
+        downPoint &&
+        Math.hypot(e.clientX - downPoint.x, e.clientY - downPoint.y) >=
+          RIGHT_DRAG_THRESHOLD
+      ) {
+        if (!rightDragDidMoveRef.current && downLocalPoint && currentLocalPoint) {
+          renderCutterTrail([downLocalPoint, currentLocalPoint]);
+        }
+        rightDragDidMoveRef.current = true;
+        suppressNextContextMenuRef.current = true;
+      }
+
+      if (!currentCanvasPoint || !currentLocalPoint) {
+        return;
+      }
+
+      const previousCanvasPoint =
+        cutterLastCanvasPointRef.current || currentCanvasPoint;
+      cutterLastCanvasPointRef.current = currentCanvasPoint;
+
+      if (rightDragDidMoveRef.current) {
+        const trailPoints = cutterTrailPointsRef.current;
+        const lastTrailPoint = trailPoints[trailPoints.length - 1];
+        if (
+          !lastTrailPoint ||
+          Math.hypot(
+            currentLocalPoint.x - lastTrailPoint.x,
+            currentLocalPoint.y - lastTrailPoint.y,
+          ) >= 2
+        ) {
+          renderCutterTrail([...trailPoints, currentLocalPoint]);
+        }
+        cutIntersectingEdges(previousCanvasPoint, currentCanvasPoint);
+      }
+
+      return;
+    }
+
     if (isResizing && selectedElementId) {
       const dx = (e.clientX - resizeStart.x) / (zoom / 100);
       const dy = (e.clientY - resizeStart.y) / (zoom / 100);
@@ -672,6 +1072,8 @@ export function useWorkspaceCanvasPointer(
     elements,
     elementsRef,
     beginAltDragDuplicate,
+    clearCutterTrail,
+    cutIntersectingEdges,
     getCachedDragOthers,
     groupDragStartRef,
     isDraggingElement,
@@ -702,9 +1104,22 @@ export function useWorkspaceCanvasPointer(
     syncMarqueePreviewHighlight,
     syncFloatingToolbarPosition,
     zoom,
+    renderCutterTrail,
+    suppressNextContextMenuRef,
   ]);
 
   const handleMouseUp = useCallback(() => {
+    if (rightPointerDownRef.current) {
+      suppressNextContextMenuRef.current = rightDragDidMoveRef.current;
+      rightPointerDownRef.current = false;
+      rightPointerDownClientRef.current = null;
+      rightPointerDownLocalRef.current = null;
+      rightDragDidMoveRef.current = false;
+      cutterLastCanvasPointRef.current = null;
+      cutEdgeKeysRef.current = new Set();
+      clearCutterTrail();
+    }
+
     const pendingDragElementId = pendingDragElementIdRef.current;
     const dragDidMove = dragDidMoveRef?.current ?? isDraggingElement;
     const dragSelectionIds = dragSelectionIdsRef.current;
@@ -891,6 +1306,7 @@ export function useWorkspaceCanvasPointer(
     resizePreviewRef,
     resizeRafIdRef,
     saveToHistory,
+    clearCutterTrail,
     setAlignmentGuides,
     setElementsSynced,
     setIsDraggingElement,
@@ -901,6 +1317,7 @@ export function useWorkspaceCanvasPointer(
     setResizeHandle,
     setSelectedElementId,
     setSelectedElementIdsIfChanged,
+    suppressNextContextMenuRef,
     syncMarqueePreviewHighlight,
     visibleElements,
     pendingDragElementIdRef,

@@ -2,7 +2,7 @@
 import { motion, AnimatePresence } from 'framer-motion';
 import { useNavigate } from 'react-router-dom';
 import { 
-  Key, X, Check, Eye, EyeOff, Loader2, Link as LinkIcon, 
+  Key, X, Check, Eye, EyeOff, Loader2,
   Shield, Sliders, Info, Globe, Banana, Zap, 
   Bot, Search, RefreshCw, ChevronDown, ChevronUp, GripVertical,
   FileText, Image as ImageIcon, Video, Plus, Box, ArrowLeft 
@@ -13,8 +13,10 @@ import { useImageHostStore } from '../stores/imageHost.store';
 import Sidebar from '../components/Sidebar';
 import {
     ApiProviderConfig,
+    ImageModelPostPathConfig,
     ModelInfo,
     buildMappedModelStorageEntry,
+    getResolvedImageModelPostPathConfig,
     getMappedModelConfigs,
     getModelDisplayLabel,
     getDefaultProviders,
@@ -123,9 +125,10 @@ const SettingsPage: React.FC = () => {
     const [selectedScriptModels, setSelectedScriptModels] = useState<string[]>([]);
     const [selectedImageModels, setSelectedImageModels] = useState<string[]>([]);
     const [selectedVideoModels, setSelectedVideoModels] = useState<string[]>([]);
+    const [imageModelPostPaths, setImageModelPostPaths] = useState<Record<string, ImageModelPostPathConfig>>({});
     const [visualOrchestratorModel, setVisualOrchestratorModel] = useState('auto');
     const [visualOrchestratorMaxReferenceImages, setVisualOrchestratorMaxReferenceImages] = useState(0);
-    const [visualOrchestratorMaxInlineImageBytesMb, setVisualOrchestratorMaxInlineImageBytesMb] = useState(18);
+    const [visualOrchestratorMaxInlineImageBytesMb, setVisualOrchestratorMaxInlineImageBytesMb] = useState(48);
     const [manualScriptModel, setManualScriptModel] = useState('');
     const [manualImageModel, setManualImageModel] = useState('');
     const [manualVideoModel, setManualVideoModel] = useState('');
@@ -149,6 +152,7 @@ const SettingsPage: React.FC = () => {
         entry: string;
         position: 'before' | 'after';
     } | null>(null);
+    const [expandedImageRouteEntries, setExpandedImageRouteEntries] = useState<string[]>([]);
 
     const normalizeImageSelection = (models: string[]): string[] => {
         if (!Array.isArray(models) || models.length === 0) return [AUTO_IMAGE_OPTION_ID];
@@ -177,9 +181,10 @@ const SettingsPage: React.FC = () => {
         setSelectedScriptModels(loaded.selectedScriptModels);
         setSelectedImageModels(normalizeImageSelection(loaded.selectedImageModels));
         setSelectedVideoModels(loaded.selectedVideoModels);
+        setImageModelPostPaths(loaded.imageModelPostPaths || {});
         setVisualOrchestratorModel(loaded.visualOrchestratorModel || 'auto');
         setVisualOrchestratorMaxReferenceImages(loaded.visualOrchestratorMaxReferenceImages ?? 0);
-        setVisualOrchestratorMaxInlineImageBytesMb(loaded.visualOrchestratorMaxInlineImageBytesMb ?? 18);
+        setVisualOrchestratorMaxInlineImageBytesMb(loaded.visualOrchestratorMaxInlineImageBytesMb ?? 48);
         setManualProviderId(loaded.activeProviderId || 'yunwu');
         setVisualContinuity(loaded.visualContinuity);
         setSystemModeration(loaded.systemModeration);
@@ -288,6 +293,7 @@ const SettingsPage: React.FC = () => {
                 selectedScriptModels,
                 selectedImageModels: normalizeImageSelection(selectedImageModels),
                 selectedVideoModels,
+                imageModelPostPaths,
                 visualOrchestratorModel,
                 visualOrchestratorMaxReferenceImages,
                 visualOrchestratorMaxInlineImageBytesMb,
@@ -335,6 +341,61 @@ const SettingsPage: React.FC = () => {
             providerName: provider?.name || parsed.providerId || '默认供应商',
             displayLabel: getModelDisplayLabel(parsed.modelId || entry),
         };
+    };
+
+    const getImageModelPostPathKey = (entry: string): string | null => {
+        if (entry === AUTO_IMAGE_OPTION_ID) return null;
+        const parsed = parseMappedModelStorageEntry('image', entry);
+        if (!parsed.modelId) return null;
+        return buildMappedModelStorageEntry(parsed.providerId, parsed.modelId);
+    };
+
+    const getImageModelPostPathConfig = (entry: string): ImageModelPostPathConfig => {
+        const key = getImageModelPostPathKey(entry);
+        if (!key) {
+            return {
+                withReferences: '',
+                withoutReferences: '',
+            };
+        }
+        return imageModelPostPaths[key] || {
+            withReferences: '',
+            withoutReferences: '',
+        };
+    };
+
+    const updateImageModelPostPath = (
+        entry: string,
+        field: keyof ImageModelPostPathConfig,
+        value: string,
+    ) => {
+        const key = getImageModelPostPathKey(entry);
+        if (!key) return;
+        setImageModelPostPaths((prev) => {
+            const current = prev[key] || { withReferences: '', withoutReferences: '' };
+            const nextValue = value;
+            const nextConfig = {
+                ...current,
+                [field]: nextValue,
+            };
+            if (!nextConfig.withReferences.trim() && !nextConfig.withoutReferences.trim()) {
+                const next = { ...prev };
+                delete next[key];
+                return next;
+            }
+            return {
+                ...prev,
+                [key]: nextConfig,
+            };
+        });
+    };
+
+    const toggleImageRouteEntryExpanded = (entry: string) => {
+        setExpandedImageRouteEntries((prev) =>
+            prev.includes(entry)
+                ? prev.filter((item) => item !== entry)
+                : [...prev, entry],
+        );
     };
 
     const isModelSelected = (category: MappingCategory, model: ModelInfo): boolean => {
@@ -762,6 +823,11 @@ const SettingsPage: React.FC = () => {
                                                         可直接拖拽已选模型调整顺序，排在前面的模型会在工作区里优先显示和优先路由。
                                                     </div>
                                                 )}
+                                                {activeMappingCategory === 'image' && (
+                                                    <div className="text-xs text-gray-500">
+                                                        可为每个图片模型单独指定 POST 路径。配置按“供应商 + 模型”隔离保存，同名模型不会互相覆盖；留空则继续使用系统默认路由。
+                                                    </div>
+                                                )}
                                                 {selectedModelsForExpanded.length === 0 ? (
                                                     <div className="rounded-2xl border border-dashed border-gray-200 bg-gray-50 px-4 py-6 text-sm text-gray-500">
                                                         当前类别还没有选中模型。
@@ -770,6 +836,18 @@ const SettingsPage: React.FC = () => {
                                                     <div className="space-y-3">
                                                         {selectedModelsForExpanded.map((entry, index) => {
                                                             const meta = getModelEntryMeta(activeMappingCategory, entry);
+                                                            const imagePostPathConfig = getImageModelPostPathConfig(entry);
+                                                            const shouldShowImageRouteFields =
+                                                                activeMappingCategory === 'image' && entry !== AUTO_IMAGE_OPTION_ID;
+                                                            const isImageRouteExpanded = expandedImageRouteEntries.includes(entry);
+                                                            const resolvedImagePostPaths = getResolvedImageModelPostPathConfig({
+                                                                providerId: meta.providerId,
+                                                                modelId: meta.modelId,
+                                                            });
+                                                            const currentImagePostPathSummary =
+                                                                resolvedImagePostPaths.withReferences === resolvedImagePostPaths.withoutReferences
+                                                                    ? `当前 POST: ${resolvedImagePostPaths.withReferences}`
+                                                                    : `当前 POST: 参考图 ${resolvedImagePostPaths.withReferences} · 无参考图 ${resolvedImagePostPaths.withoutReferences}`;
                                                             const showBeforeIndicator =
                                                                 dragOverSelectedModel?.entry === entry &&
                                                                 dragOverSelectedModel.position === 'before' &&
@@ -831,7 +909,7 @@ const SettingsPage: React.FC = () => {
                                                                         }`}
                                                                     />
                                                                     <div
-                                                                        className={`flex items-center gap-3 rounded-2xl border px-4 py-3 transition-all ${
+                                                                        className={`flex items-start gap-3 rounded-2xl border px-4 py-3 transition-all ${
                                                                             draggingSelectedModel === entry
                                                                                 ? 'border-gray-900 bg-gray-900 text-white shadow-lg shadow-black/10'
                                                                                 : 'border-gray-200 bg-white text-gray-900 hover:border-gray-300'
@@ -863,6 +941,23 @@ const SettingsPage: React.FC = () => {
                                                                                 <span className="truncate text-sm font-semibold">
                                                                                     {meta.displayLabel}
                                                                                 </span>
+                                                                                {shouldShowImageRouteFields && (
+                                                                                    <button
+                                                                                        type="button"
+                                                                                        onClick={(event) => {
+                                                                                            event.stopPropagation();
+                                                                                            toggleImageRouteEntryExpanded(entry);
+                                                                                        }}
+                                                                                        className={`inline-flex h-7 w-7 shrink-0 items-center justify-center rounded-lg border transition-colors ${
+                                                                                            draggingSelectedModel === entry
+                                                                                                ? 'border-white/15 bg-white/10 text-white/80 hover:bg-white/15'
+                                                                                                : 'border-gray-200 bg-white text-gray-500 hover:bg-gray-100 hover:text-gray-700'
+                                                                                        }`}
+                                                                                        aria-label={`${isImageRouteExpanded ? '收起' : '展开'} ${meta.displayLabel} 的 POST 路径设置`}
+                                                                                    >
+                                                                                        {isImageRouteExpanded ? <ChevronUp size={14} /> : <ChevronDown size={14} />}
+                                                                                    </button>
+                                                                                )}
                                                                             </div>
                                                                             <div
                                                                                 className={`mt-1 text-xs ${
@@ -871,6 +966,69 @@ const SettingsPage: React.FC = () => {
                                                                             >
                                                                                 {meta.providerName}
                                                                             </div>
+                                                                            {shouldShowImageRouteFields && (
+                                                                                <div className="mt-1.5"
+                                                                                >
+                                                                                    <div
+                                                                                        className={`truncate pr-2 text-[11px] ${
+                                                                                            draggingSelectedModel === entry ? 'text-white/45' : 'text-gray-400'
+                                                                                        }`}
+                                                                                        title={currentImagePostPathSummary}
+                                                                                    >
+                                                                                        {currentImagePostPathSummary}
+                                                                                    </div>
+                                                                                    {isImageRouteExpanded && (
+                                                                                        <div className="mt-2.5 grid grid-cols-1 xl:grid-cols-2 gap-2.5 rounded-xl border border-gray-100 bg-gray-50/70 px-3 py-3">
+                                                                                            <div className="space-y-1">
+                                                                                                <label
+                                                                                                    className={`block text-[11px] font-semibold ${
+                                                                                                        draggingSelectedModel === entry ? 'text-white/70' : 'text-gray-500'
+                                                                                                    }`}
+                                                                                                >
+                                                                                                    有参考图 / 蒙版
+                                                                                                </label>
+                                                                                                <div className={draggingSelectedModel === entry ? 'text-[10px] text-white/40' : 'text-[10px] text-gray-400'}>
+                                                                                                    默认 {resolvedImagePostPaths.defaultWithReferences}
+                                                                                                </div>
+                                                                                                <input
+                                                                                                    value={imagePostPathConfig.withReferences}
+                                                                                                    onChange={(event) => updateImageModelPostPath(entry, 'withReferences', event.target.value)}
+                                                                                                    placeholder={resolvedImagePostPaths.defaultWithReferences}
+                                                                                                    onClick={(event) => event.stopPropagation()}
+                                                                                                    className={`h-9 w-full rounded-lg border px-3 text-sm outline-none transition-all ${
+                                                                                                        draggingSelectedModel === entry
+                                                                                                            ? 'border-white/15 bg-black/10 text-white placeholder:text-white/30'
+                                                                                                            : 'border-gray-200 bg-white text-gray-900 placeholder:text-gray-400 focus:ring-4 focus:ring-black/5'
+                                                                                                    }`}
+                                                                                                />
+                                                                                            </div>
+                                                                                            <div className="space-y-1">
+                                                                                                <label
+                                                                                                    className={`block text-[11px] font-semibold ${
+                                                                                                        draggingSelectedModel === entry ? 'text-white/70' : 'text-gray-500'
+                                                                                                    }`}
+                                                                                                >
+                                                                                                    无参考图
+                                                                                                </label>
+                                                                                                <div className={draggingSelectedModel === entry ? 'text-[10px] text-white/40' : 'text-[10px] text-gray-400'}>
+                                                                                                    默认 {resolvedImagePostPaths.defaultWithoutReferences}
+                                                                                                </div>
+                                                                                                <input
+                                                                                                    value={imagePostPathConfig.withoutReferences}
+                                                                                                    onChange={(event) => updateImageModelPostPath(entry, 'withoutReferences', event.target.value)}
+                                                                                                    placeholder={resolvedImagePostPaths.defaultWithoutReferences}
+                                                                                                    onClick={(event) => event.stopPropagation()}
+                                                                                                    className={`h-9 w-full rounded-lg border px-3 text-sm outline-none transition-all ${
+                                                                                                        draggingSelectedModel === entry
+                                                                                                            ? 'border-white/15 bg-black/10 text-white placeholder:text-white/30'
+                                                                                                            : 'border-gray-200 bg-white text-gray-900 placeholder:text-gray-400 focus:ring-4 focus:ring-black/5'
+                                                                                                    }`}
+                                                                                                />
+                                                                                            </div>
+                                                                                        </div>
+                                                                                    )}
+                                                                                </div>
+                                                                            )}
                                                                         </div>
                                                                         <button
                                                                             onClick={() => removeSelectedModel(activeMappingCategory, entry)}
@@ -1093,14 +1251,14 @@ const SettingsPage: React.FC = () => {
                                                 />
                                             </div>
                                         </SettingsControl>
-                                        <SettingsControl label="编排图片预算" description="视觉编排模型可读取的参考图总预算，单位 MB。超出后会显式报错，不再隐式截断。">
+                                        <SettingsControl label="编排图片预算" description="视觉编排模型可读取的参考图总预算，单位 MB。默认 48MB；单张参考图超过 8MB 时会先自动压缩，再参与预算计算。">
                                             <div className="w-[140px]">
                                                 <SettingsInput
                                                     type="number"
                                                     min={1}
                                                     max={64}
                                                     value={visualOrchestratorMaxInlineImageBytesMb}
-                                                    onChange={(e) => setVisualOrchestratorMaxInlineImageBytesMb(Math.max(1, Math.min(64, Number.parseInt(e.target.value || '18', 10) || 18)))}
+                                                    onChange={(e) => setVisualOrchestratorMaxInlineImageBytesMb(Math.max(1, Math.min(64, Number.parseInt(e.target.value || '48', 10) || 48)))}
                                                 />
                                             </div>
                                         </SettingsControl>

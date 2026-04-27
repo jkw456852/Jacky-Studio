@@ -46,6 +46,7 @@ export interface LoadedProviderSettings {
   selectedScriptModels: string[];
   selectedImageModels: string[];
   selectedVideoModels: string[];
+  imageModelPostPaths: Record<string, ImageModelPostPathConfig>;
   visualOrchestratorModel: string;
   visualOrchestratorMaxReferenceImages: number;
   visualOrchestratorMaxInlineImageBytesMb: number;
@@ -64,14 +65,27 @@ export interface MappedModelConfig {
   displayLabel: string;
 }
 
+export interface ImageModelPostPathConfig {
+  withReferences: string;
+  withoutReferences: string;
+}
+
+export interface ResolvedImageModelPostPathConfig extends ImageModelPostPathConfig {
+  defaultWithReferences: string;
+  defaultWithoutReferences: string;
+  hasCustomWithReferences: boolean;
+  hasCustomWithoutReferences: boolean;
+}
+
 const DEFAULT_SCRIPT_MODEL = 'gemini-3.1-flash-lite-preview';
 const DEFAULT_IMAGE_MODEL = 'gemini-3-pro-image-preview';
 const DEFAULT_VIDEO_MODEL = 'veo-3.1-fast-generate-preview';
 const DEFAULT_VISUAL_ORCHESTRATOR_MODEL = 'auto';
 const DEFAULT_VISUAL_ORCHESTRATOR_MAX_REFERENCE_IMAGES = 0;
-const DEFAULT_VISUAL_ORCHESTRATOR_MAX_INLINE_IMAGE_BYTES_MB = 18;
+const DEFAULT_VISUAL_ORCHESTRATOR_MAX_INLINE_IMAGE_BYTES_MB = 48;
 const AUTO_IMAGE_OPTION_ID = 'Auto';
 const MODEL_ENTRY_SEPARATOR = '@@';
+const IMAGE_MODEL_POST_PATHS_STORAGE_KEY = 'setting_image_model_post_paths';
 
 const IMAGE_MODEL_ALIASES: Record<string, string> = {
   Auto: DEFAULT_IMAGE_MODEL,
@@ -129,6 +143,167 @@ const MODEL_DISPLAY_LABELS: Record<string, string> = {
 const getLocalStorage = (): Storage | null => {
   if (typeof window === 'undefined') return null;
   return window.localStorage;
+};
+
+const normalizeImageModelPostPath = (value: unknown): string => {
+  const raw = String(value ?? '').trim();
+  if (!raw) return '';
+
+  try {
+    if (/^https?:\/\//i.test(raw)) {
+      const url = new URL(raw);
+      const next = `${url.pathname || ''}${url.search || ''}`.trim();
+      return next.startsWith('/') ? next : next ? `/${next}` : '';
+    }
+  } catch {
+    // keep raw fallback
+  }
+
+  if (!raw.startsWith('/')) {
+    return `/${raw.replace(/^\/+/, '')}`;
+  }
+
+  return raw;
+};
+
+const getImageModelPostPathStorageKey = (
+  providerId: string | null | undefined,
+  modelId: string,
+): string => {
+  return buildMappedModelStorageEntry(
+    providerId,
+    canonicalizeMappedModelId('image', modelId),
+  );
+};
+
+const parseStoredImageModelPostPaths = (
+  value: string | null,
+): Record<string, ImageModelPostPathConfig> => {
+  if (!value) return {};
+
+  try {
+    const parsed = JSON.parse(value) as Record<string, unknown>;
+    if (!parsed || typeof parsed !== 'object') return {};
+
+    return Object.entries(parsed).reduce<Record<string, ImageModelPostPathConfig>>((acc, [entry, config]) => {
+      const parsedEntry = parseMappedModelStorageEntry('image', entry);
+      if (!parsedEntry.modelId) return acc;
+
+      const rawConfig = config && typeof config === 'object'
+        ? config as Record<string, unknown>
+        : {};
+      const withReferences = normalizeImageModelPostPath(rawConfig.withReferences);
+      const withoutReferences = normalizeImageModelPostPath(rawConfig.withoutReferences);
+
+      if (!withReferences && !withoutReferences) {
+        return acc;
+      }
+
+      acc[getImageModelPostPathStorageKey(parsedEntry.providerId, parsedEntry.modelId)] = {
+        withReferences,
+        withoutReferences,
+      };
+      return acc;
+    }, {});
+  } catch {
+    return {};
+  }
+};
+
+export const getStoredImageModelPostPaths = (): Record<string, ImageModelPostPathConfig> => {
+  const storage = getLocalStorage();
+  return parseStoredImageModelPostPaths(storage?.getItem(IMAGE_MODEL_POST_PATHS_STORAGE_KEY) || null);
+};
+
+const getDefaultImageModelPostPaths = (
+  providerId: string | null | undefined,
+  modelId: string,
+): ImageModelPostPathConfig => {
+  const normalizedProviderId = String(providerId || '').trim();
+  const normalizedModelId = canonicalizeMappedModelId('image', modelId);
+
+  if (normalizedProviderId === 'yunwu' && normalizedModelId === 'gemini-3.1-flash-image-preview') {
+    return {
+      withReferences: '/v1beta/models/gemini-3.1-flash-image-preview:generateContent',
+      withoutReferences: '/v1beta/models/gemini-3.1-flash-image-preview:generateContent',
+    };
+  }
+
+  if (normalizedProviderId === 'yunwu' && normalizedModelId === 'gemini-3-pro-image-preview') {
+    return {
+      withReferences: '/v1beta/models/gemini-3-pro-image-preview:generateContent',
+      withoutReferences: '/v1beta/models/gemini-3-pro-image-preview:generateContent',
+    };
+  }
+
+  if (normalizedProviderId === 'plato' && normalizedModelId === 'gpt-image-2') {
+    return {
+      withReferences: '/v1/images/edits',
+      withoutReferences: '/v1/images/generations',
+    };
+  }
+
+  if (normalizedModelId === 'gpt-image-2' || normalizedModelId === 'gpt-image-1.5-all') {
+    return {
+      withReferences: '/v1/images/edits',
+      withoutReferences: '/v1/images/generations',
+    };
+  }
+
+  return {
+    withReferences: `/v1beta/models/${normalizedModelId}:generateContent`,
+    withoutReferences: `/v1beta/models/${normalizedModelId}:generateContent`,
+  };
+};
+
+const sanitizeImageModelPostPathSettings = (
+  settings: Record<string, ImageModelPostPathConfig> | undefined,
+): Record<string, ImageModelPostPathConfig> => {
+  if (!settings || typeof settings !== 'object') return {};
+
+  return Object.entries(settings).reduce<Record<string, ImageModelPostPathConfig>>((acc, [entry, config]) => {
+    const parsedEntry = parseMappedModelStorageEntry('image', entry);
+    if (!parsedEntry.modelId) return acc;
+
+    const withReferences = normalizeImageModelPostPath(config?.withReferences);
+    const withoutReferences = normalizeImageModelPostPath(config?.withoutReferences);
+    if (!withReferences && !withoutReferences) return acc;
+
+    acc[getImageModelPostPathStorageKey(parsedEntry.providerId, parsedEntry.modelId)] = {
+      withReferences,
+      withoutReferences,
+    };
+    return acc;
+  }, {});
+};
+
+export const resolveImageModelPostPath = (args: {
+  providerId?: string | null;
+  modelId: string;
+  hasReferences: boolean;
+}): string => {
+  const resolved = getResolvedImageModelPostPathConfig(args);
+  return args.hasReferences ? resolved.withReferences : resolved.withoutReferences;
+};
+
+export const getResolvedImageModelPostPathConfig = (args: {
+  providerId?: string | null;
+  modelId: string;
+}): ResolvedImageModelPostPathConfig => {
+  const key = getImageModelPostPathStorageKey(args.providerId, args.modelId);
+  const config = getStoredImageModelPostPaths()[key];
+  const defaults = getDefaultImageModelPostPaths(args.providerId, args.modelId);
+  const customWithReferences = normalizeImageModelPostPath(config?.withReferences);
+  const customWithoutReferences = normalizeImageModelPostPath(config?.withoutReferences);
+
+  return {
+    withReferences: customWithReferences || defaults.withReferences,
+    withoutReferences: customWithoutReferences || defaults.withoutReferences,
+    defaultWithReferences: defaults.withReferences,
+    defaultWithoutReferences: defaults.withoutReferences,
+    hasCustomWithReferences: Boolean(customWithReferences),
+    hasCustomWithoutReferences: Boolean(customWithoutReferences),
+  };
 };
 
 export const getDefaultProviders = (): ApiProviderConfig[] => {
@@ -310,6 +485,16 @@ export const getModelDisplayLabel = (modelId: string): string => {
   return MODEL_DISPLAY_LABELS[modelId] || modelId;
 };
 
+export const getProviderDisplayLabel = (
+  providerId: string | null | undefined,
+  providers?: ApiProviderConfig[],
+): string => {
+  const normalizedProviderId = String(providerId || '').trim();
+  if (!normalizedProviderId) return '';
+  const providerNameMap = getProviderNameMap(providers || getStoredProviders());
+  return providerNameMap[normalizedProviderId] || normalizedProviderId;
+};
+
 export const normalizeMappedModelId = (
   category: ModelCategory,
   modelId: string,
@@ -464,6 +649,7 @@ export const loadProviderSettings = (): LoadedProviderSettings => {
     selectedScriptModels: getStoredMappingEntries('script'),
     selectedImageModels: getStoredMappingEntries('image'),
     selectedVideoModels: getStoredMappingEntries('video').length > 0 ? getStoredMappingEntries('video') : selectedVideoModels,
+    imageModelPostPaths: getStoredImageModelPostPaths(),
     visualOrchestratorModel: storage?.getItem('setting_visual_orchestrator_model') || DEFAULT_VISUAL_ORCHESTRATOR_MODEL,
     visualOrchestratorMaxReferenceImages: clampInteger(
       storage?.getItem('setting_visual_orchestrator_max_reference_images'),
@@ -492,6 +678,10 @@ export const saveProviderSettings = (settings: LoadedProviderSettings): void => 
   safeLocalStorageSetItem('setting_script_models', JSON.stringify(settings.selectedScriptModels));
   safeLocalStorageSetItem('setting_image_models', JSON.stringify(settings.selectedImageModels));
   safeLocalStorageSetItem('setting_video_models', JSON.stringify(settings.selectedVideoModels));
+  safeLocalStorageSetItem(
+    IMAGE_MODEL_POST_PATHS_STORAGE_KEY,
+    JSON.stringify(sanitizeImageModelPostPathSettings(settings.imageModelPostPaths)),
+  );
   safeLocalStorageSetItem('setting_visual_orchestrator_model', settings.visualOrchestratorModel || DEFAULT_VISUAL_ORCHESTRATOR_MODEL);
   safeLocalStorageSetItem(
     'setting_visual_orchestrator_max_reference_images',
@@ -523,6 +713,7 @@ export const saveProviderSettings = (settings: LoadedProviderSettings): void => 
           selectedScriptModels: settings.selectedScriptModels,
           selectedImageModels: settings.selectedImageModels,
           selectedVideoModels: settings.selectedVideoModels,
+          imageModelPostPaths: sanitizeImageModelPostPathSettings(settings.imageModelPostPaths),
           visualOrchestratorModel: settings.visualOrchestratorModel || DEFAULT_VISUAL_ORCHESTRATOR_MODEL,
           visualOrchestratorMaxReferenceImages: clampInteger(
             settings.visualOrchestratorMaxReferenceImages,

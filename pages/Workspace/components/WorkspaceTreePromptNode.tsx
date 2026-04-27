@@ -219,6 +219,17 @@ const TreePromptToolbar: React.FC<{
   styleLibraryMode,
 }) => {
   const [showStyleLibraryPicker, setShowStyleLibraryPicker] = React.useState(false);
+  const stopToolbarPointerEvent = (
+    event:
+      | React.MouseEvent<HTMLElement>
+      | React.PointerEvent<HTMLElement>,
+  ) => {
+    event.preventDefault();
+    event.stopPropagation();
+  };
+  const stopToolbarClickEvent = (event: React.MouseEvent<HTMLElement>) => {
+    event.stopPropagation();
+  };
   const normalizedStyleLibraryMode = styleLibraryMode || "default";
   const styleLibraryLabel =
     normalizedStyleLibraryMode === "none"
@@ -253,7 +264,13 @@ const TreePromptToolbar: React.FC<{
   ];
 
   return (
-    <div className="absolute left-1/2 top-0 z-[130] flex -translate-x-1/2 -translate-y-[calc(100%+12px)] items-center gap-1.5 rounded-full border border-[#e7e6ef] bg-white/98 px-2 py-1.5 shadow-[0_10px_24px_rgba(15,23,42,0.12)] backdrop-blur-sm">
+    <div
+      data-tree-prompt-toolbar="true"
+      className="pointer-events-auto absolute left-1/2 top-0 z-[130] flex -translate-x-1/2 -translate-y-[calc(100%+12px)] items-center gap-1.5 rounded-full border border-[#e7e6ef] bg-white/98 px-2 py-1.5 shadow-[0_10px_24px_rgba(15,23,42,0.12)] backdrop-blur-sm"
+      onPointerDown={stopToolbarPointerEvent}
+      onMouseDown={stopToolbarPointerEvent}
+      onClick={stopToolbarClickEvent}
+    >
       <div className="flex items-center gap-1 rounded-full border border-[#efedf5] bg-[#faf9fc] px-1.5 py-1">
         {TREE_PROMPT_TONES.map((tone) => {
           const active = activeTone === tone.id;
@@ -263,7 +280,8 @@ const TreePromptToolbar: React.FC<{
               type="button"
               aria-label={`Set tone ${tone.id}`}
               className="flex h-6 w-6 items-center justify-center rounded-full transition hover:scale-105"
-              onMouseDown={(event) => event.stopPropagation()}
+              onPointerDown={stopToolbarPointerEvent}
+              onMouseDown={stopToolbarPointerEvent}
               onClick={(event) => {
                 event.stopPropagation();
                 onToneChange(tone.id);
@@ -294,7 +312,8 @@ const TreePromptToolbar: React.FC<{
               ? "bg-[#111111] text-white shadow-[0_8px_18px_rgba(17,17,17,0.18)]"
               : "text-[#111827] hover:bg-[#f5f3ff]"
           }`}
-          onMouseDown={(event) => event.stopPropagation()}
+          onPointerDown={stopToolbarPointerEvent}
+          onMouseDown={stopToolbarPointerEvent}
           onClick={(event) => {
             event.stopPropagation();
             onToggleBerserkRetry();
@@ -312,7 +331,8 @@ const TreePromptToolbar: React.FC<{
         <button
           type="button"
           className="flex h-8 shrink-0 items-center gap-1 rounded-full px-2.5 whitespace-nowrap text-[12px] font-medium text-[#111827] transition hover:bg-[#f5f3ff]"
-          onMouseDown={(event) => event.stopPropagation()}
+          onPointerDown={stopToolbarPointerEvent}
+          onMouseDown={stopToolbarPointerEvent}
           onClick={(event) => {
             event.stopPropagation();
             setShowStyleLibraryPicker((value) => !value);
@@ -327,7 +347,9 @@ const TreePromptToolbar: React.FC<{
         {showStyleLibraryPicker ? (
           <div
             className="absolute bottom-full left-0 z-[160] mb-2 w-64 rounded-2xl border border-[#e7e6ef] bg-white p-1.5 shadow-[0_18px_44px_rgba(15,23,42,0.16)]"
-            onMouseDown={(event) => event.stopPropagation()}
+            onPointerDown={stopToolbarPointerEvent}
+            onMouseDown={stopToolbarPointerEvent}
+            onClick={stopToolbarClickEvent}
           >
             <div className="mb-1 border-b border-[#f1f2f7] px-3 py-1.5 text-[10px] font-bold uppercase tracking-[0.16em] text-[#98a2b3]">
               {LABEL_STYLE_LIBRARY}
@@ -370,7 +392,8 @@ const TreePromptToolbar: React.FC<{
       <button
         type="button"
         className="flex h-8 shrink-0 items-center gap-1 rounded-full px-2.5 whitespace-nowrap text-[12px] font-medium text-[#111827] transition hover:bg-[#f5f3ff]"
-        onMouseDown={(event) => event.stopPropagation()}
+        onPointerDown={stopToolbarPointerEvent}
+        onMouseDown={stopToolbarPointerEvent}
         onClick={(event) => {
           event.stopPropagation();
           onCopy();
@@ -382,7 +405,8 @@ const TreePromptToolbar: React.FC<{
       <button
         type="button"
         className="flex h-8 shrink-0 items-center gap-1 rounded-full px-2.5 whitespace-nowrap text-[12px] font-medium text-[#111827] transition hover:bg-[#fff1f2] hover:text-[#dc2626]"
-        onMouseDown={(event) => event.stopPropagation()}
+        onPointerDown={stopToolbarPointerEvent}
+        onMouseDown={stopToolbarPointerEvent}
         onClick={(event) => {
           event.stopPropagation();
           onDelete();
@@ -499,8 +523,8 @@ const TreePromptGenerateControls: React.FC<{
   };
 
   return (
-    <div className="mt-4 shrink-0 space-y-2 pt-1">
-      <div className="grid grid-cols-[minmax(0,1.1fr)_84px_104px] gap-2">
+    <div className="relative z-[12] mt-4 shrink-0 space-y-2 pt-1 pointer-events-auto">
+      <div className="grid grid-cols-[minmax(0,1.1fr)_92px_104px] gap-2">
         <div className="relative min-w-0">
           <button
             type="button"
@@ -584,7 +608,7 @@ const TreePromptGenerateControls: React.FC<{
 
         <label
           htmlFor={refUploadInputId}
-          className={`${CONTROL_PILL_CLASS} justify-between px-2.5 ${
+          className={`${CONTROL_PILL_CLASS} justify-between overflow-hidden px-2.5 ${
             refImageCount >= 6 ? "cursor-not-allowed opacity-40" : "cursor-pointer"
           }`}
           onMouseDown={(event) => {
@@ -593,11 +617,11 @@ const TreePromptGenerateControls: React.FC<{
           }}
           title={LABEL_REF}
         >
-          <span className="flex items-center gap-1.5">
-            <ImagePlus size={14} className="text-[#7b8192]" />
-            <span>Ref</span>
+          <span className="inline-flex min-w-0 items-center gap-1.5 whitespace-nowrap leading-none">
+            <ImagePlus size={14} className="shrink-0 text-[#7b8192]" />
+            <span className="block whitespace-nowrap leading-none">Ref</span>
           </span>
-          <span className="rounded-full bg-[#f3efff] px-1.5 py-0.5 text-[10px] font-semibold text-[#6b4eff]">
+          <span className="inline-flex h-5 min-w-[20px] shrink-0 items-center justify-center rounded-full bg-[#f3efff] px-1.5 text-[10px] font-semibold leading-none text-[#6b4eff]">
             {refImageCount}
           </span>
         </label>
@@ -1018,12 +1042,11 @@ export const WorkspaceTreePromptNode: React.FC<
             setPreviewUrl={setPreviewUrl}
           />
 
-          <div className="min-h-0">
-            <div className="mb-3 flex flex-wrap items-center gap-1.5 text-[12px] leading-none">
-              <span className="rounded-[8px] bg-[#f3efff] px-2 py-1 font-medium text-[#6b4eff] shadow-[inset_0_0_0_1px_rgba(107,78,255,0.10)]">
-                Follow-up with {helperCount} node{helperCount > 1 ? "s" : ""}
+          <div className="relative z-[1] min-h-0">
+            <div className="mb-3 flex justify-center text-[12px] leading-none">
+              <span className="rounded-[8px] bg-[#f3efff] px-2 py-1 text-center font-medium text-[#6b4eff] shadow-[inset_0_0_0_1px_rgba(107,78,255,0.10)]">
+                跟进生成 {helperCount} 个节点
               </span>
-              <span className="font-medium text-[#16181d]">Based on this style,</span>
             </div>
 
             <textarea

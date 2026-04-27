@@ -141,6 +141,10 @@ export function useWorkspaceElementMutationHelpers(
       const nextElements = baseElements.map((element) => {
         if (element.id !== elementId) return element;
         changed = true;
+        const isTreeImageChild =
+          element.type === "image" &&
+          element.treeNodeKind === "image" &&
+          Boolean(element.nodeParentId);
         return {
           ...element,
           isGenerating: false,
@@ -169,6 +173,14 @@ export function useWorkspaceElementMutationHelpers(
                 ? element.height
                 : displayHeight,
           genAspectRatio: `${originalWidth}:${originalHeight}`,
+          genRefImage: isTreeImageChild ? undefined : element.genRefImage,
+          genRefImages: isTreeImageChild ? undefined : element.genRefImages,
+          genRefPreviewImage: isTreeImageChild
+            ? undefined
+            : element.genRefPreviewImage,
+          genRefPreviewImages: isTreeImageChild
+            ? undefined
+            : element.genRefPreviewImages,
         };
       });
 
@@ -517,8 +529,13 @@ export function useWorkspaceElementMutationHelpers(
       );
 
       const nextElements = [...elementsRef.current, ...placeholderElements];
-      setElementsSynced(nextElements);
-      saveToHistory(nextElements, markersRef.current);
+      const reflowedElements = reflowGenerationRowForParent(
+        nextElements,
+        sourceElement,
+      );
+
+      setElementsSynced(reflowedElements);
+      saveToHistory(reflowedElements, markersRef.current);
 
       return placeholderElements.map((element) => element.id);
     },
@@ -588,10 +605,6 @@ export function useWorkspaceElementMutationHelpers(
           genImageCount: sourceElement.genImageCount,
           genInfiniteRetry: sourceElement.genInfiniteRetry,
           genReferenceRoleMode: sourceElement.genReferenceRoleMode,
-          genRefImage: sourceElement.genRefImage,
-          genRefImages: sourceElement.genRefImages,
-          genRefPreviewImage: sourceElement.genRefPreviewImage,
-          genRefPreviewImages: sourceElement.genRefPreviewImages,
           nodeInteractionMode: "branch",
           nodeParentId: placement.nodeParentId,
           nodeParentIds: [placement.nodeParentId],

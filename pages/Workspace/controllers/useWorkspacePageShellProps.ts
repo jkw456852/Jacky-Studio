@@ -45,6 +45,9 @@ type UseWorkspacePageShellPropsArgs = {
   containerRef: React.RefObject<HTMLDivElement | null>;
   canvasLayerRef: React.RefObject<HTMLDivElement | null>;
   marqueeBoxRef: React.RefObject<HTMLDivElement | null>;
+  cutterTrailGlowRef: React.RefObject<SVGPathElement | null>;
+  cutterTrailPathRef: React.RefObject<SVGPathElement | null>;
+  cutterTrailTipRef: React.RefObject<SVGCircleElement | null>;
   creationMode: string;
   isPickingFromCanvas: boolean;
   activeTool: string;
@@ -132,6 +135,9 @@ export const useWorkspacePageShellProps = ({
   containerRef,
   canvasLayerRef,
   marqueeBoxRef,
+  cutterTrailGlowRef,
+  cutterTrailPathRef,
+  cutterTrailTipRef,
   creationMode,
   isPickingFromCanvas,
   activeTool,
@@ -247,6 +253,9 @@ export const useWorkspacePageShellProps = ({
       containerRef,
       canvasLayerRef,
       marqueeBoxRef,
+      cutterTrailGlowRef,
+      cutterTrailPathRef,
+      cutterTrailTipRef,
       creationMode,
       isPickingFromCanvas,
       activeTool,
@@ -288,6 +297,9 @@ export const useWorkspacePageShellProps = ({
       canvasLayerRef,
       consistencyCheckEnabled,
       containerRef,
+      cutterTrailGlowRef,
+      cutterTrailPathRef,
+      cutterTrailTipRef,
       creationMode,
       currentConsistencyAnchorUrl,
       handleCanvasDrop,

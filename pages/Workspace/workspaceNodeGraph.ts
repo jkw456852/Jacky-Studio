@@ -7,6 +7,17 @@ const BRANCH_HORIZONTAL_GAP = 140;
 
 const round = (value: number) => Math.round(value * 100) / 100;
 
+const extractGenerationTimestamp = (id: string): number | null => {
+  const match = String(id || "").match(/\d{13}/);
+  if (match) {
+    return Number(match[0]);
+  }
+  if (/^\d+$/.test(String(id || "").trim())) {
+    return Number(id);
+  }
+  return null;
+};
+
 export const canUseNodeGraphParent = (element: CanvasElement | null | undefined) =>
   Boolean(element && element.type !== "group");
 
@@ -74,25 +85,17 @@ export const resolveNodeGraphPlacement = ({
   const generationChildren = getGenerationChildren(elements, parentElement.id);
 
   if (preferredLinkKind === "generation") {
-    const lowestGenerationChild = generationChildren.reduce<CanvasElement | null>(
-      (lowest, current) => {
-        if (!lowest) return current;
-        const lowestBottom = lowest.y + lowest.height;
-        const currentBottom = current.y + current.height;
-        return currentBottom > lowestBottom ? current : lowest;
-      },
-      null,
-    );
+    const rowY =
+      generationChildren.length > 0
+        ? generationChildren.reduce(
+            (minY, child) => Math.min(minY, child.y),
+            generationChildren[0].y,
+          )
+        : parentElement.y + parentElement.height + GENERATION_VERTICAL_GAP;
 
     return {
       x: round(parentElement.x + (parentElement.width - childWidth) / 2),
-      y: round(
-        lowestGenerationChild
-          ? lowestGenerationChild.y +
-              lowestGenerationChild.height +
-              GENERATION_VERTICAL_GAP
-          : parentElement.y + parentElement.height + GENERATION_VERTICAL_GAP,
-      ),
+      y: round(rowY),
       nodeParentId: parentElement.id,
       nodeLinkKind: "generation",
     };
@@ -130,6 +133,21 @@ export const reflowGenerationRowForParent = (
   const generationChildren = getGenerationChildren(elements, parentElement.id)
     .slice()
     .sort((left, right) => {
+      const leftTimestamp = extractGenerationTimestamp(left.id);
+      const rightTimestamp = extractGenerationTimestamp(right.id);
+      if (
+        leftTimestamp !== null &&
+        rightTimestamp !== null &&
+        leftTimestamp !== rightTimestamp
+      ) {
+        return leftTimestamp - rightTimestamp;
+      }
+      if (leftTimestamp !== null && rightTimestamp === null) {
+        return -1;
+      }
+      if (leftTimestamp === null && rightTimestamp !== null) {
+        return 1;
+      }
       if (left.x !== right.x) {
         return left.x - right.x;
       }
@@ -149,10 +167,16 @@ export const reflowGenerationRowForParent = (
       parentElement.y + parentElement.height + GENERATION_VERTICAL_GAP,
     ),
   );
-  const totalWidth =
-    generationChildren.reduce((sum, child) => sum + child.width, 0) +
+  const latestChild = generationChildren[generationChildren.length - 1];
+  const latestChildAnchorX = round(
+    parentElement.x + (parentElement.width - latestChild.width) / 2,
+  );
+  const widthToLeft =
+    generationChildren
+      .slice(0, -1)
+      .reduce((sum, child) => sum + child.width, 0) +
     GENERATION_HORIZONTAL_GAP * Math.max(0, generationChildren.length - 1);
-  let cursorX = round(parentElement.x + parentElement.width / 2 - totalWidth / 2);
+  let cursorX = round(latestChildAnchorX - widthToLeft);
   const offsetById = new Map<string, { dx: number; dy: number }>();
 
   for (const child of generationChildren) {

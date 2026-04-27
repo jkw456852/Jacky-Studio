@@ -18,6 +18,9 @@ type WorkspaceCanvasStageProps = {
   containerRef: React.RefObject<HTMLDivElement | null>;
   canvasLayerRef: React.RefObject<HTMLDivElement | null>;
   marqueeBoxRef: React.RefObject<HTMLDivElement | null>;
+  cutterTrailGlowRef: React.RefObject<SVGPathElement | null>;
+  cutterTrailPathRef: React.RefObject<SVGPathElement | null>;
+  cutterTrailTipRef: React.RefObject<SVGCircleElement | null>;
   creationMode: string;
   isPickingFromCanvas: boolean;
   activeTool: string;
@@ -44,6 +47,9 @@ export const WorkspaceCanvasStage: React.FC<WorkspaceCanvasStageProps> = ({
   containerRef,
   canvasLayerRef,
   marqueeBoxRef,
+  cutterTrailGlowRef,
+  cutterTrailPathRef,
+  cutterTrailTipRef,
   creationMode,
   isPickingFromCanvas,
   activeTool,
@@ -120,6 +126,41 @@ export const WorkspaceCanvasStage: React.FC<WorkspaceCanvasStageProps> = ({
             willChange: isMarqueeSelecting ? "left, top, width, height" : "auto",
           }}
         />
+
+        <svg
+          className="absolute inset-0 w-full h-full pointer-events-none z-[9998] overflow-visible"
+          aria-hidden="true"
+        >
+          <path
+            ref={cutterTrailGlowRef}
+            d=""
+            fill="none"
+            stroke="rgba(255,107,53,0.22)"
+            strokeWidth="8"
+            strokeLinecap="round"
+            strokeLinejoin="round"
+            style={{ opacity: 0, transition: "opacity 120ms ease-out" }}
+          />
+          <path
+            ref={cutterTrailPathRef}
+            d=""
+            fill="none"
+            stroke="rgba(255,92,24,0.92)"
+            strokeWidth="2.4"
+            strokeLinecap="round"
+            strokeLinejoin="round"
+            strokeDasharray="6 8"
+            style={{ opacity: 0, transition: "opacity 120ms ease-out" }}
+          />
+          <circle
+            ref={cutterTrailTipRef}
+            cx="0"
+            cy="0"
+            r="3.5"
+            fill="rgba(255,92,24,0.98)"
+            style={{ opacity: 0, transition: "opacity 120ms ease-out" }}
+          />
+        </svg>
 
         <div
           ref={canvasLayerRef}

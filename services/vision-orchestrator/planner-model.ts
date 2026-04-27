@@ -1,6 +1,6 @@
 import { Type } from "@google/genai";
 import { generateJsonResponse } from "../gemini";
-import { normalizeReferenceToDataUrl } from "../image-reference-resolver";
+import { normalizeReferenceToModelInputDataUrl } from "../image-reference-resolver";
 import { getVisualOrchestratorInputPolicy } from "../provider-settings";
 import type {
   PlannerConsistencyContext,
@@ -253,6 +253,125 @@ const estimateDataUrlBytes = (dataUrl: string): number => {
   return Math.floor((base64.length * 3) / 4);
 };
 
+const MAX_REFERENCE_IMAGE_BYTES = 8 * 1024 * 1024;
+const MAX_REFERENCE_IMAGE_EDGE = 2048;
+const REFERENCE_COMPRESS_QUALITIES = [0.9, 0.82, 0.74, 0.66, 0.58, 0.5, 0.42];
+
+const blobToDataUrl = async (blob: Blob): Promise<string> =>
+  new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onloadend = () => resolve(String(reader.result || ""));
+    reader.onerror = () => reject(new Error("reference image read failed"));
+    reader.readAsDataURL(blob);
+  });
+
+const loadImageFromBlob = async (blob: Blob): Promise<HTMLImageElement> =>
+  new Promise((resolve, reject) => {
+    const objectUrl = URL.createObjectURL(blob);
+    const image = new Image();
+    image.onload = () => {
+      URL.revokeObjectURL(objectUrl);
+      resolve(image);
+    };
+    image.onerror = () => {
+      URL.revokeObjectURL(objectUrl);
+      reject(new Error("reference image decode failed"));
+    };
+    image.src = objectUrl;
+  });
+
+const renderCanvasToBlob = async (
+  canvas: HTMLCanvasElement,
+  type: string,
+  quality?: number,
+): Promise<Blob | null> =>
+  new Promise((resolve) => {
+    canvas.toBlob(resolve, type, quality);
+  });
+
+const shouldPreserveReferenceTransparency = (mimeType: string): boolean => {
+  const normalized = String(mimeType || "").toLowerCase();
+  return (
+    normalized.includes("png") ||
+    normalized.includes("webp") ||
+    normalized.includes("gif")
+  );
+};
+
+const compressReferenceDataUrlIfNeeded = async (
+  dataUrl: string,
+  maxBytes: number,
+): Promise<string> => {
+  const originalBytes = estimateDataUrlBytes(dataUrl);
+  if (originalBytes <= maxBytes) {
+    return dataUrl;
+  }
+
+  if (typeof document === "undefined") {
+    return dataUrl;
+  }
+
+  const sourceBlob = await fetch(dataUrl).then((response) => response.blob());
+  const sourceMimeType =
+    String(sourceBlob.type || "").trim() ||
+    String(dataUrl.match(/^data:(.+);base64,/)?.[1] || "").trim() ||
+    "image/png";
+  const preserveTransparency = shouldPreserveReferenceTransparency(sourceMimeType);
+  const image = await loadImageFromBlob(sourceBlob);
+  const sourceWidth = Math.max(1, image.naturalWidth || image.width || 1);
+  const sourceHeight = Math.max(1, image.naturalHeight || image.height || 1);
+
+  let scale = Math.min(1, MAX_REFERENCE_IMAGE_EDGE / Math.max(sourceWidth, sourceHeight));
+  let bestDataUrl = dataUrl;
+  let bestBytes = originalBytes;
+
+  for (let pass = 0; pass < 6; pass += 1) {
+    const targetWidth = Math.max(1, Math.round(sourceWidth * scale));
+    const targetHeight = Math.max(1, Math.round(sourceHeight * scale));
+    const canvas = document.createElement("canvas");
+    canvas.width = targetWidth;
+    canvas.height = targetHeight;
+    const context = canvas.getContext("2d");
+    if (!context) {
+      throw new Error("canvas context unavailable");
+    }
+    context.drawImage(image, 0, 0, targetWidth, targetHeight);
+
+    if (preserveTransparency) {
+      const blob = await renderCanvasToBlob(canvas, "image/png");
+      if (blob) {
+        const candidateDataUrl = await blobToDataUrl(blob);
+        const candidateBytes = estimateDataUrlBytes(candidateDataUrl);
+        if (candidateBytes < bestBytes) {
+          bestBytes = candidateBytes;
+          bestDataUrl = candidateDataUrl;
+        }
+        if (candidateBytes <= maxBytes) {
+          return candidateDataUrl;
+        }
+      }
+    } else {
+      for (const quality of REFERENCE_COMPRESS_QUALITIES) {
+        const blob = await renderCanvasToBlob(canvas, "image/jpeg", quality);
+        if (!blob) continue;
+        const candidateDataUrl = await blobToDataUrl(blob);
+        const candidateBytes = estimateDataUrlBytes(candidateDataUrl);
+        if (candidateBytes < bestBytes) {
+          bestBytes = candidateBytes;
+          bestDataUrl = candidateDataUrl;
+        }
+        if (candidateBytes <= maxBytes) {
+          return candidateDataUrl;
+        }
+      }
+    }
+
+    scale *= 0.82;
+  }
+
+  return bestDataUrl;
+};
+
 const buildReferenceParts = async (referenceImages: string[]) => {
   const policy = getVisualOrchestratorInputPolicy();
   const maxReferenceImages = policy.maxReferenceImages;
@@ -267,7 +386,7 @@ const buildReferenceParts = async (referenceImages: string[]) => {
   let totalInlineBytes = 0;
 
   for (let index = 0; index < referenceImages.length; index += 1) {
-    const normalized = await normalizeReferenceToDataUrl(referenceImages[index]);
+    const normalized = await normalizeReferenceToModelInputDataUrl(referenceImages[index]);
     if (!normalized) {
       throw new Error(
         `Visual orchestration could not load reference image ${index + 1}. Planning was stopped to avoid silently ignoring that reference.`,
@@ -279,7 +398,22 @@ const buildReferenceParts = async (referenceImages: string[]) => {
         `Visual orchestration could not decode reference image ${index + 1} into a valid multimodal input.`,
       );
     }
-    const candidateBytes = estimateDataUrlBytes(normalized);
+    const compressed = await compressReferenceDataUrlIfNeeded(
+      normalized,
+      MAX_REFERENCE_IMAGE_BYTES,
+    );
+    const compressedMatch = compressed.match(/^data:(.+);base64,(.+)$/);
+    if (!compressedMatch) {
+      throw new Error(
+        `Visual orchestration could not decode reference image ${index + 1} after compression.`,
+      );
+    }
+    const candidateBytes = estimateDataUrlBytes(compressed);
+    if (candidateBytes > MAX_REFERENCE_IMAGE_BYTES) {
+      throw new Error(
+        `Visual orchestration could not compress reference image ${index + 1} under the per-image limit of 8MB. Current size is ${(candidateBytes / 1024 / 1024).toFixed(2)}MB. Please reduce that reference image before generating.`,
+      );
+    }
     if (totalInlineBytes + candidateBytes > maxInlineBytes) {
       throw new Error(
         `Visual orchestration image budget exceeded at reference ${index + 1}. Used ${(totalInlineBytes / 1024 / 1024).toFixed(2)}MB, next image adds ${(candidateBytes / 1024 / 1024).toFixed(2)}MB, budget is ${policy.maxInlineImageBytesMb}MB. Raise the budget in Settings or reduce the references before generating.`,
@@ -291,8 +425,8 @@ const buildReferenceParts = async (referenceImages: string[]) => {
     });
     parts.push({
       inlineData: {
-        mimeType: match[1],
-        data: match[2],
+        mimeType: compressedMatch[1],
+        data: compressedMatch[2],
       },
     });
     totalInlineBytes += candidateBytes;

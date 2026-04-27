@@ -10,6 +10,7 @@ import { useImageHostStore } from '../stores/imageHost.store';
 import { ROUTES } from '../utils/routes';
 import {
     ApiProviderConfig,
+    ImageModelPostPathConfig,
     ModelInfo,
     getDefaultProviders,
     loadProviderSettings,
@@ -111,6 +112,10 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose })
     const [selectedScriptModels, setSelectedScriptModels] = useState<string[]>([]);
     const [selectedImageModels, setSelectedImageModels] = useState<string[]>([]);
     const [selectedVideoModels, setSelectedVideoModels] = useState<string[]>([]);
+    const [imageModelPostPaths, setImageModelPostPaths] = useState<Record<string, ImageModelPostPathConfig>>({});
+    const [visualOrchestratorModel, setVisualOrchestratorModel] = useState('auto');
+    const [visualOrchestratorMaxReferenceImages, setVisualOrchestratorMaxReferenceImages] = useState(0);
+    const [visualOrchestratorMaxInlineImageBytesMb, setVisualOrchestratorMaxInlineImageBytesMb] = useState(48);
 
     const [expandedCategory, setExpandedCategory] = useState<string | null>('image');
     const [visibleCount, setVisibleCount] = useState(60);
@@ -143,6 +148,10 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose })
             setSelectedScriptModels(loaded.selectedScriptModels);
             setSelectedImageModels(normalizeImageSelection(loaded.selectedImageModels));
             setSelectedVideoModels(loaded.selectedVideoModels);
+            setImageModelPostPaths(loaded.imageModelPostPaths || {});
+            setVisualOrchestratorModel(loaded.visualOrchestratorModel || 'auto');
+            setVisualOrchestratorMaxReferenceImages(loaded.visualOrchestratorMaxReferenceImages ?? 0);
+            setVisualOrchestratorMaxInlineImageBytesMb(loaded.visualOrchestratorMaxInlineImageBytesMb ?? 48);
             setVisualContinuity(loaded.visualContinuity);
             setSystemModeration(loaded.systemModeration);
             setAutoSave(loaded.autoSave);
@@ -211,6 +220,10 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose })
                 selectedScriptModels,
                 selectedImageModels: normalizeImageSelection(selectedImageModels),
                 selectedVideoModels,
+                imageModelPostPaths,
+                visualOrchestratorModel,
+                visualOrchestratorMaxReferenceImages,
+                visualOrchestratorMaxInlineImageBytesMb,
                 visualContinuity,
                 systemModeration,
                 autoSave,

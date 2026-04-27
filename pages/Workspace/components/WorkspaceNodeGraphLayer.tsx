@@ -236,6 +236,7 @@ export const WorkspaceNodeGraphLayer: React.FC<WorkspaceNodeGraphLayerProps> = (
       })}
       {graph?.edges.map(({ child, parent, points }) => {
         if (!onDisconnectEdge) return null;
+        const shouldDisableHitArea = Boolean(child.isGenerating);
 
         const d = `M ${points.startX - minX} ${points.startY - minY} C ${
           points.control1X - minX
@@ -252,7 +253,9 @@ export const WorkspaceNodeGraphLayer: React.FC<WorkspaceNodeGraphLayerProps> = (
             strokeWidth={18}
             strokeLinecap="round"
             fill="none"
-            pointerEvents={isDraggingElement ? "none" : "stroke"}
+            pointerEvents={
+              isDraggingElement || shouldDisableHitArea ? "none" : "stroke"
+            }
             onDoubleClick={(event) => {
               event.preventDefault();
               event.stopPropagation();
