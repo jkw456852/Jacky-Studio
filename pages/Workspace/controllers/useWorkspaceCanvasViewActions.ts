@@ -1,5 +1,6 @@
 import { useCallback, type MouseEvent } from "react";
 import type { CanvasElement } from "../../../types";
+import { downloadFromUrls } from "../../../utils/download";
 import { getCanvasViewportSize } from "../workspaceShared";
 
 type UseWorkspaceCanvasViewActionsOptions = {
@@ -121,18 +122,20 @@ export function useWorkspaceCanvasViewActions(
     }
   }, [addElement]);
 
-  const handleDownload = useCallback(() => {
+  const handleDownload = useCallback(async () => {
     if (!selectedElementId) return;
     const element = elements.find((item) => item.id === selectedElementId);
     if (!element || !element.url) return;
 
     const sourceUrl = getElementSourceUrl(element) || element.url;
-    const link = document.createElement("a");
-    link.href = sourceUrl;
-    link.download = `jk-image-${Date.now()}.png`;
-    document.body.appendChild(link);
-    link.click();
-    document.body.removeChild(link);
+    try {
+      await downloadFromUrls(
+        [sourceUrl, element.originalUrl, element.proxyUrl, element.url],
+        `jk-image-${Date.now()}`,
+      );
+    } catch (error) {
+      console.error("Canvas element download failed", error);
+    }
     setContextMenu(null);
   }, [
     elements,

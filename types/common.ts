@@ -50,6 +50,12 @@ export type ShapeType = 'square' | 'circle' | 'triangle' | 'star' | 'bubble' | '
 export type WorkspaceNodeInteractionMode = 'classic' | 'branch';
 export type WorkspaceNodeLinkKind = 'generation' | 'branch';
 export type WorkspaceTreeNodeKind = 'image' | 'prompt';
+export type GenerationStatusPhase =
+  | 'planning'
+  | 'planned'
+  | 'queued'
+  | 'generating'
+  | 'retrying';
 
 export interface CanvasElement {
   id: string;
@@ -113,6 +119,9 @@ export interface CanvasElement {
   isGenerating?: boolean;
   generatingType?: 'upscale' | 'vector' | 'remove-bg' | 'gen-image' | 'gen-video' | 'product-swap' | 'text-edit' | 'fast-edit' | 'eraser';
   genError?: string;
+  genStatusPhase?: GenerationStatusPhase;
+  genStatusTitle?: string;
+  genStatusLines?: string[];
   hasFreshGeneratedGlow?: boolean;
 
   x: number;

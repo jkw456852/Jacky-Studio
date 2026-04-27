@@ -68,6 +68,8 @@ When editing this repo, AI must follow these rules in order:
 5. Leave the code easier for the next AI than you found it.
 6. For new features, prefer a clean primary flow over layered fallback patches.
 7. If the implementation starts turning into patch-on-patch nesting, stop and redesign the main flow before adding more guards.
+8. For agent-owned or model-owned decision layers, do not replace missing intelligence with rule fallback.
+9. If orchestration, planning, routing, or reference-role reasoning fails, fail explicitly instead of silently degrading to a fake-smart rule path.
 
 If a generic best practice conflicts with the actual repo structure, prefer the repo structure unless there is a clear maintenance or correctness problem.
 
@@ -91,6 +93,10 @@ During editing:
 - Do not hide unfinished feature logic behind fake completeness:
   - prefer explicit failure or empty state over synthetic fallback content
   - do not stack repair layers when the real issue is the primary flow design
+- For intelligence layers such as agent routing, planning, prompt orchestration, reference-role assignment, and strategy selection:
+  - do not use hidden rule fallback as a permanent substitute
+  - do not merge model output onto a silent rule authority and call that "smart"
+  - if model output is required for the feature, failure must be visible and traceable
 - Temporary stabilization logic is allowed only as short-term containment:
   - document why it exists
   - remove or collapse it once the correct flow is implemented

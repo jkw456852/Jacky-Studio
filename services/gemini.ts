@@ -695,6 +695,7 @@ const fetchOpenAIFormWithFallback = async <T>(
 
 type UnifiedJsonGenerationOptions = {
     model: string;
+    providerId?: string | null;
     parts: Array<{ text?: string; inlineData?: { mimeType?: string; data?: string } }>;
     temperature?: number;
     responseSchema?: unknown;
@@ -835,6 +836,7 @@ export const generateJsonResponse = async (
 ): Promise<UnifiedJsonGenerationResult> => {
     const {
         model,
+        providerId,
         parts,
         temperature = 0.7,
         responseSchema,
@@ -846,12 +848,12 @@ export const generateJsonResponse = async (
         requestTuning,
     } = options;
 
-    const provider = getProviderConfig();
+    const provider = getProviderConfigById(providerId);
     const baseUrl = normalizeUrl(provider.baseUrl || '');
     const isGoogleDirect = provider.id === 'gemini' || !baseUrl || baseUrl.includes('googleapis.com');
 
     if (isGoogleDirect) {
-        const response = await getClient().models.generateContent({
+        const response = await getClient(providerId).models.generateContent({
             model,
             contents: { parts },
             config: {
@@ -869,9 +871,9 @@ export const generateJsonResponse = async (
         };
     }
 
-    const apiKeys = getApiKey(true);
+    const apiKeys = getApiKey(true, providerId);
     if (!Array.isArray(apiKeys) || apiKeys.length === 0) {
-        requireApiKey('generateJsonResponse');
+        requireApiKey('generateJsonResponse', providerId);
     }
     const openAIContent = toOpenAIMessageContent(parts);
 

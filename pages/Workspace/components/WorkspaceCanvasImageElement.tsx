@@ -2,10 +2,10 @@ import React, { memo } from "react";
 import {
   AlertCircle,
   Image as ImageIcon,
-  Loader2,
   RefreshCw,
 } from "lucide-react";
 import type { CanvasElement, WorkspaceNodeInteractionMode } from "../../../types";
+import { WorkspaceGenerationStatusCard } from "./WorkspaceGenerationStatusCard";
 import { WorkspaceTreePromptNode } from "./WorkspaceTreePromptNode";
 import { WorkspaceTreeImageNode } from "./WorkspaceTreeImageNode";
 import {
@@ -78,7 +78,6 @@ const RELATIVE_TIME_FORMATTER = new Intl.RelativeTimeFormat("en", {
 });
 const LABEL_PENDING_IMAGE = "\u56fe\u7247\u8282\u70b9";
 const LABEL_GENERATING = "\u751f\u56fe\u4e2d";
-const LABEL_GENERATING_MAGIC = "Creating magic...";
 const LABEL_GENERATION_FAILED = "\u751f\u56fe\u5931\u8d25";
 const LABEL_RETRY = "\u91cd\u8bd5";
 const LABEL_UNKNOWN_ERROR = "\u751f\u6210\u5931\u8d25\uff0c\u8bf7\u7a0d\u540e\u518d\u8bd5";
@@ -298,34 +297,42 @@ const GenerationFailureState: React.FC<{
 const PendingImageNode: React.FC<{
   element: CanvasElement;
   onRetry?: () => void;
-}> = ({ element, onRetry }) => (
-  <div
-    className={`relative flex h-full w-full items-center justify-center overflow-hidden border border-[#d8e0ea] bg-[linear-gradient(180deg,#f8fafc_0%,#eef2f7_100%)] shadow-[0_18px_42px_rgba(15,23,42,0.08)] ${WORKSPACE_NODE_CARD_RADIUS}`}
-  >
-    <div className="pointer-events-none absolute inset-0 bg-[radial-gradient(circle_at_top,rgba(255,255,255,0.85),transparent_72%)]" />
-    {element.isGenerating ? (
-      <div className="relative z-10 flex flex-col items-center gap-3 text-[#64748b]">
-        <div className="flex h-12 w-12 items-center justify-center rounded-full bg-white shadow-[0_10px_24px_rgba(15,23,42,0.08)]">
-          <Loader2 size={18} className="animate-spin" />
+}> = ({ element, onRetry }) => {
+  const generationStatusTitle = element.genStatusTitle || LABEL_GENERATING;
+  const generationStatusLines = Array.isArray(element.genStatusLines)
+    ? element.genStatusLines.filter(Boolean).slice(0, 5)
+    : [];
+  const statusTone = element.genStatusPhase === "retrying" ? "berserk" : "default";
+
+  return (
+    <div
+      className={`relative flex h-full w-full items-center justify-center overflow-hidden border border-[#d8e0ea] bg-[linear-gradient(180deg,#f8fafc_0%,#eef2f7_100%)] shadow-[0_18px_42px_rgba(15,23,42,0.08)] ${WORKSPACE_NODE_CARD_RADIUS}`}
+    >
+      <div className="pointer-events-none absolute inset-0 bg-[radial-gradient(circle_at_top,rgba(255,255,255,0.85),transparent_72%)]" />
+      {element.isGenerating ? (
+        <WorkspaceGenerationStatusCard
+          title={generationStatusTitle}
+          lines={generationStatusLines}
+          tone={statusTone}
+          className="h-full w-full rounded-[inherit]"
+        />
+      ) : element.genError ? (
+        <GenerationFailureState
+          errorMessage={element.genError}
+          onRetry={onRetry}
+          compact
+        />
+      ) : (
+        <div className="relative z-10 flex flex-col items-center gap-3 text-[#64748b]">
+          <div className="flex h-12 w-12 items-center justify-center rounded-full bg-white shadow-[0_10px_24px_rgba(15,23,42,0.08)]">
+            <ImageIcon size={18} />
+          </div>
+          <div className="text-[13px] font-medium">{LABEL_PENDING_IMAGE}</div>
         </div>
-        <div className="text-[13px] font-medium">{LABEL_GENERATING}</div>
-      </div>
-    ) : element.genError ? (
-      <GenerationFailureState
-        errorMessage={element.genError}
-        onRetry={onRetry}
-        compact
-      />
-    ) : (
-      <div className="relative z-10 flex flex-col items-center gap-3 text-[#64748b]">
-        <div className="flex h-12 w-12 items-center justify-center rounded-full bg-white shadow-[0_10px_24px_rgba(15,23,42,0.08)]">
-          <ImageIcon size={18} />
-        </div>
-        <div className="text-[13px] font-medium">{LABEL_PENDING_IMAGE}</div>
-      </div>
-    )}
-  </div>
-);
+      )}
+    </div>
+  );
+};
 
 const ClassicEmptyGenNode: React.FC<{
   element: CanvasElement;

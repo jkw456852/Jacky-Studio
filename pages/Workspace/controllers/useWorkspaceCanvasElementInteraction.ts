@@ -168,6 +168,16 @@ export function useWorkspaceCanvasElementInteraction(
     [],
   );
 
+  const isMarkableElement = useCallback(
+    (element: CanvasElement | null | undefined) =>
+      Boolean(
+        element &&
+          (element.type === "image" || element.type === "gen-image") &&
+          element.url,
+      ),
+    [],
+  );
+
   const handleElementMouseDown = useCallback(
     async (e: React.MouseEvent, id: string) => {
       if (isSpacePressedRef.current || activeTool === "hand") return;
@@ -238,7 +248,11 @@ export function useWorkspaceCanvasElementInteraction(
       e.stopPropagation();
       e.preventDefault();
 
-      if (activeTool === "mark" || e.ctrlKey || e.metaKey) {
+      const modifierMarkRequested = e.ctrlKey || e.metaKey;
+      if (
+        activeTool === "mark" ||
+        (modifierMarkRequested && isMarkableElement(elObj))
+      ) {
         const imgEl = (e.currentTarget as HTMLElement).querySelector("img");
         const rect = imgEl
           ? imgEl.getBoundingClientRect()
@@ -461,6 +475,7 @@ export function useWorkspaceCanvasElementInteraction(
       setElementsSynced,
       setImageGenUploads,
       setInputBlocks,
+      isMarkableElement,
       setIsDraggingElement,
       setIsPickingFromCanvas,
       setMarkersSynced,

@@ -5,6 +5,8 @@ import type {
   WorkspaceNodeInteractionMode,
 } from "../../../types";
 import { imageGenSkill } from "../../../services/skills/image-gen.skill";
+import { getVisualOrchestratorModelConfig } from "../../../services/provider-settings";
+import { planVisualGenerationWithModel } from "../../../services/vision-orchestrator";
 import { resolveWorkspaceTreeNodeKind } from "../workspaceTreeNode";
 
 const formatGenerationError = (error: unknown) => {
@@ -53,6 +55,145 @@ const formatGenerationError = (error: unknown) => {
   return message;
 };
 
+const HUMAN_INTENT_LABELS: Record<string, string> = {
+  poster_rebuild: "海报复刻",
+  multi_reference_fusion: "多图融合",
+  product_lock: "主体锁定",
+  product_scene: "场景生成",
+  background_replace: "背景替换",
+  text_preserve: "文案版式保留",
+};
+
+const HUMAN_REFERENCE_ROLE_MODE_LABELS: Record<string, string> = {
+  none: "无约束",
+  default: "智能分配",
+  "poster-product": "海报参考 + 产品参考",
+};
+
+const HUMAN_QUALITY_LABELS: Record<string, string> = {
+  low: "低",
+  medium: "中",
+  high: "高",
+};
+
+const formatPlannerNote = (note: string): string => {
+  const value = String(note || "").trim();
+  if (!value) return "";
+  if (value.startsWith("planner-model=")) {
+    return `编排模型：${value.slice("planner-model=".length)}`;
+  }
+  if (value.startsWith("intent=")) {
+    const intent = value.slice("intent=".length);
+    return `识别意图：${HUMAN_INTENT_LABELS[intent] || intent}`;
+  }
+  if (value.startsWith("reference-role-mode=")) {
+    const mode = value.slice("reference-role-mode=".length);
+    return `参考图分工：${HUMAN_REFERENCE_ROLE_MODE_LABELS[mode] || mode}`;
+  }
+  return value;
+};
+
+const buildPlanningStatusLines = (
+  referenceCount: number,
+  plannerLabel?: string | null,
+) => {
+  const lines = [
+    "已创建生图节点，正在进入编排阶段",
+    plannerLabel ? `正在调用编排模型：${plannerLabel}` : "正在调用编排模型",
+    referenceCount > 0
+      ? `正在分析 ${referenceCount} 张参考图的分工与约束`
+      : "正在分析本次生图意图与约束",
+    "正在生成视觉编排计划",
+  ];
+  return lines;
+};
+
+const buildPlannedStatusLines = ({
+  intent,
+  strategyId,
+  referenceRoleMode,
+  plannerNotes,
+}: {
+  intent: string;
+  strategyId: string;
+  referenceRoleMode: string;
+  plannerNotes: string[];
+}) => {
+  const lines = [
+    `意图：${HUMAN_INTENT_LABELS[intent] || intent}`,
+    `分工：${HUMAN_REFERENCE_ROLE_MODE_LABELS[referenceRoleMode] || referenceRoleMode}`,
+    `策略：${strategyId}`,
+  ];
+
+  for (const note of plannerNotes.map(formatPlannerNote)) {
+    if (!note) continue;
+    if (lines.includes(note)) continue;
+    lines.push(note);
+    if (lines.length >= 5) break;
+  }
+
+  return lines.slice(0, 5);
+};
+
+const buildGeneratingStatusLines = ({
+  imageCount,
+  variantLabel,
+  model,
+  aspectRatio,
+  imageSize,
+  imageQuality,
+  referenceCount,
+  planLines,
+}: {
+  imageCount: number;
+  variantLabel: string;
+  model: string;
+  aspectRatio: string;
+  imageSize: string;
+  imageQuality: string;
+  referenceCount: number;
+  planLines: string[];
+}) => {
+  const lines = [
+    imageCount > 1 ? `当前批次：${variantLabel}` : "已完成视觉编排，正在请求生图",
+    `模型：${model}`,
+    `参数：${aspectRatio} · ${imageSize} · 质量${HUMAN_QUALITY_LABELS[imageQuality] || imageQuality}`,
+    `参考图：${referenceCount} 张`,
+  ];
+
+  const importantPlanLine = planLines.find((line) => line.startsWith("分工："));
+  if (importantPlanLine) {
+    lines.push(importantPlanLine);
+  }
+
+  return lines.slice(0, 5);
+};
+
+const buildQueuedStatusLines = ({
+  variantLabel,
+  waitingForLabel,
+  planLines,
+}: {
+  variantLabel: string;
+  waitingForLabel?: string;
+  planLines: string[];
+}) => {
+  const lines = [
+    `当前批次：${variantLabel}`,
+    waitingForLabel
+      ? `正在等待前序任务 ${waitingForLabel} 完成`
+      : "正在等待前序任务完成",
+    "轮到当前节点时会自动开始生图",
+  ];
+
+  const importantPlanLine = planLines.find((line) => line.startsWith("分工："));
+  if (importantPlanLine) {
+    lines.push(importantPlanLine);
+  }
+
+  return lines.slice(0, 5);
+};
+
 type UseWorkspaceElementImageGenerationOptions = {
   elementsRef: MutableRefObject<CanvasElement[]>;
   nodeInteractionMode: WorkspaceNodeInteractionMode;
@@ -60,6 +201,14 @@ type UseWorkspaceElementImageGenerationOptions = {
     elementId: string,
     isGenerating: boolean,
     errorMessage?: string,
+  ) => void;
+  setElementsGenerationStatus: (
+    elementIds: string[],
+    status?: {
+      phase?: "planning" | "planned" | "queued" | "generating" | "retrying";
+      title?: string;
+      lines?: string[];
+    } | null,
   ) => void;
   addMessage: (message: ChatMessage) => void;
   translatePromptToEnglish: boolean;
@@ -98,11 +247,13 @@ export function useWorkspaceElementImageGeneration(
     elementsRef,
     nodeInteractionMode,
     setElementGeneratingState,
+    setElementsGenerationStatus,
     addMessage,
     translatePromptToEnglish,
     enforceChineseTextInImage,
     requiredChineseCopy,
     mergeConsistencyAnchorIntoReferences,
+    getDesignConsistencyContext,
     retryWithConsistencyFix,
     applyGeneratedImageToElement,
     createGeneratingImagesNearElement,
@@ -129,6 +280,9 @@ export function useWorkspaceElementImageGeneration(
       }
       activeRequestsRef.current.add(requestKey);
       const requestStartedAt = Date.now();
+      let plannerStartedAt = 0;
+      let shouldTrackSourceElementState = false;
+      let targetElementIds: string[] = [];
       try {
         const el = elementsRef.current.find((element) => element.id === elementId);
         if (!el) return;
@@ -147,7 +301,7 @@ export function useWorkspaceElementImageGeneration(
             : null;
         const sourceElement = parentPromptElement || el;
         if (!sourceElement.genPrompt) return;
-        const shouldTrackSourceElementState = !isTreePromptNode;
+        shouldTrackSourceElementState = !isTreePromptNode;
         if (shouldTrackSourceElementState) {
           setElementGeneratingState(elementId, true);
         }
@@ -172,27 +326,104 @@ export function useWorkspaceElementImageGeneration(
           (manualReferenceImages.length === 0 ||
             referenceImages[0] !== manualReferenceImages[0] ||
             referenceImages.length !== manualReferenceImages.length);
-        const referenceRoleMode =
-          sourceElement.genReferenceRoleMode === "none"
-            ? "none"
-            : sourceElement.genReferenceRoleMode === "poster-product" &&
-                referenceImages.length >= 2
-              ? "poster-product"
-              : "default";
-        const referencePriority =
-          referenceRoleMode === "poster-product"
-            ? "all"
-            : referenceImages.length > 1
-            ? "all"
-            : referenceImages.length === 1
-              ? "first"
-              : undefined;
-        const referenceStrength =
-          referenceRoleMode === "poster-product"
-            ? 0.94
-            : referenceImages.length > 0
-              ? 0.88
-              : undefined;
+        const visualOrchestratorModel = getVisualOrchestratorModelConfig();
+        const plannerLabel =
+          visualOrchestratorModel?.displayLabel ||
+          visualOrchestratorModel?.modelId ||
+          null;
+
+        if (isTreePromptNode) {
+          targetElementIds = createGeneratingTreeImageChildren(elementId, imageCount);
+          if (targetElementIds.length === 0) {
+            throw new Error("Failed to create tree image placeholders");
+          }
+          setElementsGenerationStatus(targetElementIds, {
+            phase: "planning",
+            title: referenceImages.length > 0
+              ? `正在分析 ${referenceImages.length} 张参考图分工`
+              : "正在分析生图意图",
+            lines: buildPlanningStatusLines(
+              referenceImages.length,
+              plannerLabel,
+            ),
+          });
+        } else if (shouldTrackSourceElementState) {
+          setElementsGenerationStatus([elementId], {
+            phase: "planning",
+            title: referenceImages.length > 0
+              ? `正在分析 ${referenceImages.length} 张参考图分工`
+              : "正在分析生图意图",
+            lines: buildPlanningStatusLines(
+              referenceImages.length,
+              plannerLabel,
+            ),
+          });
+        }
+
+        plannerStartedAt = Date.now();
+        console.info("[workspace.imggen] planner.start", {
+          elementId,
+          sourceElementId: sourceElement.id,
+          imageCount,
+          model,
+          aspectRatio: currentAspectRatio,
+          imageSize,
+          imageQuality,
+          manualReferenceCount: manualReferenceImages.length,
+          mergedReferenceCount: referenceImages.length,
+          requestedReferenceRoleMode: sourceElement.genReferenceRoleMode || "default",
+          visualOrchestratorModel: visualOrchestratorModel
+            ? {
+                modelId: visualOrchestratorModel.modelId,
+                providerId: visualOrchestratorModel.providerId || null,
+                label: visualOrchestratorModel.displayLabel,
+              }
+            : null,
+        });
+        const plannedGeneration = await planVisualGenerationWithModel({
+          prompt: sourceElement.genPrompt,
+          manualReferenceImages,
+          referenceImages,
+          requestedReferenceRoleMode: sourceElement.genReferenceRoleMode,
+          imageQuality,
+          translatePromptToEnglish,
+          enforceChineseTextInImage,
+          requiredChineseCopy,
+          disableTransportRetries: Boolean(sourceElement.genInfiniteRetry),
+          consistencyContext: getDesignConsistencyContext(),
+        }, visualOrchestratorModel
+          ? {
+              modelId: visualOrchestratorModel.modelId,
+              providerId: visualOrchestratorModel.providerId || null,
+              label: visualOrchestratorModel.displayLabel,
+            }
+          : null);
+        const {
+          plan,
+          plannerMeta,
+          execution: {
+            basePrompt,
+            composedPrompt,
+            referenceImages: plannedReferenceImages,
+            referencePriority,
+            referenceStrength,
+            referenceRoleMode,
+            promptLanguagePolicy,
+            textPolicy,
+            disableTransportRetries,
+            consistencyContext,
+          },
+        } = plannedGeneration;
+        console.info("[workspace.imggen] planner.success", {
+          elementId,
+          sourceElementId: sourceElement.id,
+          elapsedMs: Date.now() - plannerStartedAt,
+          planIntent: plan.intent,
+          planStrategy: plan.strategyId,
+          referenceRoleMode,
+          plannerSource: plannerMeta?.source || "model",
+          plannerNotes: plan.plannerNotes,
+        });
 
         addMessage({
           id: `gen-start-${Date.now()}`,
@@ -213,41 +444,87 @@ export function useWorkspaceElementImageGeneration(
           imageSize,
           imageQuality,
           manualReferenceCount: manualReferenceImages.length,
-          referenceCount: referenceImages.length,
+          referenceCount: plannedReferenceImages.length,
           referenceRoleMode,
           referencePriority: referencePriority || null,
           referenceStrength: referenceStrength ?? null,
           consistencyAnchorInjected,
+          planIntent: plan.intent,
+          planStrategy: plan.strategyId,
+          plannerSource: plannerMeta?.source || "rule",
+          composedPromptPreview:
+            composedPrompt.length > 320
+              ? `${composedPrompt.slice(0, 320)}...`
+              : composedPrompt,
+          visualOrchestratorModel: visualOrchestratorModel
+            ? {
+                modelId: visualOrchestratorModel.modelId,
+                providerId: visualOrchestratorModel.providerId || null,
+                label: visualOrchestratorModel.displayLabel,
+              }
+            : null,
+          planReferenceRoles: plan.references.map((item) => ({
+            role: item.role,
+            source: item.source,
+            weight: item.weight,
+          })),
+          planLocks: plan.locks,
+          plannerNotes: plan.plannerNotes,
           manualReferenceKinds: manualReferenceImages.map((item) =>
             String(item || "").startsWith("data:") ? "data" : "url",
           ),
-          finalReferenceKinds: referenceImages.map((item) =>
+          finalReferenceKinds: plannedReferenceImages.map((item) =>
             String(item || "").startsWith("data:") ? "data" : "url",
           ),
         };
         console.info("[workspace.imggen] request.start", generationContext);
-        const targetElementIds = isTreePromptNode
-          ? createGeneratingTreeImageChildren(elementId, imageCount)
-          : imageCount > 1
-            ? [
-                elementId,
-                ...createGeneratingImagesNearElement(elementId, imageCount - 1),
-              ]
-            : [elementId];
+        if (!isTreePromptNode) {
+          targetElementIds =
+            imageCount > 1
+              ? [
+                  elementId,
+                  ...createGeneratingImagesNearElement(elementId, imageCount - 1),
+                ]
+              : [elementId];
+        }
 
-        if (isTreePromptNode && targetElementIds.length === 0) {
-          throw new Error("Failed to create tree image placeholders");
+        const plannedStatusLines = buildPlannedStatusLines({
+          intent: plan.intent,
+          strategyId: plan.strategyId,
+          referenceRoleMode,
+          plannerNotes: plan.plannerNotes || [],
+        });
+        if (imageCount <= 1) {
+          setElementsGenerationStatus(targetElementIds, {
+            phase: "planned",
+            title: "视觉编排已完成",
+            lines: plannedStatusLines,
+          });
+        } else {
+          targetElementIds.slice(1).forEach((queuedElementId, queuedIndex) => {
+            const variantOrder = queuedIndex + 2;
+            setElementsGenerationStatus([queuedElementId], {
+              phase: "queued",
+              title: `等待第 ${variantOrder}/${imageCount} 张开始`,
+              lines: buildQueuedStatusLines({
+                variantLabel: `${variantOrder}/${imageCount}`,
+                waitingForLabel: `1/${imageCount}`,
+                planLines: plannedStatusLines,
+              }),
+            });
+          });
         }
 
         const buildVariantPrompt = (index: number, fixPrompt?: string) => {
           const basePrompt = fixPrompt
-            ? `${sourceElement.genPrompt}\n\nConsistency fix: ${fixPrompt}`
-            : sourceElement.genPrompt!;
+            ? `${basePromptSource}\n\nConsistency fix: ${fixPrompt}`
+            : basePromptSource;
           if (index === 0 || imageCount <= 1) {
             return basePrompt;
           }
           return `${basePrompt}\n\nVariation ${index + 1}/${imageCount}: keep the same subject and core prompt intent, but use a clearly different composition and framing.`;
         };
+        const basePromptSource = composedPrompt;
 
         const runGeneration = (index: number, fixPrompt?: string) =>
           imageGenSkill({
@@ -257,18 +534,14 @@ export function useWorkspaceElementImageGeneration(
             aspectRatio: currentAspectRatio,
             imageSize,
             imageQuality,
-            disableTransportRetries: Boolean(sourceElement.genInfiniteRetry),
-            referenceImages,
+            disableTransportRetries,
+            referenceImages: plannedReferenceImages,
             referencePriority,
             referenceStrength,
             referenceRoleMode,
-            promptLanguagePolicy: translatePromptToEnglish
-              ? "translate-en"
-              : "original-zh",
-            textPolicy: {
-              enforceChinese: enforceChineseTextInImage,
-              requiredCopy: (requiredChineseCopy || "").trim() || undefined,
-            },
+            promptLanguagePolicy,
+            textPolicy,
+            consistencyContext,
           });
 
         let successCount = 0;
@@ -283,6 +556,37 @@ export function useWorkspaceElementImageGeneration(
           while (true) {
             attempt += 1;
             const variantStartedAt = Date.now();
+            targetElementIds.slice(index + 1).forEach((queuedElementId, queuedOffset) => {
+              const queuedOrder = index + queuedOffset + 2;
+              setElementsGenerationStatus([queuedElementId], {
+                phase: "queued",
+                title: `等待第 ${queuedOrder}/${imageCount} 张开始`,
+                lines: buildQueuedStatusLines({
+                  variantLabel: `${queuedOrder}/${imageCount}`,
+                  waitingForLabel: variantLabel,
+                  planLines: plannedStatusLines,
+                }),
+              });
+            });
+            setElementsGenerationStatus([targetElementId], {
+              phase: enteredInfiniteRetry ? "retrying" : "generating",
+              title:
+                enteredInfiniteRetry
+                  ? `正在重试第 ${variantLabel} 张`
+                  : imageCount > 1
+                    ? `正在生成第 ${variantLabel} 张`
+                    : "正在请求生图接口",
+              lines: buildGeneratingStatusLines({
+                imageCount,
+                variantLabel,
+                model,
+                aspectRatio: currentAspectRatio,
+                imageSize,
+                imageQuality,
+                referenceCount: plannedReferenceImages.length,
+                planLines: plannedStatusLines,
+              }),
+            });
             console.info("[workspace.imggen] variant.start", {
               ...generationContext,
               variant: variantLabel,
@@ -306,7 +610,9 @@ export function useWorkspaceElementImageGeneration(
               }
 
               const consistencyAnchor =
-                referenceImages.length > 0 ? referenceImages[0] : undefined;
+                plannedReferenceImages.length > 0
+                  ? plannedReferenceImages[0]
+                  : undefined;
               const finalUrl =
                 index === 0
                   ? await retryWithConsistencyFix(
@@ -314,8 +620,8 @@ export function useWorkspaceElementImageGeneration(
                       resultUrl,
                       (fixPrompt?: string) => runGeneration(index, fixPrompt),
                       consistencyAnchor,
-                      sourceElement.genPrompt,
-                      referenceImages.length,
+                      basePromptSource,
+                      plannedReferenceImages.length,
                     )
                   : resultUrl;
 
@@ -356,6 +662,16 @@ export function useWorkspaceElementImageGeneration(
                 }
 
                 setElementGeneratingState(targetElementId, true);
+                setElementsGenerationStatus([targetElementId], {
+                  phase: "retrying",
+                  title: imageCount > 1 ? `正在重试第 ${variantLabel} 张` : "正在重试当前节点",
+                  lines: [
+                    imageCount > 1 ? `当前批次：${variantLabel}` : "当前节点正在立即重试",
+                    `失败原因：${reason}`,
+                    "不会新建图片节点",
+                    "会一直在当前失败节点轮询重试，直到成功或刷新页面",
+                  ],
+                });
                 console.warn("[workspace.imggen] variant.berserk-retrying", {
                   ...generationContext,
                   variant: variantLabel,
@@ -370,6 +686,7 @@ export function useWorkspaceElementImageGeneration(
               }
 
               failedResults.push(`Image ${index + 1}: ${reason}`);
+              setElementsGenerationStatus([targetElementId], null);
               setElementGeneratingState(targetElementId, false, reason);
               console.error("[workspace.imggen] variant.failed", {
                 ...generationContext,
@@ -424,11 +741,24 @@ export function useWorkspaceElementImageGeneration(
         }
       } catch (error) {
         const reason = formatGenerationError(error);
+        if (plannerStartedAt > 0) {
+          console.error("[workspace.imggen] planner.failed", {
+            elementId,
+            elapsedMs: Date.now() - plannerStartedAt,
+            error: reason,
+          });
+        }
         console.error("[workspace.imggen] request.failed", {
           elementId,
           elapsedMs: Date.now() - requestStartedAt,
           error: reason,
         });
+        if (targetElementIds.length > 0) {
+          setElementsGenerationStatus(targetElementIds, null);
+          targetElementIds.forEach((targetElementId) => {
+            setElementGeneratingState(targetElementId, false, reason);
+          });
+        }
         if (shouldTrackSourceElementState) {
           setElementGeneratingState(elementId, false);
         }
@@ -448,6 +778,7 @@ export function useWorkspaceElementImageGeneration(
       applyGeneratedImageToElement,
       elementsRef,
       enforceChineseTextInImage,
+      getDesignConsistencyContext,
       getClosestAspectRatio,
       mergeConsistencyAnchorIntoReferences,
       nodeInteractionMode,
@@ -455,6 +786,7 @@ export function useWorkspaceElementImageGeneration(
       retryWithConsistencyFix,
       createGeneratingImagesNearElement,
       createGeneratingTreeImageChildren,
+      setElementsGenerationStatus,
       setElementGeneratingState,
       translatePromptToEnglish,
     ],

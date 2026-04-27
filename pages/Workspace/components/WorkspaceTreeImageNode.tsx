@@ -3,13 +3,15 @@ import {
   AlertCircle,
   Download,
   Image as ImageIcon,
-  Loader2,
   Pencil,
   RefreshCw,
   Trash2,
 } from "lucide-react";
 import type { CanvasElement } from "../../../types";
+import { downloadFromUrls } from "../../../utils/download";
+import { WorkspaceGenerationStatusCard } from "./WorkspaceGenerationStatusCard";
 import {
+  WORKSPACE_NODE_BERSERK_SHADOW,
   WORKSPACE_NODE_FRESH_GENERATED_GLOW_SHADOW,
   WORKSPACE_NODE_OUTLINE_RADIUS,
   WORKSPACE_NODE_SELECTION_RADIUS,
@@ -26,6 +28,7 @@ const LABEL_GENERATING = "\u751f\u56fe\u4e2d";
 const LABEL_GENERATION_FAILED = "\u751f\u56fe\u5931\u8d25";
 const LABEL_RETRY = "\u91cd\u8bd5";
 const LABEL_UNKNOWN_ERROR = "\u751f\u6210\u5931\u8d25\uff0c\u8bf7\u7a0d\u540e\u518d\u8bd5";
+const LABEL_BERSERK = "\u72c2\u66b4";
 
 type WorkspaceTreeImageNodeProps = {
   element: CanvasElement;
@@ -157,15 +160,22 @@ export const WorkspaceTreeImageNode: React.FC<
   onDelete,
   onRetry,
 }) => {
-  const handleDownload = React.useCallback(() => {
-    const downloadUrl = sourceUrl || displayUrl;
-    if (!downloadUrl || typeof document === "undefined") return;
-    const link = document.createElement("a");
-    link.href = downloadUrl;
-    link.download = `tree-image-${element.id}.png`;
-    document.body.appendChild(link);
-    link.click();
-    document.body.removeChild(link);
+  const isBerserkNode = Boolean(element.genInfiniteRetry);
+  const showBerserkVisualState = isBerserkNode && Boolean(element.isGenerating);
+  const generationStatusTitle = element.genStatusTitle || LABEL_GENERATING;
+  const generationStatusLines = Array.isArray(element.genStatusLines)
+    ? element.genStatusLines.filter(Boolean).slice(0, 5)
+    : [];
+  const statusTone = showBerserkVisualState ? "berserk" : "default";
+  const handleDownload = React.useCallback(async () => {
+    try {
+      await downloadFromUrls(
+        [sourceUrl, displayUrl],
+        `tree-image-${element.id}`,
+      );
+    } catch (error) {
+      console.error("Tree image download failed", error);
+    }
   }, [displayUrl, element.id, sourceUrl]);
 
   return (
@@ -188,6 +198,15 @@ export const WorkspaceTreeImageNode: React.FC<
           }}
         />
       ) : null}
+      {showBerserkVisualState ? (
+        <div
+          className={`pointer-events-none absolute -inset-[4px] ${WORKSPACE_NODE_OUTLINE_RADIUS}`}
+          style={{
+            borderRadius: WORKSPACE_NODE_SELECTION_RADIUS,
+            boxShadow: WORKSPACE_NODE_BERSERK_SHADOW,
+          }}
+        />
+      ) : null}
       <TreeImageToolbar
         canEdit={Boolean(displayUrl)}
         isVisible={isSelected}
@@ -207,6 +226,11 @@ export const WorkspaceTreeImageNode: React.FC<
       >
         <div className="pointer-events-none absolute inset-0 z-[1] rounded-[30px] shadow-[0_1px_0_rgba(255,255,255,0.4)_inset]" />
         <div className="pointer-events-none absolute inset-0 z-[2] rounded-[30px] bg-[linear-gradient(180deg,rgba(255,255,255,0.10)_0%,rgba(255,255,255,0)_34%,rgba(0,0,0,0.02)_100%)]" />
+        {showBerserkVisualState ? (
+          <div className="pointer-events-none absolute left-3 top-3 z-[4] rounded-full border border-[rgba(255,161,118,0.92)] bg-[rgba(255,103,46,0.94)] px-2.5 py-1 text-[10px] font-bold tracking-[0.04em] text-white shadow-[0_10px_24px_rgba(255,94,0,0.26)]">
+            {LABEL_BERSERK}
+          </div>
+        ) : null}
         {displayUrl ? (
           <img
             src={displayUrl}
@@ -224,11 +248,17 @@ export const WorkspaceTreeImageNode: React.FC<
         ) : null}
         <ImageCardFooter timestampLabel={timestampLabel} />
         {element.isGenerating ? (
-          <div className="pointer-events-none absolute inset-0 flex items-center justify-center bg-black/16 backdrop-blur-[1.5px]">
-            <div className="flex items-center gap-2 rounded-full bg-white/94 px-3 py-2 text-[12px] font-semibold text-[#18181b] shadow-[0_10px_24px_rgba(0,0,0,0.14)]">
-              <Loader2 size={14} className="animate-spin" />
-              <span>{LABEL_GENERATING}</span>
-            </div>
+          <div
+            className={`pointer-events-none absolute inset-0 flex items-center justify-center backdrop-blur-[1.5px] ${
+              showBerserkVisualState ? "bg-[rgba(255,104,47,0.10)]" : "bg-[rgba(248,250,252,0.20)]"
+            }`}
+          >
+            <WorkspaceGenerationStatusCard
+              title={generationStatusTitle}
+              lines={generationStatusLines}
+              tone={statusTone}
+              className="h-full w-full rounded-[inherit]"
+            />
           </div>
         ) : element.genError ? (
           <div className="absolute inset-0 z-[5] flex items-center justify-center bg-[rgba(18,18,18,0.38)] px-5 backdrop-blur-[2px]">

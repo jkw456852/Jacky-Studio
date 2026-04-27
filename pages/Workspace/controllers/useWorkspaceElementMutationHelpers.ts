@@ -1,6 +1,7 @@
 import { useCallback, type MutableRefObject } from "react";
 import type {
   CanvasElement,
+  GenerationStatusPhase,
   Marker,
   WorkspaceNodeInteractionMode,
 } from "../../../types";
@@ -60,6 +61,12 @@ const parseAspectRatioDimensions = (
 type CreateGeneratingTreeImageChildrenOptions = {
   baseElementsOverride?: CanvasElement[];
   sourceElementOverride?: CanvasElement | null;
+};
+
+type ElementGenerationStatusUpdate = {
+  phase?: GenerationStatusPhase;
+  title?: string;
+  lines?: string[];
 };
 
 const shouldAutoPromoteGeneratedResultToAnchor = (session: {
@@ -139,6 +146,9 @@ export function useWorkspaceElementMutationHelpers(
           isGenerating: false,
           generatingType: undefined,
           genError: undefined,
+          genStatusPhase: undefined,
+          genStatusTitle: undefined,
+          genStatusLines: undefined,
           hasFreshGeneratedGlow: true,
           url: resolvedDisplayUrl,
           originalUrl: resolvedOriginalUrl,
@@ -255,8 +265,69 @@ export function useWorkspaceElementMutationHelpers(
           ...element,
           isGenerating,
           genError: nextError,
+          genStatusPhase: isGenerating ? element.genStatusPhase : undefined,
+          genStatusTitle: isGenerating ? element.genStatusTitle : undefined,
+          genStatusLines: isGenerating ? element.genStatusLines : undefined,
         };
       });
+      if (!changed) return;
+      setElementsSynced(nextElements);
+    },
+    [elementsRef, setElementsSynced],
+  );
+
+  const setElementsGenerationStatus = useCallback(
+    (
+      elementIds: string[],
+      status?: ElementGenerationStatusUpdate | null,
+    ) => {
+      const normalizedIds = Array.from(
+        new Set(
+          (elementIds || [])
+            .map((item) => String(item || "").trim())
+            .filter(Boolean),
+        ),
+      );
+      if (normalizedIds.length === 0) return;
+
+      const normalizedTitle = String(status?.title || "").trim();
+      const normalizedLines = Array.isArray(status?.lines)
+        ? status.lines
+            .map((item) => String(item || "").trim())
+            .filter(Boolean)
+            .slice(0, 5)
+        : [];
+
+      const baseElements = elementsRef.current;
+      let changed = false;
+      const nextElements = baseElements.map((element) => {
+        if (!normalizedIds.includes(element.id)) return element;
+
+        const nextPhase = status?.phase;
+        const nextTitle = normalizedTitle || undefined;
+        const nextLines = normalizedLines.length > 0 ? normalizedLines : undefined;
+        const currentLines = element.genStatusLines || [];
+        const sameLines =
+          currentLines.length === (nextLines || []).length &&
+          currentLines.every((line, index) => line === (nextLines || [])[index]);
+
+        if (
+          element.genStatusPhase === nextPhase &&
+          element.genStatusTitle === nextTitle &&
+          sameLines
+        ) {
+          return element;
+        }
+
+        changed = true;
+        return {
+          ...element,
+          genStatusPhase: nextPhase,
+          genStatusTitle: nextTitle,
+          genStatusLines: nextLines,
+        };
+      });
+
       if (!changed) return;
       setElementsSynced(nextElements);
     },
@@ -554,6 +625,7 @@ export function useWorkspaceElementMutationHelpers(
     appendGeneratedImagesNearElement,
     createGeneratingImagesNearElement,
     createGeneratingTreeImageChildren,
+    setElementsGenerationStatus,
     setElementGeneratingState,
   };
 }

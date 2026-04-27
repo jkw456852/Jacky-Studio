@@ -12,6 +12,7 @@ import {
 } from "lucide-react";
 import type { CanvasElement, ImageModel } from "../../../types";
 import {
+  WORKSPACE_NODE_BERSERK_SHADOW,
   WORKSPACE_NODE_RADIUS,
   WORKSPACE_NODE_SELECTION_RADIUS,
   WORKSPACE_NODE_SELECTION_SHADOW,
@@ -28,6 +29,7 @@ const LABEL_COLLAPSE = "\u6536\u8d77\u5b50\u8282\u70b9";
 const LABEL_GENERATING = "Generating";
 const LABEL_BERSERK_RETRY = "\u72c2\u66b4\u91cd\u8bd5";
 const LABEL_BERSERK_SHORT = "\u72c2\u66b4";
+const LABEL_BERSERK_ACTIVE = "\u72c2\u66b4\u4e2d";
 const LABEL_BERSERK_RETRY_HINT =
   "\u6253\u5f00\u540e\uff0c\u751f\u56fe\u5931\u8d25\u4f1a\u5728\u539f\u56fe\u7247\u8282\u70b9\u4e0a\u7acb\u5373\u8fdb\u5165\u8f6e\u8be2\u91cd\u8bd5\uff0c\u4e0d\u7b49\u5f85\u3001\u4e0d\u65b0\u5f00\u8282\u70b9\uff0c\u76f4\u5230\u6210\u529f\u6216\u5237\u65b0\u9875\u9762\u3002";
 const LABEL_MODEL = "\u6a21\u578b";
@@ -936,6 +938,8 @@ export const WorkspaceTreePromptNode: React.FC<
 
   const cardHeight = normalizedCardHeight;
   const canUsePosterProductMode = sourceRefUrls.length >= 2;
+  const isBerserkEnabled = Boolean(element.genInfiniteRetry);
+  const showBerserkVisualState = isBerserkEnabled && isGenerating;
 
   return (
     <div className="relative h-full w-full overflow-visible">
@@ -953,6 +957,15 @@ export const WorkspaceTreePromptNode: React.FC<
             style={{
               borderRadius: WORKSPACE_NODE_SELECTION_RADIUS,
               boxShadow: WORKSPACE_NODE_SELECTION_SHADOW,
+            }}
+          />
+        ) : null}
+        {showBerserkVisualState ? (
+          <div
+            className="pointer-events-none absolute -inset-[4px]"
+            style={{
+              borderRadius: WORKSPACE_NODE_SELECTION_RADIUS,
+              boxShadow: WORKSPACE_NODE_BERSERK_SHADOW,
             }}
           />
         ) : null}
@@ -979,15 +992,26 @@ export const WorkspaceTreePromptNode: React.FC<
           className="relative grid h-full w-full grid-rows-[auto_minmax(0,1fr)_auto] border px-8 pb-6 pt-8 text-[#111827] transition-[box-shadow,border-color] duration-200"
           style={{
             borderRadius: WORKSPACE_NODE_RADIUS,
-            background: `linear-gradient(180deg, rgba(255,255,255,0.46) 0%, ${activeTone.fill} 24%, ${activeTone.fill} 100%)`,
+            background: showBerserkVisualState
+              ? `linear-gradient(180deg, rgba(255,246,241,0.96) 0%, rgba(255,225,211,0.82) 16%, ${activeTone.fill} 38%, ${activeTone.fill} 100%)`
+              : `linear-gradient(180deg, rgba(255,255,255,0.46) 0%, ${activeTone.fill} 24%, ${activeTone.fill} 100%)`,
             borderColor: isSelected
               ? "rgba(255,255,255,0.92)"
+              : showBerserkVisualState
+                ? "rgba(255,137,92,0.88)"
               : "rgba(209,212,219,0.9)",
             boxShadow: isSelected
               ? "0 14px 32px rgba(15,23,42,0.08)"
-              : "0 10px 24px rgba(15,23,42,0.04)",
+              : showBerserkVisualState
+                ? "0 16px 34px rgba(255,106,61,0.12)"
+                : "0 10px 24px rgba(15,23,42,0.04)",
           }}
         >
+          {showBerserkVisualState ? (
+            <div className="pointer-events-none absolute right-5 top-5 z-[6] rounded-full border border-[rgba(255,161,118,0.92)] bg-[rgba(255,103,46,0.94)] px-2.5 py-1 text-[10px] font-bold tracking-[0.04em] text-white shadow-[0_10px_24px_rgba(255,94,0,0.26)]">
+              {LABEL_BERSERK_ACTIVE}
+            </div>
+          ) : null}
           <ReferenceThumbStrip
             thumbUrls={thumbUrls}
             sourceRefUrls={sourceRefUrls}
@@ -1039,7 +1063,11 @@ export const WorkspaceTreePromptNode: React.FC<
 
           {isGenerating ? (
             <div
-              className="pointer-events-none absolute inset-0 bg-white/18"
+              className={`pointer-events-none absolute inset-0 ${
+                showBerserkVisualState
+                  ? "bg-[rgba(255,104,47,0.10)]"
+                  : "bg-white/18"
+              }`}
               style={{ borderRadius: WORKSPACE_NODE_RADIUS }}
             />
           ) : null}

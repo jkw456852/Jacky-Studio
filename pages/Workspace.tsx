@@ -1306,6 +1306,7 @@ const Workspace: React.FC = () => {
   const [pan, setPan] = useState({ x: 0, y: 0 });
   const zoomRef = useRef(30);
   const panRef = useRef({ x: 0, y: 0 });
+  const lastPointerClientRef = useRef<{ x: number; y: number } | null>(null);
 
   useEffect(() => {
     zoomRef.current = zoom;
@@ -1379,6 +1380,7 @@ const Workspace: React.FC = () => {
   const [markers, setMarkers] = useState<Marker[]>([]);
   const markersRef = useRef<Marker[]>([]);
   const [isCtrlPressed, setIsCtrlPressed] = useState(false);
+  const [isCtrlMarkTargetHovered, setIsCtrlMarkTargetHovered] = useState(false);
   const [hoveredMarkerId, setHoveredMarkerId] = useState<number | null>(null);
   const [editingMarkerId, setEditingMarkerId] = useState<string | null>(null);
   const [editingMarkerLabel, setEditingMarkerLabel] = useState("");
@@ -3198,6 +3200,36 @@ const Workspace: React.FC = () => {
     [elementsRef, resolveClientToCanvasPoint],
   );
 
+  const isMarkableCanvasElementAtPoint = useCallback(
+    (clientX: number, clientY: number) => {
+      if (typeof document === "undefined") return false;
+
+      const hoveredElementId =
+        document
+          .elementsFromPoint(clientX, clientY)
+          .map((node) => {
+            if (!(node instanceof HTMLElement)) return null;
+            const target = node.closest("[id^='canvas-el-']");
+            if (!(target instanceof HTMLElement)) return null;
+            return target.id.replace("canvas-el-", "");
+          })
+          .find(Boolean) || null;
+
+      if (!hoveredElementId) return false;
+      const hoveredElement =
+        elementsRef.current.find((element) => element.id === hoveredElementId) ||
+        null;
+      return Boolean(
+        hoveredElement &&
+          (hoveredElement.type === "image" || hoveredElement.type === "gen-image") &&
+          hoveredElement.url,
+      );
+    },
+    [elementsRef],
+  );
+
+  const effectiveCtrlMarkActive = isCtrlPressed && isCtrlMarkTargetHovered;
+
   const handleTreeConnectionCancel = useCallback(() => {
     setTreeConnectionDraft(null);
   }, []);
@@ -3952,6 +3984,7 @@ const Workspace: React.FC = () => {
     applyGeneratedImageToElement,
     createGeneratingImagesNearElement,
     createGeneratingTreeImageChildren,
+    setElementsGenerationStatus,
     setElementGeneratingState,
   } = useWorkspaceElementMutationHelpers({
     showAssistant,
@@ -4204,10 +4237,21 @@ const Workspace: React.FC = () => {
   // Ctrl key listener: toggle custom cursor state
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
-      if (e.key === "Control") setIsCtrlPressed(true);
+      if (e.key === "Control") {
+        setIsCtrlPressed(true);
+        const lastPoint = lastPointerClientRef.current;
+        setIsCtrlMarkTargetHovered(
+          lastPoint
+            ? isMarkableCanvasElementAtPoint(lastPoint.x, lastPoint.y)
+            : false,
+        );
+      }
     };
     const handleKeyUp = (e: KeyboardEvent) => {
-      if (e.key === "Control") setIsCtrlPressed(false);
+      if (e.key === "Control") {
+        setIsCtrlPressed(false);
+        setIsCtrlMarkTargetHovered(false);
+      }
     };
     window.addEventListener("keydown", handleKeyDown);
     window.addEventListener("keyup", handleKeyUp);
@@ -4215,7 +4259,7 @@ const Workspace: React.FC = () => {
       window.removeEventListener("keydown", handleKeyDown);
       window.removeEventListener("keyup", handleKeyUp);
     };
-  }, []);
+  }, [isMarkableCanvasElementAtPoint]);
 
   useWorkspaceConversationPersistence({
     messages,
@@ -4506,6 +4550,7 @@ const Workspace: React.FC = () => {
     elementsRef,
     nodeInteractionMode,
     setElementGeneratingState,
+    setElementsGenerationStatus,
     addMessage,
     translatePromptToEnglish,
     enforceChineseTextInImage,
@@ -4683,12 +4728,24 @@ const Workspace: React.FC = () => {
 
   const handleCanvasMouseMove = useCallback(
     (event: React.MouseEvent<HTMLDivElement>) => {
+      lastPointerClientRef.current = {
+        x: event.clientX,
+        y: event.clientY,
+      };
+      setIsCtrlMarkTargetHovered(
+        isMarkableCanvasElementAtPoint(event.clientX, event.clientY),
+      );
       if (treeConnectionDraft) {
         handleTreeConnectionDrag(event.clientX, event.clientY);
       }
       canvasHandleMouseMove(event);
     },
-    [canvasHandleMouseMove, handleTreeConnectionDrag, treeConnectionDraft],
+    [
+      canvasHandleMouseMove,
+      handleTreeConnectionDrag,
+      isMarkableCanvasElementAtPoint,
+      treeConnectionDraft,
+    ],
   );
 
   const handleCanvasMouseUp = useCallback(() => {
@@ -5113,7 +5170,7 @@ const Workspace: React.FC = () => {
     selectedElementIds,
     elementById,
     activeTool,
-    isCtrlPressed,
+    isCtrlPressed: effectiveCtrlMarkActive,
     editingTextId,
     isDraggingElement,
     textEditDraftRef,
@@ -5274,7 +5331,7 @@ const Workspace: React.FC = () => {
     workspaceCanvasOverlayLayerProps,
     showAssistant,
     setShowAssistant,
-    isCtrlPressed,
+    isCtrlPressed: effectiveCtrlMarkActive,
     projectTitle,
     setProjectTitle,
     nodeInteractionMode,

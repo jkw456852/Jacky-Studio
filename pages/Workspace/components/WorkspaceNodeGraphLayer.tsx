@@ -6,6 +6,10 @@ import {
 } from "../workspaceNodeGraph";
 import { getAllNodeParentIds } from "../workspaceTreeNode";
 import type { TreeConnectionDraft } from "../../Workspace";
+import {
+  WORKSPACE_NODE_BERSERK_EDGE_GLOW,
+  WORKSPACE_NODE_BERSERK_EDGE_STROKE,
+} from "./workspaceNodeStyles";
 
 type WorkspaceNodeGraphLayerProps = {
   elements: CanvasElement[];
@@ -158,6 +162,11 @@ export const WorkspaceNodeGraphLayer: React.FC<WorkspaceNodeGraphLayerProps> = (
       fill="none"
     >
       {graph?.edges.map(({ child, parent, points }) => {
+        const isBerserkEdge =
+          child.nodeLinkKind === "generation" &&
+          child.treeNodeKind === "image" &&
+          Boolean(child.genInfiniteRetry);
+        const isGeneratingBerserkEdge = isBerserkEdge && Boolean(child.isGenerating);
         const d = `M ${points.startX - minX} ${points.startY - minY} C ${
           points.control1X - minX
         } ${points.control1Y - minY}, ${points.control2X - minX} ${
@@ -168,14 +177,23 @@ export const WorkspaceNodeGraphLayer: React.FC<WorkspaceNodeGraphLayerProps> = (
           <path
             key={`glow-${parent.id}-${child.id}-${points.startX}-${points.endX}-${zoom}`}
             d={d}
-            stroke="rgba(124,92,255,0.22)"
-            strokeWidth={6}
+            stroke={
+              isBerserkEdge
+                ? WORKSPACE_NODE_BERSERK_EDGE_GLOW
+                : "rgba(124,92,255,0.22)"
+            }
+            strokeWidth={isBerserkEdge ? 8 : 6}
             strokeLinecap="round"
             pointerEvents="none"
           />
         );
       })}
       {graph?.edges.map(({ child, parent, points }) => {
+        const isBerserkEdge =
+          child.nodeLinkKind === "generation" &&
+          child.treeNodeKind === "image" &&
+          Boolean(child.genInfiniteRetry);
+        const isGeneratingBerserkEdge = isBerserkEdge && Boolean(child.isGenerating);
         const d = `M ${points.startX - minX} ${points.startY - minY} C ${
           points.control1X - minX
         } ${points.control1Y - minY}, ${points.control2X - minX} ${
@@ -187,15 +205,33 @@ export const WorkspaceNodeGraphLayer: React.FC<WorkspaceNodeGraphLayerProps> = (
             key={`${parent.id}-${child.id}-${points.startX}-${points.endX}-${zoom}`}
             d={d}
             stroke={
-              child.nodeLinkKind === "branch"
+              isBerserkEdge
+                ? WORKSPACE_NODE_BERSERK_EDGE_STROKE
+                : child.nodeLinkKind === "branch"
                 ? "rgba(124,92,255,0.98)"
                 : "rgba(79,70,229,0.98)"
             }
-            strokeDasharray={child.nodeLinkKind === "branch" ? "10 12" : "6 9"}
-            strokeWidth={3}
+            strokeDasharray={
+              isBerserkEdge
+                ? "3 8"
+                : child.nodeLinkKind === "branch"
+                  ? "10 12"
+                  : "6 9"
+            }
+            strokeWidth={isBerserkEdge ? 3.4 : 3}
             strokeLinecap="round"
             pointerEvents="none"
-          />
+          >
+            {isGeneratingBerserkEdge ? (
+              <animate
+                attributeName="stroke-dashoffset"
+                from="0"
+                to="-22"
+                dur="0.8s"
+                repeatCount="indefinite"
+              />
+            ) : null}
+          </path>
         );
       })}
       {graph?.edges.map(({ child, parent, points }) => {

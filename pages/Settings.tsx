@@ -15,6 +15,7 @@ import {
     ApiProviderConfig,
     ModelInfo,
     buildMappedModelStorageEntry,
+    getMappedModelConfigs,
     getModelDisplayLabel,
     getDefaultProviders,
     loadProviderSettings,
@@ -122,6 +123,9 @@ const SettingsPage: React.FC = () => {
     const [selectedScriptModels, setSelectedScriptModels] = useState<string[]>([]);
     const [selectedImageModels, setSelectedImageModels] = useState<string[]>([]);
     const [selectedVideoModels, setSelectedVideoModels] = useState<string[]>([]);
+    const [visualOrchestratorModel, setVisualOrchestratorModel] = useState('auto');
+    const [visualOrchestratorMaxReferenceImages, setVisualOrchestratorMaxReferenceImages] = useState(0);
+    const [visualOrchestratorMaxInlineImageBytesMb, setVisualOrchestratorMaxInlineImageBytesMb] = useState(18);
     const [manualScriptModel, setManualScriptModel] = useState('');
     const [manualImageModel, setManualImageModel] = useState('');
     const [manualVideoModel, setManualVideoModel] = useState('');
@@ -173,6 +177,9 @@ const SettingsPage: React.FC = () => {
         setSelectedScriptModels(loaded.selectedScriptModels);
         setSelectedImageModels(normalizeImageSelection(loaded.selectedImageModels));
         setSelectedVideoModels(loaded.selectedVideoModels);
+        setVisualOrchestratorModel(loaded.visualOrchestratorModel || 'auto');
+        setVisualOrchestratorMaxReferenceImages(loaded.visualOrchestratorMaxReferenceImages ?? 0);
+        setVisualOrchestratorMaxInlineImageBytesMb(loaded.visualOrchestratorMaxInlineImageBytesMb ?? 18);
         setManualProviderId(loaded.activeProviderId || 'yunwu');
         setVisualContinuity(loaded.visualContinuity);
         setSystemModeration(loaded.systemModeration);
@@ -192,6 +199,49 @@ const SettingsPage: React.FC = () => {
         { id: 'image', label: '图片生成模型', hint: '用于电商生图、改图和工作流出图。', multi: true },
         { id: 'video', label: '视频生成模型', hint: '用于视频工作流和动画生成。', multi: true },
     ];
+
+    const visualOrchestratorModelOptions = useMemo(() => {
+        const mappedScriptModels = getMappedModelConfigs('script', providers);
+        const discoveredScriptModels = availableModels
+            .filter((model) => model.category === 'script')
+            .map((model) => {
+                const entry = buildMappedModelStorageEntry(
+                    model.providerId || activeProviderId,
+                    model.id,
+                );
+                const provider = providers.find((item) => item.id === (model.providerId || activeProviderId));
+                return {
+                    entry,
+                    label: provider?.name
+                        ? `${getModelDisplayLabel(model.id)} @ ${provider.name}`
+                        : getModelDisplayLabel(model.id),
+                };
+            });
+
+        const merged = new Map<string, { entry: string; label: string }>();
+        merged.set('auto', {
+            entry: 'auto',
+            label: `自动（跟随 ${mappedScriptModels[0]?.displayLabel || '默认文本模型'}）`,
+        });
+
+        mappedScriptModels.forEach((item) => {
+            if (!item.raw) return;
+            merged.set(item.raw, {
+                entry: item.raw,
+                label: item.displayLabel,
+            });
+        });
+
+        discoveredScriptModels.forEach((item) => {
+            if (!item.entry) return;
+            if (!merged.has(item.entry)) {
+                merged.set(item.entry, item);
+            }
+        });
+
+        return Array.from(merged.values());
+    }, [activeProviderId, availableModels, providers]);
+
     useEffect(() => {
         if (activeTab === 'mapping') {
             void handleRefreshModels();
@@ -238,6 +288,9 @@ const SettingsPage: React.FC = () => {
                 selectedScriptModels,
                 selectedImageModels: normalizeImageSelection(selectedImageModels),
                 selectedVideoModels,
+                visualOrchestratorModel,
+                visualOrchestratorMaxReferenceImages,
+                visualOrchestratorMaxInlineImageBytesMb,
                 visualContinuity,
                 systemModeration,
                 autoSave,
@@ -1015,6 +1068,42 @@ const SettingsPage: React.FC = () => {
                             <div className="max-w-3xl space-y-6">
                                 <SettingsCard title="体验优化" icon={<Zap size={18} />}>
                                     <div className="space-y-2 mt-4">
+                                        <SettingsControl label="视觉编排模型" description="用于后续通用视觉编排层的大模型规划。现在先作为全局设置保留，后续可直接切换生效。">
+                                            <div className="w-[340px]">
+                                                <SettingsSelect
+                                                    value={visualOrchestratorModel}
+                                                    onChange={(e) => setVisualOrchestratorModel(e.target.value)}
+                                                >
+                                                    {visualOrchestratorModelOptions.map((option) => (
+                                                        <option key={option.entry} value={option.entry}>
+                                                            {option.label}
+                                                        </option>
+                                                    ))}
+                                                </SettingsSelect>
+                                            </div>
+                                        </SettingsControl>
+                                        <SettingsControl label="编排参考图上限" description="0 表示不按张数限制。若超过这里的值，视觉编排会直接报错，不会偷偷忽略后面的参考图。">
+                                            <div className="w-[140px]">
+                                                <SettingsInput
+                                                    type="number"
+                                                    min={0}
+                                                    max={64}
+                                                    value={visualOrchestratorMaxReferenceImages}
+                                                    onChange={(e) => setVisualOrchestratorMaxReferenceImages(Math.max(0, Math.min(64, Number.parseInt(e.target.value || '0', 10) || 0)))}
+                                                />
+                                            </div>
+                                        </SettingsControl>
+                                        <SettingsControl label="编排图片预算" description="视觉编排模型可读取的参考图总预算，单位 MB。超出后会显式报错，不再隐式截断。">
+                                            <div className="w-[140px]">
+                                                <SettingsInput
+                                                    type="number"
+                                                    min={1}
+                                                    max={64}
+                                                    value={visualOrchestratorMaxInlineImageBytesMb}
+                                                    onChange={(e) => setVisualOrchestratorMaxInlineImageBytesMb(Math.max(1, Math.min(64, Number.parseInt(e.target.value || '18', 10) || 18)))}
+                                                />
+                                            </div>
+                                        </SettingsControl>
                                         <SettingsControl label="视觉一致性" description="智能体在多个生成步骤间保持视觉特征。">
                                             <SettingsToggle active={visualContinuity} onClick={() => setVisualContinuity(!visualContinuity)} />
                                         </SettingsControl>

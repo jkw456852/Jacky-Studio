@@ -46,6 +46,9 @@ export interface LoadedProviderSettings {
   selectedScriptModels: string[];
   selectedImageModels: string[];
   selectedVideoModels: string[];
+  visualOrchestratorModel: string;
+  visualOrchestratorMaxReferenceImages: number;
+  visualOrchestratorMaxInlineImageBytesMb: number;
   visualContinuity: boolean;
   systemModeration: boolean;
   autoSave: boolean;
@@ -64,6 +67,9 @@ export interface MappedModelConfig {
 const DEFAULT_SCRIPT_MODEL = 'gemini-3.1-flash-lite-preview';
 const DEFAULT_IMAGE_MODEL = 'gemini-3-pro-image-preview';
 const DEFAULT_VIDEO_MODEL = 'veo-3.1-fast-generate-preview';
+const DEFAULT_VISUAL_ORCHESTRATOR_MODEL = 'auto';
+const DEFAULT_VISUAL_ORCHESTRATOR_MAX_REFERENCE_IMAGES = 0;
+const DEFAULT_VISUAL_ORCHESTRATOR_MAX_INLINE_IMAGE_BYTES_MB = 18;
 const AUTO_IMAGE_OPTION_ID = 'Auto';
 const MODEL_ENTRY_SEPARATOR = '@@';
 
@@ -191,6 +197,17 @@ const safeJsonArray = (value: string | null, fallback: string[]): string[] => {
     // ignore
   }
   return fallback;
+};
+
+const clampInteger = (
+  value: unknown,
+  fallback: number,
+  min: number,
+  max: number,
+): number => {
+  const parsed = Number.parseInt(String(value ?? ''), 10);
+  if (!Number.isFinite(parsed)) return fallback;
+  return Math.min(max, Math.max(min, parsed));
 };
 
 const canonicalizeMappedModelId = (category: ModelCategory, modelId: string): string => {
@@ -364,6 +381,61 @@ export const getMappedPrimaryModelLabel = (category: ModelCategory): string => {
   return getMappedPrimaryModelConfig(category)?.displayLabel || '\u672a\u8bbe\u7f6e';
 };
 
+export const getVisualOrchestratorModelConfig = (
+  providers?: ApiProviderConfig[],
+): MappedModelConfig | null => {
+  const storage = getLocalStorage();
+  const raw = storage?.getItem('setting_visual_orchestrator_model') || DEFAULT_VISUAL_ORCHESTRATOR_MODEL;
+  if (!raw || raw === DEFAULT_VISUAL_ORCHESTRATOR_MODEL) {
+    return getMappedPrimaryModelConfig('script', providers);
+  }
+
+  const parsed = parseMappedModelStorageEntry('script', raw);
+  if (!parsed.modelId) {
+    return getMappedPrimaryModelConfig('script', providers);
+  }
+
+  const providerNameMap = getProviderNameMap(providers || getStoredProviders());
+  return {
+    raw,
+    providerId: parsed.providerId,
+    providerName: parsed.providerId ? providerNameMap[parsed.providerId] || parsed.providerId : null,
+    modelId: parsed.modelId,
+    category: 'script',
+    displayLabel: parsed.providerId && providerNameMap[parsed.providerId]
+      ? `${getModelDisplayLabel(parsed.modelId)} @ ${providerNameMap[parsed.providerId]}`
+      : getModelDisplayLabel(parsed.modelId),
+  };
+};
+
+export const getVisualOrchestratorModelLabel = (
+  providers?: ApiProviderConfig[],
+): string => {
+  const config = getVisualOrchestratorModelConfig(providers);
+  return config?.displayLabel || getMappedPrimaryModelLabel('script');
+};
+
+export const getVisualOrchestratorInputPolicy = (): {
+  maxReferenceImages: number;
+  maxInlineImageBytesMb: number;
+} => {
+  const storage = getLocalStorage();
+  return {
+    maxReferenceImages: clampInteger(
+      storage?.getItem('setting_visual_orchestrator_max_reference_images'),
+      DEFAULT_VISUAL_ORCHESTRATOR_MAX_REFERENCE_IMAGES,
+      0,
+      64,
+    ),
+    maxInlineImageBytesMb: clampInteger(
+      storage?.getItem('setting_visual_orchestrator_max_inline_image_bytes_mb'),
+      DEFAULT_VISUAL_ORCHESTRATOR_MAX_INLINE_IMAGE_BYTES_MB,
+      1,
+      64,
+    ),
+  };
+};
+
 export const getMappedModelDisplaySummary = (category: ModelCategory): string => {
   const labels = Array.from(new Set(getMappedModelConfigs(category).map((item) => item.displayLabel).filter(Boolean)));
   if (labels.length === 0) return '\u672a\u8bbe\u7f6e';
@@ -392,6 +464,19 @@ export const loadProviderSettings = (): LoadedProviderSettings => {
     selectedScriptModels: getStoredMappingEntries('script'),
     selectedImageModels: getStoredMappingEntries('image'),
     selectedVideoModels: getStoredMappingEntries('video').length > 0 ? getStoredMappingEntries('video') : selectedVideoModels,
+    visualOrchestratorModel: storage?.getItem('setting_visual_orchestrator_model') || DEFAULT_VISUAL_ORCHESTRATOR_MODEL,
+    visualOrchestratorMaxReferenceImages: clampInteger(
+      storage?.getItem('setting_visual_orchestrator_max_reference_images'),
+      DEFAULT_VISUAL_ORCHESTRATOR_MAX_REFERENCE_IMAGES,
+      0,
+      64,
+    ),
+    visualOrchestratorMaxInlineImageBytesMb: clampInteger(
+      storage?.getItem('setting_visual_orchestrator_max_inline_image_bytes_mb'),
+      DEFAULT_VISUAL_ORCHESTRATOR_MAX_INLINE_IMAGE_BYTES_MB,
+      1,
+      64,
+    ),
     visualContinuity: storage?.getItem('setting_visual_continuity') !== 'false',
     systemModeration: storage?.getItem('setting_system_moderation') === 'true',
     autoSave: storage?.getItem('setting_auto_save') !== 'false',
@@ -407,6 +492,25 @@ export const saveProviderSettings = (settings: LoadedProviderSettings): void => 
   safeLocalStorageSetItem('setting_script_models', JSON.stringify(settings.selectedScriptModels));
   safeLocalStorageSetItem('setting_image_models', JSON.stringify(settings.selectedImageModels));
   safeLocalStorageSetItem('setting_video_models', JSON.stringify(settings.selectedVideoModels));
+  safeLocalStorageSetItem('setting_visual_orchestrator_model', settings.visualOrchestratorModel || DEFAULT_VISUAL_ORCHESTRATOR_MODEL);
+  safeLocalStorageSetItem(
+    'setting_visual_orchestrator_max_reference_images',
+    clampInteger(
+      settings.visualOrchestratorMaxReferenceImages,
+      DEFAULT_VISUAL_ORCHESTRATOR_MAX_REFERENCE_IMAGES,
+      0,
+      64,
+    ).toString(),
+  );
+  safeLocalStorageSetItem(
+    'setting_visual_orchestrator_max_inline_image_bytes_mb',
+    clampInteger(
+      settings.visualOrchestratorMaxInlineImageBytesMb,
+      DEFAULT_VISUAL_ORCHESTRATOR_MAX_INLINE_IMAGE_BYTES_MB,
+      1,
+      64,
+    ).toString(),
+  );
   safeLocalStorageSetItem('setting_visual_continuity', settings.visualContinuity ? 'true' : 'false');
   safeLocalStorageSetItem('setting_system_moderation', settings.systemModeration ? 'true' : 'false');
   safeLocalStorageSetItem('setting_auto_save', settings.autoSave ? 'true' : 'false');
@@ -419,6 +523,19 @@ export const saveProviderSettings = (settings: LoadedProviderSettings): void => 
           selectedScriptModels: settings.selectedScriptModels,
           selectedImageModels: settings.selectedImageModels,
           selectedVideoModels: settings.selectedVideoModels,
+          visualOrchestratorModel: settings.visualOrchestratorModel || DEFAULT_VISUAL_ORCHESTRATOR_MODEL,
+          visualOrchestratorMaxReferenceImages: clampInteger(
+            settings.visualOrchestratorMaxReferenceImages,
+            DEFAULT_VISUAL_ORCHESTRATOR_MAX_REFERENCE_IMAGES,
+            0,
+            64,
+          ),
+          visualOrchestratorMaxInlineImageBytesMb: clampInteger(
+            settings.visualOrchestratorMaxInlineImageBytesMb,
+            DEFAULT_VISUAL_ORCHESTRATOR_MAX_INLINE_IMAGE_BYTES_MB,
+            1,
+            64,
+          ),
         },
       }),
     );
